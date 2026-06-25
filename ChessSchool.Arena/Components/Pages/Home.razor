@@ -1,17 +1,10 @@
 @page "/"
 @inject IGrainFactory Grains
 
-<PageTitle>Arena — турниры</PageTitle>
+<PageTitle>Расписание турниров — ChessArena</PageTitle>
 <HeadContent>
-    <meta name="description" content="Арена-турниры по шахматам: bullet, blitz, rapid. Непрерывный пейринг и стрики, как на lichess." />
+    <meta name="description" content="Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики." />
 </HeadContent>
-
-<div class="section-head">
-    <div>
-        <h1>Турниры</h1>
-        <p class="text-secondary mb-0">Арена с непрерывным пейрингом и стриками. Единый аккаунт ChessSchool ID.</p>
-    </div>
-</div>
 
 @if (_tournaments is null)
 {
@@ -19,32 +12,204 @@
 }
 else
 {
-    <div class="grid grid-auto">
-        @foreach (var t in _tournaments)
-        {
-            <a class="tcard" href="/t/@t.Id">
-                <div class="row between">
-                    <span class="ttitle">@t.Name</span>
-                    <span class="badge @StatusBadge(t.Status)">@StatusText(t.Status)</span>
+    <div class="sched">
+        @* Состояние переключателя вида (статический SSR → интерактив на CSS) *@
+        <input type="radio" name="schedview" id="sv-tl" class="sv-state" checked />
+        <input type="radio" name="schedview" id="sv-list" class="sv-state" />
+
+        <div class="sched-top">
+            <div>
+                <div class="sched-status">
+                    <span class="dot"></span>@_liveCount идёт сейчас · @_dateLabel
                 </div>
-                <div class="tmeta">
-                    <span>@t.TimeControl</span>
-                    <span>@t.PlayerCount участников</span>
+                <h1>Расписание турниров</h1>
+            </div>
+
+            <div class="sched-controls">
+                <div class="seg seg-view">
+                    <label for="sv-tl">
+                        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h10" /></svg>Таймлайн
+                    </label>
+                    <label for="sv-list">
+                        <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>Список
+                    </label>
                 </div>
-                @if (t.Status == TournamentStatus.Running)
+
+                <div class="sched-filters">
+                    <span class="now-pill"><span class="chev">‹</span>сейчас<span class="chev">›</span></span>
+                    <div class="seg seg-range">
+                        <input type="radio" name="schedrange" id="rg-1" /><label for="rg-1">1ч</label>
+                        <input type="radio" name="schedrange" id="rg-4" checked /><label for="rg-4">4ч</label>
+                        <input type="radio" name="schedrange" id="rg-12" /><label for="rg-12">12ч</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- Таймлайн ---------------- *@
+        <div class="view view-tl">
+            <div class="tl-wrap">
+                <div class="tl-scroll">
+                    <div class="tl-grid" style="--cols:@(Hours * 2)">
+                        <div class="tl-gutter"></div>
+                        @for (var h = 0; h < Hours; h++)
+                        {
+                            var hour = (_startHour + h) % 24;
+                            <div class="tl-h @(h == 0 ? "now" : "")" style="grid-column:@(h * 2 + 2) / span 2">@hour.ToString("00"):00</div>
+                        }
+
+                        <div class="tl-cat" style="grid-row:2 / span @_lanes"><span>Регулярные</span></div>
+
+                        @foreach (var b in _blocks)
+                        {
+                            <a class="tlb @b.Type @(b.Mini ? "mini" : "")" href="/t/@b.Href"
+                               style="grid-column:@(b.Col) / span @(b.Span); grid-row:@(b.Row)">
+                                @if (b.Mini)
+                                {
+                                    <div class="tlb-head">
+                                        <span class="tlb-ico">@Icon(b.Type)</span>
+                                        <span class="tlb-tc">@b.Tc</span>
+                                    </div>
+                                    @if (b.Live)
+                                    {
+                                        <span class="tlb-live"><span class="live"></span></span>
+                                    }
+                                }
+                                else
+                                {
+                                    <div class="tlb-head">
+                                        <span class="tlb-title">
+                                            @if (b.Live)
+                                            {
+                                                <span class="live"></span>
+                                            }
+                                            <span class="tlb-ico">@Icon(b.Type)</span>@b.Title
+                                        </span>
+                                        <span class="tlb-tc">@b.Tc</span>
+                                    </div>
+                                    <div class="tlb-sub">@(b.Live ? $"{b.Time} · {b.Players} игр." : b.Time)</div>
+                                }
+                            </a>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- Список ---------------- *@
+        <div class="view view-list">
+            <div class="lcat"><span>Регулярные</span></div>
+            <div class="lgrid">
+                @foreach (var t in _tournaments)
                 {
-                    <div class="tmeta"><span>Осталось ~@(t.SecondsLeft / 60) мин</span></div>
+                    <a class="lcard @TypeOf(t.TimeControl)" href="/t/@t.Id">
+                        <div class="lcard-head">
+                            <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
+                            <span class="lcard-title">@t.Name</span>
+                            <span class="badge @StatusBadge(t.Status)">@StatusText(t.Status)</span>
+                        </div>
+                        <div class="lcard-meta">
+                            <span>@t.TimeControl</span>
+                            <span>@t.PlayerCount участников</span>
+                            @if (t.Status == TournamentStatus.Running)
+                            {
+                                <span>осталось ~@(t.SecondsLeft / 60) мин</span>
+                            }
+                        </div>
+                    </a>
                 }
-            </a>
-        }
+            </div>
+        </div>
     </div>
 }
 
 @code {
-    private IReadOnlyList<TournamentSummaryDto>? _tournaments;
+    private const int Hours = 6;
 
-    protected override async Task OnInitializedAsync() =>
+    private IReadOnlyList<TournamentSummaryDto>? _tournaments;
+    private readonly List<Block> _blocks = new();
+    private int _lanes;
+    private int _startHour;
+    private int _liveCount;
+    private string _dateLabel = "";
+
+    private sealed record Block(int Col, int Span, int Row, string Type, string Title,
+        string Time, int Players, string Tc, bool Live, bool Mini, string Href);
+
+    protected override async Task OnInitializedAsync()
+    {
         _tournaments = await Grains.GetGrain<IArenaDirectoryGrain>(0).ListAsync();
+        _liveCount = _tournaments.Count(t => t.Status == TournamentStatus.Running);
+
+        var now = DateTimeOffset.Now;
+        _startHour = now.Hour;
+        _dateLabel = $"{Weekday[(int)now.DayOfWeek]} {now.Day} {Months[now.Month - 1]}";
+
+        BuildTimeline(now);
+    }
+
+    private void BuildTimeline(DateTimeOffset now)
+    {
+        var byType = _tournaments!.ToDictionary(t => TypeOf(t.TimeControl), t => t);
+        int cols = Hours * 2;
+        int liveHalf = now.Minute >= 30 ? 1 : 0; // полу-часовой слот текущего часа
+
+        // (Тип, шаг в полу-часах, смещение в полу-часах, ширина блока в полу-часах, мини?)
+        var lanes = new (string Type, int Step, int Offset, int Span, bool Mini)[]
+        {
+            ("bullet", 2, 0, 2, true),   // пуля каждый час
+            ("blitz",  2, 0, 2, false),  // блиц каждый час
+            ("blitz",  2, 1, 2, false),  // блиц со сдвигом на :30
+            ("rapid",  4, 0, 4, false),  // рапид каждые 2 часа
+        };
+
+        _lanes = lanes.Length;
+        int row = 2;
+        foreach (var lane in lanes)
+        {
+            if (!byType.TryGetValue(lane.Type, out var t)) { row++; continue; }
+            for (int start = lane.Offset; start < cols; start += lane.Step)
+            {
+                int span = Math.Min(lane.Span, cols - start);
+                if (span <= 0) break;
+
+                int hour = (_startHour + start / 2) % 24;
+                int minute = (start % 2) * 30;
+                bool live = start <= liveHalf && liveHalf < start + span && t.Status == TournamentStatus.Running;
+
+                _blocks.Add(new Block(
+                    Col: start + 2, Span: span, Row: row, Type: lane.Type, Title: ShortName(lane.Type),
+                    Time: $"{hour:00}:{minute:00}", Players: t.PlayerCount, Tc: t.TimeControl.ToString(),
+                    Live: live, Mini: lane.Mini, Href: t.Id));
+            }
+            row++;
+        }
+    }
+
+    private static string TypeOf(TimeControl tc) => tc.InitialSeconds switch
+    {
+        <= 120 => "bullet",
+        <= 480 => "blitz",
+        _ => "rapid"
+    };
+
+    private static string ShortName(string type) => type switch
+    {
+        "bullet" => "Bullet",
+        "rapid" => "Rapid",
+        _ => "Blitz"
+    };
+
+    private static string Icon(string type) => type switch
+    {
+        "bullet" => "⚡",
+        "rapid" => "⏱",
+        _ => "🔥"
+    };
+
+    private static readonly string[] Weekday = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
+    private static readonly string[] Months =
+        ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."];
 
     private static string StatusText(TournamentStatus s) => s switch
     {
@@ -62,8 +227,79 @@ else
 }
 
 <style>
-    .tcard { display: block; padding: 18px; border-radius: var(--r-lg); background: var(--surface); color: var(--ink); text-decoration: none; border: 1px solid var(--line); box-shadow: var(--shadow-sm); transition: box-shadow .12s, border-color .12s, transform .12s; }
-    .tcard:hover { box-shadow: var(--shadow-md); border-color: var(--line-strong); transform: translateY(-1px); color: var(--ink); }
-    .ttitle { font-size: 1.1rem; font-weight: 660; }
-    .tmeta { display: flex; justify-content: space-between; margin-top: .6rem; color: var(--muted); font-size: .9rem; }
+    .sched > .sv-state { display: none; }
+
+    .sched-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .sched-status { display: flex; align-items: center; gap: .55rem; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: .35rem; }
+    .sched-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px var(--danger-weak); }
+    .sched h1 { margin: 0; }
+
+    .sched-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+    .sched-filters { display: flex; align-items: center; gap: 10px; }
+
+    /* Сегментированные переключатели */
+    .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 3px; gap: 2px; }
+    .seg label { display: inline-flex; align-items: center; gap: .4rem; padding: .42rem .85rem; border-radius: var(--r-pill); font-size: .85rem; font-weight: 600; color: var(--ink-2); cursor: pointer; user-select: none; white-space: nowrap; }
+    .seg label svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+    .seg-range input { display: none; }
+
+    .now-pill { display: inline-flex; align-items: center; gap: .5rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-pill); padding: .42rem .85rem; font-size: .85rem; color: var(--ink-2); font-weight: 600; }
+    .now-pill .chev { color: var(--muted); }
+
+    /* Активные состояния переключателей (CSS, без JS) */
+    #sv-tl:checked ~ .sched-top .seg-view label[for="sv-tl"],
+    #sv-list:checked ~ .sched-top .seg-view label[for="sv-list"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+    .seg-range input:checked + label { background: var(--ink); color: #fff; }
+
+    /* Переключение секций */
+    .view-list { display: none; }
+    #sv-list:checked ~ .view-list { display: block; }
+    #sv-list:checked ~ .view-tl { display: none; }
+
+    /* ---------------- Таймлайн ---------------- */
+    .tl-wrap { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .tl-scroll { overflow-x: auto; }
+    .tl-grid { display: grid; grid-template-columns: 132px repeat(var(--cols), minmax(78px, 1fr)); grid-auto-rows: 72px; min-width: 920px; }
+
+    .tl-gutter { grid-column: 1; grid-row: 1; position: sticky; left: 0; background: var(--surface); z-index: 3; border-bottom: 1px solid var(--line); }
+    .tl-h { grid-row: 1; display: flex; align-items: center; padding: 0 12px; font-weight: 600; font-size: .85rem; color: var(--ink-2); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); position: relative; }
+    .tl-h.now::before { content: ""; position: absolute; top: -1px; left: -1px; width: 30px; height: 30px; background: radial-gradient(circle at top left, rgba(230, 150, 60, .45), transparent 70%); pointer-events: none; }
+    .tl-h.now::after { content: ""; position: absolute; top: 0; left: 0; bottom: -1000px; width: 2px; background: linear-gradient(var(--warn), transparent); opacity: .5; }
+
+    .tl-cat { grid-column: 1; position: sticky; left: 0; background: var(--surface); z-index: 2; display: flex; align-items: flex-start; padding: 12px; border-right: 1px solid var(--line); }
+    .tl-cat span { font-size: .64rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; background: var(--surface-2); padding: 4px 9px; border-radius: var(--r-pill); }
+
+    .tlb { margin: 6px; border-radius: 12px; padding: 7px 11px; display: flex; flex-direction: column; justify-content: center; gap: 2px; line-height: 1.25; text-decoration: none; border: 1px solid; box-shadow: var(--shadow-sm); overflow: hidden; transition: transform .1s, box-shadow .1s; }
+    .tlb:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+    .tlb.bullet { background: #f8ead9; border-color: #ecc39b; color: #6b4a2a; }
+    .tlb.blitz { background: #f6ecca; border-color: #e6cf86; color: #695717; }
+    .tlb.rapid { background: #dcecd6; border-color: #a9cf9a; color: #2f5a36; }
+    .tlb.mini { justify-content: center; }
+    .tlb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .tlb-title { display: flex; align-items: center; gap: .4rem; font-weight: 680; font-size: .92rem; min-width: 0; }
+    .tlb-ico { font-size: .9rem; line-height: 1; }
+    .tlb-tc { font-weight: 700; font-size: .8rem; opacity: .7; white-space: nowrap; }
+    .tlb-sub { font-size: .78rem; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tlb .live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
+    .tlb-live { margin-top: 2px; }
+
+    /* ---------------- Список ---------------- */
+    .view-list { margin-top: 20px; }
+    .lcat { margin-bottom: 12px; }
+    .lcat span { font-size: .64rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; background: var(--surface-2); padding: 4px 9px; border-radius: var(--r-pill); }
+    .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+    .lcard { display: block; padding: 16px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); border-left: 4px solid var(--line-strong); transition: box-shadow .12s, transform .12s; }
+    .lcard:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); color: var(--ink); }
+    .lcard.bullet { border-left-color: #ecc39b; }
+    .lcard.blitz { border-left-color: #e6cf86; }
+    .lcard.rapid { border-left-color: #a9cf9a; }
+    .lcard-head { display: flex; align-items: center; gap: .5rem; }
+    .lcard-title { font-weight: 660; font-size: 1.05rem; flex: 1; min-width: 0; }
+    .lcard-meta { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem; color: var(--muted); font-size: .88rem; }
+
+    @@media (max-width: 700px) {
+        .sched-top { flex-direction: column; }
+        .sched-controls { align-items: stretch; width: 100%; }
+        .sched-filters { justify-content: space-between; }
+    }
 </style>

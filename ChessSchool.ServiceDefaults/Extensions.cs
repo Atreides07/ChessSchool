@@ -20,6 +20,11 @@ public static class Extensions
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
+        // Запас по размеру заголовков запроса для ВСЕХ сервисов: браузер шлёт auth-cookie
+        // на любой порт localhost, и раздутая cookie иначе даёт HTTP 431 на каждом сервисе.
+        builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(
+            o => o.Limits.MaxRequestHeadersTotalSize = 256 * 1024);
+
         builder.ConfigureOpenTelemetry();
 
         builder.AddDefaultHealthChecks();

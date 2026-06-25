@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -76,6 +77,13 @@ public static class SsoExtensions
 
         builder.Services.AddAuthorization();
         builder.Services.AddCascadingAuthenticationState();
+
+        // Серверное хранилище тикетов: в cookie остаётся только ключ, а большие OIDC-токены
+        // (access/id/refresh) хранятся на сервере. Иначе cookie раздувается и Kestrel отвечает HTTP 431.
+        builder.Services.AddMemoryCache();
+        builder.Services.AddSingleton<ITicketStore, MemoryCacheTicketStore>();
+        builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+            .Configure<ITicketStore>((o, store) => o.SessionStore = store);
     }
 
     public static void MapSsoEndpoints(this WebApplication app)
@@ -90,5 +98,38 @@ public static class SsoExtensions
             Results.SignOut(
                 new AuthenticationProperties { RedirectUri = "/" },
                 [CookieAuthenticationDefaults.AuthenticationScheme, OpenIdConnectDefaults.AuthenticationScheme]));
+    }
+}
+
+/// <summary>
+/// Хранит тикет аутентификации на сервере (in-memory); в cookie кладётся только короткий ключ.
+/// Это держит cookie маленькой даже при больших OIDC-токенах. Для прод-многонодового сценария
+/// заменить на распределённый кэш (Redis). При перезапуске сервиса тикеты теряются — нужен повторный вход.
+/// </summary>
+public sealed class MemoryCacheTicketStore(IMemoryCache cache) : ITicketStore
+{
+    private const string Prefix = "auth-ticket:";
+
+    public Task<string> StoreAsync(AuthenticationTicket ticket)
+    {
+        var key = Prefix + Guid.NewGuid().ToString("N");
+        return RenewAsync(key, ticket).ContinueWith(_ => key);
+    }
+
+    public Task RenewAsync(string key, AuthenticationTicket ticket)
+    {
+        var options = new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(8) };
+        if (ticket.Properties.ExpiresUtc is { } exp) options.AbsoluteExpiration = exp.AddHours(8);
+        cache.Set(key, ticket, options);
+        return Task.CompletedTask;
+    }
+
+    public Task<AuthenticationTicket?> RetrieveAsync(string key) =>
+        Task.FromResult(cache.Get<AuthenticationTicket>(key));
+
+    public Task RemoveAsync(string key)
+    {
+        cache.Remove(key);
+        return Task.CompletedTask;
     }
 }

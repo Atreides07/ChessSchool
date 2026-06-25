@@ -19,6 +19,7 @@ public interface IArenaDirectoryGrain : IGrainWithIntegerKey
 public interface IArenaTournamentGrain : IGrainWithStringKey
 {
     Task ConfigureAsync(string name, TimeControl tc, int durationSeconds);
+    Task ConfigureFinishedDemoAsync(string name, TimeControl tc, DateTimeOffset startedAt, int durationSeconds);
     Task JoinAsync(string sub, string name);
     Task<ArenaStateDto> GetStateAsync(string sub);
     Task<TournamentSummaryDto> GetSummaryAsync();
@@ -47,6 +48,13 @@ public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDir
             await t.ConfigureAsync(name, tc, minutes * 60);
             list.Add(await t.GetSummaryAsync());
         }
+
+        // Демонстрационный завершённый турнир — чтобы можно было посмотреть результаты/участников.
+        var finished = grains.GetGrain<IArenaTournamentGrain>("blitz-evening");
+        await finished.ConfigureFinishedDemoAsync("Blitz 3+0 22:00", new TimeControl(180, 0),
+            DateTimeOffset.Now.AddHours(-2), 3600);
+        list.Add(await finished.GetSummaryAsync());
+
         return list;
     }
 }
@@ -64,6 +72,9 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         public string? GameId;
         public bool IsBot;
         public DateTimeOffset? WaitingSince; // когда игрок встал в очередь на соперника
+        public int Games;
+        public int Wins;
+        public readonly List<int> Results = new(); // очки за каждую сыгранную партию (0/1/2/4)
         public bool OnFire => Streak >= 2;
     }
 
@@ -117,6 +128,31 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         return Task.CompletedTask;
     }
 
+    /// <summary>Сидирует завершённый турнир с готовой таблицей — для демонстрации страницы результатов.</summary>
+    public Task ConfigureFinishedDemoAsync(string name, TimeControl tc, DateTimeOffset startedAt, int durationSeconds)
+    {
+        if (_configured) return Task.CompletedTask;
+        _configured = true;
+        _name = name;
+        _tc = tc;
+        _startedAt = startedAt;
+        _durationSeconds = durationSeconds;
+        _status = TournamentStatus.Finished;
+
+        AddDemoPlayer("ArenaHost_0", 20, 0, 14, 8, [2, 2, 0, 0, 0, 2, 2, 4, 0, 2, 2, 4, 0, 2]);
+        AddDemoPlayer("French_Winawer", 15, 2, 15, 6, [2, 1, 0, 1, 2, 1, 2, 2, 0, 0, 2, 0, 0, 2, 2]);
+        AddDemoPlayer("DeepBlue_v2", 13, 0, 15, 5, [0, 1, 2, 1, 0, 1, 0, 0, 2, 2, 0, 2, 2, 0, 0]);
+        AddDemoPlayer("Stockfish_15", 12, 0, 14, 5, [0, 0, 2, 2, 4, 0, 0, 0, 2, 0, 0, 0, 2, 0]);
+        return Task.CompletedTask;
+    }
+
+    private void AddDemoPlayer(string name, int score, int streak, int games, int wins, int[] results)
+    {
+        var p = new Player { Name = name, Score = score, Streak = streak, Games = games, Wins = wins };
+        p.Results.AddRange(results);
+        _players[name] = p;
+    }
+
     private async Task OnTimerAsync()
     {
         if (!_configured) return;
@@ -147,7 +183,8 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         var standings = _players
             .OrderByDescending(p => p.Value.Score)
             .ThenByDescending(p => p.Value.Streak)
-            .Select((p, i) => new ArenaStandingRow(i + 1, p.Value.Name, p.Value.Score, p.Value.Streak, p.Value.OnFire, p.Value.Playing))
+            .Select((p, i) => new ArenaStandingRow(i + 1, p.Value.Name, p.Value.Score, p.Value.Streak,
+                p.Value.OnFire, p.Value.Playing, p.Value.Games, p.Value.Wins, p.Value.Results.ToList()))
             .ToList();
 
         ArenaGameDto? myGame = null;
@@ -156,7 +193,8 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
 
         return Task.FromResult(new ArenaStateDto(
             Id, _name, _status, SecondsLeft(), _players.ContainsKey(sub),
-            _players.TryGetValue(sub, out var p2) ? p2.Score : 0, standings, myGame));
+            _players.TryGetValue(sub, out var p2) ? p2.Score : 0, standings, myGame,
+            _tc, _startedAt, _durationSeconds));
     }
 
     public Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move)
@@ -381,8 +419,14 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         if (g.Result == GameResult.BlackWins && g.BlackBerserk) black.Score += 1;
     }
 
-    private static void Award(Player p, double outcome) =>
+    private static void Award(Player p, double outcome)
+    {
+        var before = p.Score;
         (p.Score, p.Streak) = ArenaScoring.Apply(p.Score, p.Streak, outcome);
+        p.Games++;
+        if (outcome == 1.0) p.Wins++;
+        p.Results.Add(p.Score - before); // 0 — поражение, 1/2 — ничья, 2/4 — победа (×2 на огне)
+    }
 
     private ArenaGameDto BuildGameDto(Game g, string sub)
     {

@@ -25,7 +25,10 @@ public sealed record ArenaStandingRow(
     [property: Id(2)] int Score,
     [property: Id(3)] int Streak,
     [property: Id(4)] bool OnFire,
-    [property: Id(5)] bool Playing);
+    [property: Id(5)] bool Playing,
+    [property: Id(6)] int Games,
+    [property: Id(7)] int Wins,
+    [property: Id(8)] IReadOnlyList<int> Results);
 
 /// <summary>Текущая партия игрока внутри турнира.</summary>
 [GenerateSerializer]
@@ -58,4 +61,7 @@ public sealed record ArenaStateDto(
     [property: Id(4)] bool Joined,
     [property: Id(5)] int MyScore,
     [property: Id(6)] IReadOnlyList<ArenaStandingRow> Standings,
-    [property: Id(7)] ArenaGameDto? MyGame);
+    [property: Id(7)] ArenaGameDto? MyGame,
+    [property: Id(8)] TimeControl TimeControl,
+    [property: Id(9)] DateTimeOffset StartedAt,
+    [property: Id(10)] int DurationSeconds);

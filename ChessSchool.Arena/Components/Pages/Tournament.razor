@@ -8,40 +8,53 @@
 
 <PageTitle>@(_state?.Name ?? "Турнир")</PageTitle>
 
-@if (!_authenticated)
-{
-    <div class="card ds-narrow">
-        <h1>Турнир</h1>
-        <p class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы участвовать.</p>
-        <a class="btn btn-primary" href="/signin?returnUrl=/t/@Id">Войти через ChessSchool ID</a>
-    </div>
-}
-else if (_state is null)
+@if (_state is null)
 {
     <p class="text-muted"><em>Загрузка…</em></p>
 }
 else
 {
-    <div class="section-head">
-        <div>
-            <h1 class="mb-0">@_state.Name</h1>
-            <div class="row mt-1">
-                <span class="badge @(_state.Status == TournamentStatus.Running ? "badge-success" : "")">@StatusText(_state.Status)</span>
-                @if (_state.Status == TournamentStatus.Running)
-                {
-                    <span class="timer">@Mmss(_state.SecondsLeft)</span>
-                }
-            </div>
-        </div>
-        @if (!_state.Joined)
-        {
-            <button class="btn btn-primary" @onclick="Join" disabled="@(_state.Status != TournamentStatus.Running)">Участвовать</button>
-        }
+    <nav class="crumbs">
+        <a href="/">Главная</a><span>›</span>
+        <a href="/">Турниры «Арена»</a><span>›</span>
+        <span class="crumbs-cur">@_state.Name</span>
+    </nav>
+
+    <div class="hero @TypeOf(_state.TimeControl)">
+        <span class="hero-badge">@HeroStatus(_state.Status)</span>
+        <span class="hero-piece">♞</span>
     </div>
 
-    <div class="layout">
-        <div class="board-col">
-            @if (_state.MyGame is { } g)
+    <div class="t-meta">
+        <span>@_state.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
+        <span>@(_state.DurationSeconds / 60) минут</span><span class="sep">•</span>
+        <span>Контроль @(_state.TimeControl.InitialSeconds / 60) + @_state.TimeControl.IncrementSeconds</span>
+    </div>
+    <h1 class="t-title">@_state.Name</h1>
+
+    <div class="t-parts">
+        <span class="t-ava-row">
+            @foreach (var s in _state.Standings.Take(4))
+            {
+                <span class="t-ava">@Avatar(s.Name)</span>
+            }
+        </span>
+        @_state.Standings.Count @Plural(_state.Standings.Count, "участник", "участника", "участников")
+    </div>
+
+    @* ----- Игровая зона (только идущий турнир) ----- *@
+    @if (_state.Status == TournamentStatus.Running)
+    {
+        <div class="play-area">
+            @if (!_authenticated)
+            {
+                <div class="card">
+                    <strong>Турнир идёт.</strong>
+                    <span class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы участвовать.</span>
+                    <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/t/@Id">Войти</a>
+                </div>
+            }
+            else if (_state.MyGame is { } g)
             {
                 <div class="card">
                     <div class="players">
@@ -69,34 +82,76 @@ else
                     </div>
                 </div>
             }
-            else if (_state.Joined && _state.Status == TournamentStatus.Running)
+            else if (_state.Joined)
             {
                 <div class="card waiting">Ищем соперника… <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div></div>
             }
-            else if (_state.Status == TournamentStatus.Finished)
+            else
             {
-                <div class="card waiting">Турнир завершён.</div>
+                <div class="card join-card">
+                    <span>Турнир идёт — осталось <strong>@Mmss(_state.SecondsLeft)</strong></span>
+                    <button class="btn btn-primary" @onclick="Join">Участвовать</button>
+                </div>
             }
         </div>
+    }
 
-        <div class="board-col">
-            <div class="card">
-                <h3 class="card-title">Таблица лидеров</h3>
-                <table class="table hover">
-                    <thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead>
-                    <tbody>
-                        @foreach (var row in _state.Standings)
+    @* ----- Результаты / таблица лидеров ----- *@
+    <div class="results">
+        <div class="results-main">
+            @{
+                var ranked = _state.Standings;
+                var podium = ranked.Take(3).ToList();
+            }
+
+            @if (podium.Count > 0)
+            {
+                <div class="podium">
+                    @foreach (var p in podium)
+                    {
+                        <div class="pod @PodClass(p.Rank)">
+                            <div class="pod-cup">@Trophy(p.Rank)</div>
+                            <div class="pod-name">@p.Name</div>
+                            <div class="pod-stat">@p.Games игр • @p.Wins побед • @p.Score очков</div>
+                        </div>
+                    }
+                </div>
+            }
+
+            <div class="st-list">
+                @foreach (var s in ranked)
+                {
+                    <div class="st-card">
+                        <div class="st-head">
+                            <span class="st-ava">@Avatar(s.Name)</span>
+                            <span class="st-name">@s.Name @if (s.OnFire) { <span class="fire">🔥 @s.Streak</span> }</span>
+                            <span class="st-place">@(s.Rank) Место</span>
+                            <span class="st-score">@s.Score</span>
+                        </div>
+                        @if (s.Results.Count > 0)
                         {
-                            <tr class="@(row.Playing ? "is-active" : "")">
-                                <td>@row.Rank</td>
-                                <td>@(row.OnFire ? "🔥 " : "")@row.Name</td>
-                                <td><strong>@row.Score</strong>@(row.Streak >= 2 ? $" (×{row.Streak})" : "")</td>
-                            </tr>
+                            <div class="st-chips">
+                                @foreach (var r in s.Results)
+                                {
+                                    <span class="chip @ChipClass(r)">@r</span>
+                                }
+                            </div>
                         }
-                    </tbody>
-                </table>
+                    </div>
+                }
             </div>
         </div>
+
+        <aside class="results-side">
+            <div class="card score-rules">
+                <h3 class="card-title">Порядок начисления очков</h3>
+                <div class="sr-sub">Результаты партий</div>
+                <div class="sr-row"><span>Победа</span><strong>+ 2</strong></div>
+                <div class="sr-row"><span>Ничья</span><strong>+ 1</strong></div>
+                <div class="sr-row"><span>Поражение</span><strong>0</strong></div>
+                <div class="sr-bonus"><span>🔥 2 победы подряд</span><strong>Бонус ×2</strong></div>
+            </div>
+        </aside>
     </div>
 }
 
@@ -115,17 +170,16 @@ else
     protected override async Task OnInitializedAsync()
     {
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
-        if (user.Identity?.IsAuthenticated != true) return;
-        _authenticated = true;
-        _sub = user.FindFirst("sub")?.Value ?? user.Identity.Name ?? "anon";
-        _name = user.Identity.Name ?? "Игрок";
+        _authenticated = user.Identity?.IsAuthenticated == true;
+        if (_authenticated)
+        {
+            _sub = user.FindFirst("sub")?.Value ?? user.Identity!.Name ?? "anon";
+            _name = user.Identity!.Name ?? "Игрок";
+        }
 
-        await Refresh();
+        await Refresh(); // состояние доступно и анонимам (просмотр результатов)
 
-        // Push: грейн уведомляет об изменениях — перерисовываемся без опроса.
         _subscription = Notifier.Subscribe(Id, () => _ = OnNotifiedAsync());
-
-        // Локальная анимация часов между обновлениями (без обращения к грейну).
         _ = AnimateClockAsync();
     }
 
@@ -176,12 +230,40 @@ else
         return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
     }
 
-    private static string StatusText(TournamentStatus s) => s switch
+    private static string TypeOf(TimeControl tc) => tc.InitialSeconds switch
     {
-        TournamentStatus.Running => "идёт",
-        TournamentStatus.Finished => "завершён",
-        _ => "скоро"
+        <= 120 => "bullet",
+        <= 480 => "blitz",
+        _ => "rapid"
     };
+
+    private static string HeroStatus(TournamentStatus s) => s switch
+    {
+        TournamentStatus.Running => "Идёт сейчас",
+        TournamentStatus.Finished => "Завершённый",
+        _ => "Скоро"
+    };
+
+    private static string Trophy(int rank) => rank switch { 1 => "🥇", 2 => "🥈", 3 => "🥉", _ => rank.ToString() };
+    private static string PodClass(int rank) => rank switch { 1 => "gold", 2 => "silver", 3 => "bronze", _ => "" };
+
+    private static string ChipClass(int r) => r switch { >= 4 => "c-bonus", 2 => "c-win", 1 => "c-draw", _ => "c-loss" };
+
+    private static readonly string[] Avatars = ["👶", "🧑", "🧔", "🧓", "👩", "🧒", "👨", "👧"];
+    private static string Avatar(string name)
+    {
+        int h = 0;
+        foreach (var ch in name) h = (h * 31 + ch) & 0x7fffffff;
+        return Avatars[h % Avatars.Length];
+    }
+
+    private static string Plural(int n, string one, string few, string many)
+    {
+        int m10 = n % 10, m100 = n % 100;
+        if (m10 == 1 && m100 != 11) return one;
+        if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+        return many;
+    }
 
     private static string ResultText(ArenaGameDto g) => g.Result switch
     {
@@ -200,12 +282,76 @@ else
 }
 
 <style>
-    .timer { font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 600; }
-    .layout { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
-    .board-col { flex: 1; min-width: 320px; }
-    .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
+    .crumbs { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink-2); margin-bottom: 1rem; flex-wrap: wrap; }
+    .crumbs a { color: var(--ink-2); font-weight: 600; }
+    .crumbs a:hover { color: var(--accent); }
+    .crumbs span { color: var(--muted); }
+    .crumbs .crumbs-cur { color: var(--ink); font-weight: 600; }
+
+    .hero { position: relative; height: clamp(200px, 34vw, 420px); border-radius: var(--r-lg); overflow: hidden; background: linear-gradient(135deg, #2a2118, #161310 60%, #0c0a08); box-shadow: var(--shadow-md); }
+    .hero.blitz { background: linear-gradient(135deg, #2c2410, #1a1408 60%, #0c0a06); }
+    .hero.rapid { background: linear-gradient(135deg, #16241a, #0e1810 60%, #080c08); }
+    .hero.bullet { background: linear-gradient(135deg, #2c1f14, #1a130c 60%, #0c0806); }
+    .hero-badge { position: absolute; top: 16px; left: 16px; background: rgba(20, 22, 26, .7); color: #fff; font-weight: 700; font-size: .85rem; padding: .4rem .8rem; border-radius: var(--r-pill); backdrop-filter: blur(4px); }
+    .hero-piece { position: absolute; right: 4%; bottom: -6%; font-size: clamp(180px, 36vw, 360px); line-height: 1; color: rgba(255, 255, 255, .06); user-select: none; }
+
+    .t-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; color: var(--ink-2); font-size: .98rem; margin-top: 1.1rem; }
+    .t-meta .sep { color: var(--muted); }
+    .t-title { margin: .35rem 0 1rem; }
+
+    .t-parts { display: inline-flex; align-items: center; gap: .7rem; background: var(--surface-2); border-radius: var(--r-pill); padding: .5rem 1rem; color: var(--ink-2); font-weight: 600; }
+    .t-ava-row { display: inline-flex; }
+    .t-ava { width: 30px; height: 30px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; font-size: 1rem; border: 2px solid var(--surface); margin-left: -10px; box-shadow: var(--shadow-sm); }
+    .t-ava-row .t-ava:first-child { margin-left: 0; }
+
+    .play-area { margin: 1.4rem 0; }
+    .play-area .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
     .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
     .waiting { text-align: center; padding: 2.5rem 1rem; font-size: 1.05rem; color: var(--ink-2); }
+    .join-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm); }
+    .card + .card { margin-top: 1rem; }
+
+    /* ----- Результаты ----- */
+    .results { display: grid; grid-template-columns: 1fr 320px; gap: 1.2rem; align-items: start; margin-top: 1.6rem; }
+    .results-main { min-width: 0; }
+
+    .podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.2rem; }
+    .pod { background: var(--surface-2); border-radius: var(--r-lg); padding: 1.2rem 1rem; text-align: center; }
+    .pod-cup { font-size: 2.4rem; line-height: 1; }
+    .pod-name { font-weight: 700; margin-top: .5rem; }
+    .pod-stat { color: var(--muted); font-size: .85rem; margin-top: .2rem; }
+    .pod.gold { order: 2; background: #fff7e0; }
+    .pod.silver { order: 1; }
+    .pod.bronze { order: 3; background: #f6ede4; }
+
+    .st-list { display: flex; flex-direction: column; gap: 12px; }
+    .st-card { background: var(--surface-2); border-radius: var(--r-lg); padding: 14px 16px; }
+    .st-head { display: flex; align-items: center; gap: .7rem; }
+    .st-ava { width: 36px; height: 36px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; font-size: 1.2rem; flex: none; }
+    .st-name { font-weight: 680; font-size: 1.05rem; display: inline-flex; align-items: center; gap: .4rem; }
+    .st-name .fire { color: var(--danger); font-size: .9rem; font-weight: 700; }
+    .st-place { margin-left: auto; color: var(--ink-2); font-weight: 600; }
+    .st-score { font-weight: 800; font-size: 1.1rem; min-width: 2ch; text-align: right; }
+    .st-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-left: calc(36px + .7rem); }
+    .chip { font-weight: 700; font-size: .95rem; font-variant-numeric: tabular-nums; min-width: 1.1ch; text-align: center; }
+    .chip.c-win { color: var(--success); }
+    .chip.c-bonus { color: var(--warn); }
+    .chip.c-draw { color: var(--ink-2); }
+    .chip.c-loss { color: var(--muted); }
+
+    .score-rules .card-title { font-size: 1.3rem; margin: 0 0 1rem; }
+    .sr-sub { font-weight: 700; color: var(--ink); margin-bottom: .6rem; }
+    .sr-row { display: flex; justify-content: space-between; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+    .sr-row strong { font-variant-numeric: tabular-nums; }
+    .sr-bonus { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; background: var(--warn-weak); color: var(--warn); font-weight: 700; padding: .7rem 1rem; border-radius: var(--r-md); }
+
+    @@media (max-width: 900px) {
+        .results { grid-template-columns: 1fr; }
+        .podium { grid-template-columns: 1fr; }
+        .pod.gold, .pod.silver, .pod.bronze { order: 0; }
+        .st-chips { padding-left: 0; }
+    }
 </style>

@@ -50,4 +50,36 @@ public class ArenaGrainTests
             await cluster.StopAllSilosAsync();
         }
     }
+
+    [Fact]
+    public async Task FinishedDemo_ExposesStandingsWithPerGameResultsAndMeta()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("demo-finished");
+            var startedAt = DateTimeOffset.UtcNow.AddHours(-2);
+            await t.ConfigureFinishedDemoAsync("Blitz 3+0 22:00", new TimeControl(180, 0), startedAt, 3600);
+
+            var state = await t.GetStateAsync("spectator"); // анонимный просмотр результатов
+
+            Assert.Equal(TournamentStatus.Finished, state.Status);
+            Assert.Equal(3600, state.DurationSeconds);
+            Assert.Equal(180, state.TimeControl.InitialSeconds);
+            Assert.Equal(4, state.Standings.Count);
+
+            // Лидер первый, у него заполнена история партий и счёт совпадает.
+            var leader = state.Standings[0];
+            Assert.Equal(1, leader.Rank);
+            Assert.Equal("ArenaHost_0", leader.Name);
+            Assert.Equal(20, leader.Score);
+            Assert.NotEmpty(leader.Results);
+            Assert.Equal(14, leader.Games);
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
 }

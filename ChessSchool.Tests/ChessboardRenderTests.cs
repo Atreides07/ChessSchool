@@ -65,6 +65,6 @@ public class ChessboardRenderTests : BunitContext
         var html = cut.Markup;
         // Считаем класс только на кнопках-клетках (в CSS-правилах внутри <style> слова те же).
         Assert.Equal(2, Regex.Matches(html, "class=\"sq[^\"]*lastmove").Count); // e2 и e4
-        Assert.Equal(1, Regex.Matches(html, "class=\"sq[^\"]*check").Count);    // e1 (король под шахом)
+        Assert.Single(Regex.Matches(html, "class=\"sq[^\"]*check"));    // e1 (король под шахом)
     }
 }

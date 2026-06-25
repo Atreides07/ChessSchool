@@ -1,14 +1,19 @@
 using System.Net.Http.Json;
+using ChessSchool.ApiService.Data;
 using ChessSchool.Contracts;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChessSchool.Tests;
 
 /// <summary>
 /// Интеграционные тесты доменного API через WebApplicationFactory: быстрые и детерминированные,
-/// каждый прогон — со своей SQLite-БД (изоляция через уникальную строку подключения).
+/// без Docker. Боевой провайдер — PostgreSQL; в тестах DbContext подменяется на EF InMemory
+/// (каждый прогон — своя изолированная БД по уникальному имени).
 /// </summary>
 public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
 {
@@ -48,21 +53,27 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
 
     public sealed class Factory : WebApplicationFactory<ChessSchool.ApiService.ApiServiceMarker>
     {
-        private readonly string _dbFile = Path.Combine(Path.GetTempPath(), $"chessschool-test-{Guid.NewGuid():N}.db");
+        private readonly string _dbName = $"chessschool-test-{Guid.NewGuid():N}";
 
-        protected override IHost CreateHost(IHostBuilder builder)
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.ConfigureHostConfiguration(cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
+            builder.ConfigureTestServices(services =>
             {
-                ["ConnectionStrings:school"] = $"Data Source={_dbFile}"
-            }));
-            return base.CreateHost(builder);
-        }
+                // Снимаем боевую (Npgsql) регистрацию контекста.
+                services.RemoveAll<DbContextOptions<SchoolDbContext>>();
+                services.RemoveAll<DbContextOptions>();
+                services.RemoveAll<SchoolDbContext>();
 
-        protected override void Dispose(bool disposing)
-        {
-            base.Dispose(disposing);
-            if (File.Exists(_dbFile)) File.Delete(_dbFile);
+                // InMemory-провайдер в отдельном internal service provider — чтобы EF-сервисы
+                // Npgsql и InMemory не оказались в одном контейнере (EF это запрещает).
+                var efProvider = new ServiceCollection()
+                    .AddEntityFrameworkInMemoryDatabase()
+                    .BuildServiceProvider();
+
+                services.AddDbContext<SchoolDbContext>(o => o
+                    .UseInMemoryDatabase(_dbName)
+                    .UseInternalServiceProvider(efProvider));
+            });
         }
     }
 }

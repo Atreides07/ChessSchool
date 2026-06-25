@@ -16,21 +16,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Провайдер БД: sqlite (дефолт) | postgres. Хранилище OpenIddict — в том же контексте.
-var dbProvider = builder.Configuration["Database:Provider"] ?? "sqlite";
+// БД — PostgreSQL (connection string инжектит Aspire по ссылке на ресурс "auth").
+// Хранилище OpenIddict — в том же контексте.
 builder.Services.AddDbContext<AuthDbContext>(o =>
 {
-    if (dbProvider.Equals("postgres", StringComparison.OrdinalIgnoreCase))
-    {
-        o.UseNpgsql(builder.Configuration.GetConnectionString("auth"));
-    }
-    else
-    {
-        var sqlitePath = builder.Configuration.GetConnectionString("auth")
-            ?? $"Data Source={Path.Combine(builder.Environment.ContentRootPath, "data", "auth.db")}";
-        Directory.CreateDirectory(Path.Combine(builder.Environment.ContentRootPath, "data"));
-        o.UseSqlite(sqlitePath);
-    }
+    o.UseNpgsql(builder.Configuration.GetConnectionString("auth"));
     o.UseOpenIddict(); // регистрирует сущности OpenIddict в модели
 });
 
@@ -90,10 +80,9 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-    // SQLite (дефолт) — через миграции (схема версионируется, не ломается на апдейтах).
-    // Postgres — EnsureCreated (отдельные prod-миграции вне этого скелета).
-    if (dbProvider.Equals("postgres", StringComparison.OrdinalIgnoreCase)) db.Database.EnsureCreated();
-    else db.Database.Migrate();
+    // Postgres — через миграции (схема версионируется, переживает апдейты); иной провайдер — EnsureCreated.
+    if (db.Database.IsNpgsql()) db.Database.Migrate();
+    else db.Database.EnsureCreated();
 }
 
 app.UseAuthentication();

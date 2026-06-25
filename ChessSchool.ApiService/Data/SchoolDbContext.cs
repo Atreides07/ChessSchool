@@ -1,6 +1,5 @@
 using ChessSchool.ApiService.Domain;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace ChessSchool.ApiService.Data;
 
@@ -20,26 +19,6 @@ public class SchoolDbContext(DbContextOptions<SchoolDbContext> options) : DbCont
         b.Entity<Game>().HasIndex(g => g.ExternalGameId).IsUnique();
         b.Entity<ShareLink>().HasIndex(s => s.Token).IsUnique();
         b.Entity<RatingPoint>().HasIndex(r => r.StudentId);
-
-        // SQLite не умеет ORDER BY по DateTimeOffset — храним как long(ticks).
-        // Для PostgreSQL (прод) оставляем нативный timestamptz.
-        if (Database.IsSqlite())
-            SqliteConversions.ApplyDateTimeOffsetAsTicks(b);
-    }
-}
-
-/// <summary>Конвертеры, нужные только провайдеру SQLite.</summary>
-public static class SqliteConversions
-{
-    public static void ApplyDateTimeOffsetAsTicks(ModelBuilder b)
-    {
-        var converter = new ValueConverter<DateTimeOffset, long>(
-            v => v.UtcTicks,
-            v => new DateTimeOffset(v, TimeSpan.Zero));
-
-        foreach (var entity in b.Model.GetEntityTypes())
-            foreach (var prop in entity.GetProperties())
-                if (prop.ClrType == typeof(DateTimeOffset) || prop.ClrType == typeof(DateTimeOffset?))
-                    prop.SetValueConverter(converter);
+        // DateTimeOffset хранится нативно в PostgreSQL (timestamptz) — конвертеры не нужны.
     }
 }

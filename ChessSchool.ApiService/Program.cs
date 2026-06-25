@@ -11,22 +11,9 @@ builder.AddServiceDefaults();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
-// Провайдер БД выбирается конфигом: Database:Provider = sqlite (дефолт, без Docker) | postgres (прод).
-var dbProvider = builder.Configuration["Database:Provider"] ?? "sqlite";
+// БД — PostgreSQL (connection string инжектит Aspire по ссылке на ресурс "school").
 builder.Services.AddDbContext<SchoolDbContext>(o =>
-{
-    if (dbProvider.Equals("postgres", StringComparison.OrdinalIgnoreCase))
-    {
-        o.UseNpgsql(builder.Configuration.GetConnectionString("school"));
-    }
-    else
-    {
-        var sqlitePath = builder.Configuration.GetConnectionString("school")
-            ?? $"Data Source={Path.Combine(builder.Environment.ContentRootPath, "data", "school.db")}";
-        Directory.CreateDirectory(Path.Combine(builder.Environment.ContentRootPath, "data"));
-        o.UseSqlite(sqlitePath);
-    }
-});
+    o.UseNpgsql(builder.Configuration.GetConnectionString("school")));
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
 
@@ -41,9 +28,9 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
-    // SQLite (дефолт) — через миграции; Postgres — EnsureCreated (prod-миграции вне скелета).
-    if (dbProvider.Equals("postgres", StringComparison.OrdinalIgnoreCase)) db.Database.EnsureCreated();
-    else db.Database.Migrate();
+    // Postgres — через миграции (схема версионируется); иной провайдер (InMemory в тестах) — EnsureCreated.
+    if (db.Database.IsNpgsql()) db.Database.Migrate();
+    else db.Database.EnsureCreated();
     SeedData.Ensure(db);
 }
 

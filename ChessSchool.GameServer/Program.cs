@@ -53,12 +53,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 
 // CORS для прямого подключения браузерного SignalR-клиента (тонкий JS-фронт) с другого origin.
-// Dev: разрешаем любой origin с credentials. В проде — ограничить списком доменов фронта.
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
-    .SetIsOriginAllowed(_ => true)
-    .AllowAnyHeader()
-    .AllowAnyMethod()
-    .AllowCredentials()));
+// Dev: разрешаем любой origin с credentials (порты под Aspire динамические).
+// Прод: строго список доменов фронта из конфига Cors:Origins — any-origin + credentials небезопасно
+// (любой сайт мог бы дёргать хаб от имени залогиненного пользователя).
+var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        p.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+    }
+    else
+    {
+        p.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+    }
+}));
 
 var app = builder.Build();
 

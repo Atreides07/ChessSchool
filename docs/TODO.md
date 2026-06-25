@@ -22,16 +22,21 @@
 
 **Связанные грабли:** см. CLAUDE.md (раздел «Грабли») и память проекта про тонкий клиент.
 
+### Вернуть тест безопасности JWKS (runtime-проверка)
+**Приоритет:** средний.
+
+Старый `JwksSecurityTests` проверял, что публичный JWKS не содержит приватных параметров RSA.
+Он был привязан к удалённому `SigningKeyProvider` (см. ниже) и удалён вместе с ним. Теперь JWKS
+отдаёт OpenIddict на `/.well-known/jwks` — корректность гарантирует библиотека, но регрессионного
+теста нет.
+
+**Что сделать:** добавить интеграционный тест против Auth `/.well-known/jwks` (поднять Auth через
+`WebApplicationFactory` + Testcontainers PostgreSQL или InMemory-override), убедиться, что в ответе
+есть `n`/`e` и нет `d,p,q,dp,dq,qi`. Требует контейнер-рантайма для полноценного прогона.
+
 ## Чистка кода
 
-### Осиротевший `SigningKeyProvider` / `TokenService` в Auth
-**Приоритет:** низкий.
-
-После перехода Auth на **OpenIddict** (dev-сертификат подписи) классы
-[SigningKeyProvider.cs](../ChessSchool.Auth/Services/SigningKeyProvider.cs) и
-[TokenService.cs](../ChessSchool.Auth/Services/TokenService.cs) больше **не регистрируются** в
-`Program.cs` — токены выпускает OpenIddict. Эти классы (и переменная `Jwt:KeyPath`) остались
-только в тесте `JwksSecurityTests`.
-
-**Что сделать:** либо удалить мёртвый код и переписать `JwksSecurityTests` на реальный JWKS-эндпоинт
-OpenIddict (`/.well-known/jwks`), либо явно задокументировать, зачем классы сохранены.
+### ✅ Удалён осиротевший `SigningKeyProvider` / `TokenService` в Auth
+**Сделано.** После перехода Auth на OpenIddict эти классы и `JwksSecurityTests` больше не
+регистрировались/не отражали боевой код — удалены. Токены и JWKS выпускает OpenIddict.
+Осталось закрыть долг по runtime-тесту JWKS (см. раздел «Безопасность» выше).

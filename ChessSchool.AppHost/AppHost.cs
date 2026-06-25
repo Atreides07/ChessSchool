@@ -3,28 +3,25 @@ var builder = DistributedApplication.CreateBuilder(args);
 // Общий ключ для server-to-server вызовов GameServer → ApiService (архивация партий).
 const string internalKey = "dev-internal-key";
 
-// Прод-профиль БД: запускается с `UsePostgres=true` (требует контейнер-рантайма).
-// По умолчанию сервисы используют SQLite — локальный запуск без Docker.
-var usePostgres = string.Equals(builder.Configuration["UsePostgres"], "true", StringComparison.OrdinalIgnoreCase);
+// БД — PostgreSQL для всех окружений (dev и прод на одном провайдере, схема через EF-миграции).
+// Требует контейнер-рантайм (Docker/Podman): Aspire поднимает контейнер Postgres локально.
+// Данные переживают перезапуск (volume), чтобы не терять seeded-клиентов IdP и учеников.
+var postgres = builder.AddPostgres("postgres").WithDataVolume();
+var authDb = postgres.AddDatabase("auth");
+var schoolDb = postgres.AddDatabase("school");
 
 // Отдельный сервис авторизации (IdP) — переиспользуемый, как Google Auth.
 var auth = builder.AddProject<Projects.ChessSchool_Auth>("auth")
-    .WithEnvironment("InternalApiKey", internalKey);
+    .WithEnvironment("InternalApiKey", internalKey)
+    .WithReference(authDb)
+    .WaitFor(authDb);
 
 // Доменный API: школы, ученики, рейтинг, архив партий, шаринг.
 var apiService = builder.AddProject<Projects.ChessSchool_ApiService>("apiservice")
     .WithEnvironment("InternalApiKey", internalKey)
-    .WithReference(auth);
-
-if (usePostgres)
-{
-    var postgres = builder.AddPostgres("postgres");
-    var authDb = postgres.AddDatabase("auth");
-    var schoolDb = postgres.AddDatabase("school");
-
-    auth.WithReference(authDb).WaitFor(authDb).WithEnvironment("Database__Provider", "postgres");
-    apiService.WithReference(schoolDb).WaitFor(schoolDb).WithEnvironment("Database__Provider", "postgres");
-}
+    .WithReference(auth)
+    .WithReference(schoolDb)
+    .WaitFor(schoolDb);
 
 // Игровой сервер: Orleans-силос (живые партии) + SignalR. Валидирует токены IdP,
 // архивирует завершённые партии в доменный API.

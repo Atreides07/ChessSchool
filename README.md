@@ -22,12 +22,13 @@
 - Каждая партия — Orleans-**грейн** (однопоточный доступ к состоянию → нет гонок без локов).
 - Завершённые партии деактивируются (в RAM только активные).
 - Транспортный ярус (SignalR) и ярус состояния (Orleans-силосы) масштабируются независимо.
-- Локально: Orleans `localhost`-кластер + SignalR in-proc + SQLite (без Docker).
-- Прод: кластеризация Orleans и SignalR backplane → Redis; персист → PostgreSQL. Код не меняется.
+- Локально: Orleans `localhost`-кластер + SignalR in-proc + PostgreSQL (контейнер от Aspire).
+- Прод: кластеризация Orleans и SignalR backplane → Redis; персист → тот же PostgreSQL (managed).
+  dev и прод на одном провайдере БД; схема — через EF-миграции.
 
 ## Запуск локально
 
-Требуется .NET 10 SDK. Контейнеры/Docker **не нужны** (используется SQLite и localhost-кластер Orleans).
+Требуются .NET 10 SDK и контейнер-рантайм (**Docker/Podman**) — Aspire поднимает контейнер PostgreSQL.
 
 ```bash
 dotnet run --project ChessSchool.AppHost

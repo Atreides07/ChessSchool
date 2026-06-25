@@ -18,11 +18,16 @@ Docker). Онлайн-игра — **Microsoft Orleans** (грейн на пар
 ## Команды
 
 ```bash
-dotnet run --project ChessSchool.AppHost   # запуск всего (откроется дашборд Aspire). Docker НЕ нужен.
+dotnet run --project ChessSchool.AppHost   # запуск всего (откроется дашборд Aspire). Нужен Docker/Podman (Postgres).
 dotnet test                                # юнит + интеграционные (вкл. полный старт AppHost; ~до 180с)
 dotnet format                              # анализатор стиля/кода
 dotnet build                               # сборка решения
 ```
+
+> **Требуется контейнер-рантайм (Docker/Podman).** БД — PostgreSQL для всех окружений; Aspire
+> поднимает контейнер Postgres локально. Без рантайма не стартуют AppHost и интеграционный
+> `WebTests`. Быстрые тесты (`ApiServiceTests` на EF InMemory, юниты) работают без Docker:
+> `dotnet test --filter "FullyQualifiedName!~WebTests"`.
 
 Точка входа после запуска — `webfrontend` (бери внешний URL **из дашборда Aspire**, не Kestrel-порт —
 см. гочу про redirect_uri ниже). Маршруты: `/` лендинг, `/school` ЛК школы, `/students/{id}` профиль,
@@ -51,8 +56,9 @@ dotnet build                               # сборка решения
 Каждая партия — Orleans-**грейн** (однопоточный доступ к состоянию → нет гонок без локов).
 Завершённые партии деактивируются (в RAM только активные). Транспорт (SignalR) и состояние
 (Orleans-силосы) масштабируются независимо. Локально: Orleans `localhost`-кластер + SignalR
-in-proc + SQLite. Прод: Orleans clustering и SignalR backplane → **Redis**, персист → **PostgreSQL**.
-Код не меняется — провайдер БД переключается `UsePostgres=true` в AppHost.
+in-proc + **PostgreSQL** (контейнер от Aspire). Прод: Orleans clustering и SignalR backplane →
+**Redis**, персист → тот же **PostgreSQL** (managed). dev и прод на одном провайдере БД —
+схема через EF-миграции.
 
 ## Архитектурные решения
 
@@ -77,14 +83,18 @@ in-proc + SQLite. Прод: Orleans clustering и SignalR backplane → **Redis*
 1. **Razor: строковый параметр компонента биндить ВСЕГДА через `@`.** `Fen="g.Fen"` передаёт литерал
    `"g.Fen"`, а не значение (для `bool` без `@` выражение вычисляется — отсюда коварство). Правильно:
    `Fen="@g.Fen"`.
-2. **SQLite не поддерживает ORDER BY/сравнение по `DateTimeOffset`** (рантайм `NotSupportedException`).
-   В обоих DbContext стоит `DateTimeOffsetToBinaryConverter` через `ConfigureConventions` — **не убирать**.
+2. **БД — PostgreSQL для всех окружений** (SQLite убран). Схема версионируется EF-миграциями,
+   на старте `db.Database.Migrate()` (ветка `IsNpgsql()`; для InMemory в тестах — `EnsureCreated()`).
+   Генерация миграций без Docker — через design-time фабрики (`AuthDbContextFactory`/`SchoolDbContextFactory`):
+   `dotnet ef migrations add <Name> -p ChessSchool.Auth -s ChessSchool.Auth -o Migrations`.
+   Фабрика Auth обязана звать `UseOpenIddict()`, иначе таблицы OpenIddict не попадут в миграцию.
 3. **Два Orleans-силоса (GameServer и Arena) на одной машине конфликтуют** портами/clusterId.
    Разведены: GameServer `11111/30000 clusterId=chessschool-game`, Arena `11112/30001 clusterId=chessschool-arena`.
 4. **IdP: JWK строить только из публичных параметров** (`n,e`) — `ConvertFromRSASecurityKey` на ключе
    с приватной частью утекает `d,p,q,...` в JWKS. Защищено `JwksSecurityTests`.
-5. **`EnsureCreated()` не мигрирует существующую БД.** После добавления таблиц (напр. OpenIddict) старый
-   `*.db` падает с `no such table`. Лечение в dev: удалить `**/Data/*.db*` (пересоздастся). В проде — миграции EF.
+5. **CORS GameServer гейтится по окружению** ([GameServer/Program.cs](ChessSchool.GameServer/Program.cs)):
+   Development — любой origin (порты Aspire динамические), прод — строгий список из `Cors:Origins`.
+   any-origin + `AllowCredentials()` в проде = дыра (чужой сайт дёргает хаб от имени пользователя).
 6. **redirect_uri / порты под Aspire:** внешний порт веба ≠ Kestrel-порт. Заходить по **внешнему URL из
    дашборда** (совпадает с seeded redirect_uri). Иначе OIDC строит redirect_uri с Kestrel-портом → `invalid_request`.
 7. **HTTP 431 на всех localhost-страницах = раздутая auth-cookie.** Фикс в

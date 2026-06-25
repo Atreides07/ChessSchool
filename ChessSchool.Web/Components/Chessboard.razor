@@ -2,6 +2,10 @@
 
 <div class="board-wrap">
     <div class="board @(Disabled ? "disabled" : "")">
+        @{
+            var leftCol = FlipForBlack ? 7 : 0;
+            var bottomRow = FlipForBlack ? 0 : 7;
+        }
         @foreach (var row in Rows())
         {
             @foreach (var col in Cols())
@@ -11,6 +15,8 @@
                 var dark = (row + col) % 2 == 1;
                 <button @key="sq" class="sq @(dark ? "dark" : "light") @Highlight(sq) @(sq == _selected ? "sel" : "")"
                         @onclick="() => Click(sq)" disabled="@Disabled">
+                    @if (col == leftCol) { <span class="coord rank @(dark ? "on-dark" : "on-light")">@(8 - row)</span> }
+                    @if (row == bottomRow) { <span class="coord file @(dark ? "on-dark" : "on-light")">@((char)('a' + col))</span> }
                     @if (piece != '\0')
                     {
                         <span class="piece @(char.IsUpper(piece) ? "w" : "b")">@((MarkupString)ChessPieces.Svg(piece))</span>
@@ -118,19 +124,22 @@
 
 <style>
     .board-wrap { position: relative; width: 448px; }
-    .board { display: grid; grid-template-columns: repeat(8, 56px); grid-template-rows: repeat(8, 56px); border: 2px solid #333; }
-    .board.disabled { opacity: .7; }
-    .sq { border: none; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
-    .sq.light { background: #f0d9b5; }
+    .board { display: grid; grid-template-columns: repeat(8, 56px); grid-template-rows: repeat(8, 56px); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.12)); }
+    .board.disabled { opacity: .75; }
+    .sq { position: relative; border: none; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+    .sq.light { background: #ecd6b3; }
     .sq.dark { background: #b58863; }
     .sq.lastmove.light { background: #cdd279; }
     .sq.lastmove.dark { background: #aaa23a; }
     .sq.check { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
+    .coord { position: absolute; font-size: 11px; font-weight: 700; line-height: 1; user-select: none; pointer-events: none; }
+    .coord.rank { top: 3px; left: 4px; }
+    .coord.file { bottom: 2px; right: 4px; }
+    .coord.on-light { color: #b58863; }
+    .coord.on-dark { color: #ecd6b3; }
     .piece { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; user-select: none; }
-    .piece.w { color: #f4f4f4; }
-    .piece.b { color: #1f1f1f; }
-    .cp { width: 84%; height: 84%; display: block; }
-    .sq.sel { outline: 3px solid #1b6ec2; outline-offset: -3px; }
+    .cp { width: 90%; height: 90%; display: block; }
+    .sq.sel { outline: 3px solid #2b6ef2; outline-offset: -3px; }
     .promo { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid #333; border-radius: 8px; padding: .5rem; display: flex; gap: .25rem; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
     .promo-btn { font-size: 28px; border: 1px solid #ccc; background: #f8f8f8; border-radius: 6px; cursor: pointer; }
 </style>

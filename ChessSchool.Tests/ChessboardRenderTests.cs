@@ -21,11 +21,12 @@ public class ChessboardRenderTests : BunitContext
 
         var html = cut.Markup;
 
-        // 64 клетки и 32 фигуры (по 16 каждого цвета), отрисованные SVG (не глифами шрифта).
+        // 64 клетки и 32 фигуры (по 16 каждого цвета) — набор Cburnett через <img> на статику.
         Assert.Equal(64, Regex.Matches(html, "<button").Count);
-        Assert.Equal(16, Regex.Matches(html, "piece w").Count);
-        Assert.Equal(16, Regex.Matches(html, "piece b").Count);
-        Assert.Equal(32, Regex.Matches(html, "<svg").Count);
+        Assert.Equal(32, Regex.Matches(html, "/pieces/").Count);
+        Assert.Equal(16, Regex.Matches(html, "/pieces/w").Count);
+        Assert.Equal(16, Regex.Matches(html, "/pieces/b").Count);
+        Assert.Equal(8, Regex.Matches(html, "/pieces/wP.svg").Count); // 8 белых пешек
     }
 
     [Fact]

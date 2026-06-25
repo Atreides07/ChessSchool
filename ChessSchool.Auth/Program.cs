@@ -129,19 +129,27 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext ctx, Au
     var request = ctx.GetOpenIddictServerRequest()
         ?? throw new InvalidOperationException("Некорректный OpenID Connect запрос.");
 
+    var returnUrl = ctx.Request.PathBase + ctx.Request.Path + ctx.Request.QueryString;
     var result = await ctx.AuthenticateAsync("idp");
     if (!result.Succeeded)
     {
         // Не залогинен → ведём на единую страницу входа, потом возвращаемся сюда.
-        var returnUrl = ctx.Request.PathBase + ctx.Request.Path + ctx.Request.QueryString;
         return Results.Challenge(
             new AuthenticationProperties { RedirectUri = returnUrl },
             ["idp"]);
     }
 
-    var sub = result.Principal!.FindFirst("sub")!.Value;
-    var user = await db.Users.FindAsync(Guid.Parse(sub))
-        ?? throw new InvalidOperationException("Пользователь не найден.");
+    var sub = result.Principal!.FindFirst("sub")?.Value;
+    var user = Guid.TryParse(sub, out var userId) ? await db.Users.FindAsync(userId) : null;
+    if (user is null)
+    {
+        // Cookie-сессия ссылается на несуществующего пользователя (напр. cookie от прежней БД).
+        // Не падаем 500 — гасим протухшую cookie и отправляем на повторный вход.
+        await ctx.SignOutAsync("idp");
+        return Results.Challenge(
+            new AuthenticationProperties { RedirectUri = returnUrl },
+            ["idp"]);
+    }
 
     var identity = new ClaimsIdentity(
         authenticationType: TokenValidationParameters.DefaultAuthenticationType,

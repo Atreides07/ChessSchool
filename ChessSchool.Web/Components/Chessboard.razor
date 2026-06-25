@@ -1,0 +1,136 @@
+@* Доска из FEN. Клик по фигуре — выбор, клик по клетке — ход. Превращение пешки — выбор фигуры. *@
+
+<div class="board-wrap">
+    <div class="board @(Disabled ? "disabled" : "")">
+        @foreach (var row in Rows())
+        {
+            @foreach (var col in Cols())
+            {
+                var sq = SquareName(col, row);
+                var piece = _grid[row, col];
+                var dark = (row + col) % 2 == 1;
+                <button @key="sq" class="sq @(dark ? "dark" : "light") @Highlight(sq) @(sq == _selected ? "sel" : "")"
+                        @onclick="() => Click(sq)" disabled="@Disabled">
+                    @if (piece != '\0')
+                    {
+                        <span class="piece @(char.IsUpper(piece) ? "w" : "b")">@((MarkupString)ChessPieces.Svg(piece))</span>
+                    }
+                </button>
+            }
+        }
+    </div>
+
+    @if (_promotionFrom is not null)
+    {
+        <div class="promo">
+            <span>Превратить в:</span>
+            @foreach (var p in new[] { ("q", '♛'), ("r", '♜'), ("b", '♝'), ("n", '♞') })
+            {
+                <button class="promo-btn" @onclick="() => ChoosePromotion(p.Item1)">@p.Item2</button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Fen { get; set; } = "";
+    [Parameter] public bool FlipForBlack { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? LastFrom { get; set; }
+    [Parameter] public string? LastTo { get; set; }
+    [Parameter] public string? CheckSquare { get; set; }
+    [Parameter] public EventCallback<(string From, string To, string? Promotion)> OnMove { get; set; }
+
+    private string Highlight(string sq) =>
+        sq == CheckSquare ? "check"
+        : sq == LastFrom || sq == LastTo ? "lastmove"
+        : "";
+
+    private readonly char[,] _grid = new char[8, 8];
+    private string? _selected;
+    private string? _promotionFrom;
+    private string? _promotionTo;
+
+    protected override void OnParametersSet() => ParseFen(Fen);
+
+    private IEnumerable<int> Rows() => FlipForBlack ? Enumerable.Range(0, 8).Reverse() : Enumerable.Range(0, 8);
+    private IEnumerable<int> Cols() => FlipForBlack ? Enumerable.Range(0, 8).Reverse() : Enumerable.Range(0, 8);
+
+    private void ParseFen(string fen)
+    {
+        Array.Clear(_grid);
+        var placement = fen.Split(' ')[0];
+        var ranks = placement.Split('/');
+        for (int row = 0; row < 8 && row < ranks.Length; row++)
+        {
+            int col = 0;
+            foreach (var ch in ranks[row])
+            {
+                if (char.IsDigit(ch)) col += ch - '0';
+                else if (col < 8) _grid[row, col++] = ch;
+            }
+        }
+    }
+
+    // row 0 = 8-я горизонталь сверху; col 0 = вертикаль 'a'.
+    private static string SquareName(int col, int row) => $"{(char)('a' + col)}{8 - row}";
+    private static (int Row, int Col) Index(string sq) => (8 - (sq[1] - '0'), sq[0] - 'a');
+
+    private async Task Click(string sq)
+    {
+        if (Disabled || _promotionFrom is not null) return;
+
+        if (_selected is null)
+        {
+            var (r, c) = Index(sq);
+            if (_grid[r, c] != '\0') _selected = sq;
+            return;
+        }
+
+        var from = _selected;
+        _selected = null;
+        if (from == sq) return;
+
+        // Превращение: пешка достигает последней горизонтали.
+        var (fr, fc) = Index(from);
+        var moving = _grid[fr, fc];
+        bool whitePromo = moving == 'P' && sq[1] == '8';
+        bool blackPromo = moving == 'p' && sq[1] == '1';
+        if (whitePromo || blackPromo)
+        {
+            _promotionFrom = from;
+            _promotionTo = sq;
+            return; // ждём выбора фигуры
+        }
+
+        await OnMove.InvokeAsync((from, sq, null));
+    }
+
+    private async Task ChoosePromotion(string piece)
+    {
+        var from = _promotionFrom!;
+        var to = _promotionTo!;
+        _promotionFrom = _promotionTo = null;
+        await OnMove.InvokeAsync((from, to, piece));
+    }
+
+}
+
+<style>
+    .board-wrap { position: relative; width: 448px; }
+    .board { display: grid; grid-template-columns: repeat(8, 56px); grid-template-rows: repeat(8, 56px); border: 2px solid #333; }
+    .board.disabled { opacity: .7; }
+    .sq { border: none; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+    .sq.light { background: #f0d9b5; }
+    .sq.dark { background: #b58863; }
+    .sq.lastmove.light { background: #cdd279; }
+    .sq.lastmove.dark { background: #aaa23a; }
+    .sq.check { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
+    .piece { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; user-select: none; }
+    .piece.w { color: #f4f4f4; }
+    .piece.b { color: #1f1f1f; }
+    .cp { width: 84%; height: 84%; display: block; }
+    .sq.sel { outline: 3px solid #1b6ec2; outline-offset: -3px; }
+    .promo { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid #333; border-radius: 8px; padding: .5rem; display: flex; gap: .25rem; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+    .promo-btn { font-size: 28px; border: 1px solid #ccc; background: #f8f8f8; border-radius: 6px; cursor: pointer; }
+</style>

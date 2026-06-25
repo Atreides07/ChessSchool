@@ -1,0 +1,212 @@
+@page "/t/{Id}"
+@rendermode InteractiveServer
+@using ChessSchool.Arena.Services
+@inject IGrainFactory Grains
+@inject ArenaNotifier Notifier
+@inject AuthenticationStateProvider AuthState
+@implements IAsyncDisposable
+
+<PageTitle>@(_state?.Name ?? "Турнир")</PageTitle>
+
+@if (!_authenticated)
+{
+    <h1>Турнир</h1>
+    <a class="btn-primary" href="/signin?returnUrl=/t/@Id">Войти через ChessSchool ID</a>
+}
+else if (_state is null)
+{
+    <p><em>Загрузка…</em></p>
+}
+else
+{
+    <div class="head">
+        <h1>@_state.Name</h1>
+        <div class="meta">
+            <span class="badge">@StatusText(_state.Status)</span>
+            @if (_state.Status == TournamentStatus.Running)
+            {
+                <span class="timer">⏳ @Mmss(_state.SecondsLeft)</span>
+            }
+        </div>
+    </div>
+
+    @if (!_state.Joined)
+    {
+        <button class="btn-primary" @onclick="Join" disabled="@(_state.Status != TournamentStatus.Running)">Участвовать</button>
+    }
+
+    <div class="layout">
+        <div class="board-col">
+            @if (_state.MyGame is { } g)
+            {
+                <div class="players">
+                    <span>@(g.BlackBerserk ? "⚡ " : "")@g.BlackName — <span class="clock @(g.Turn == PieceColor.Black && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, false) / 1000)</span></span>
+                    <span>@(g.WhiteBerserk ? "⚡ " : "")@g.WhiteName — <span class="clock @(g.Turn == PieceColor.White && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, true) / 1000)</span></span>
+                </div>
+                <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
+                            LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
+                            Disabled="@(g.Status != GameStatus.InProgress || g.Turn != g.MyColor)" OnMove="DoMove" />
+                <div class="gstatus">
+                    @if (g.Status == GameStatus.Finished)
+                    {
+                        <strong>@ResultText(g)</strong> <span class="muted">— ждём следующего соперника…</span>
+                    }
+                    else
+                    {
+                        <span>@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника")</span>
+                        @if (g.MyBerserkAvailable)
+                        {
+                            <button class="btn-berserk" @onclick="Berserk" title="Время пополам, без инкремента, +1 очко за победу">⚡ Berserk</button>
+                        }
+                        <button class="btn-sm" @onclick="Resign">Сдаться</button>
+                    }
+                </div>
+            }
+            else if (_state.Joined && _state.Status == TournamentStatus.Running)
+            {
+                <div class="waiting">⏳ Ищем соперника… (очки: <strong>@_state.MyScore</strong>)</div>
+            }
+            else if (_state.Status == TournamentStatus.Finished)
+            {
+                <div class="waiting">Турнир завершён.</div>
+            }
+        </div>
+
+        <div class="board-col">
+            <h2>Таблица лидеров</h2>
+            <table class="standings">
+                <thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead>
+                <tbody>
+                    @foreach (var row in _state.Standings)
+                    {
+                        <tr class="@(row.Playing ? "playing" : "")">
+                            <td>@row.Rank</td>
+                            <td>@(row.OnFire ? "🔥 " : "")@row.Name</td>
+                            <td><strong>@row.Score</strong>@(row.Streak >= 2 ? $" (×{row.Streak})" : "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private bool _authenticated;
+    private string _sub = "", _name = "Игрок";
+    private ArenaStateDto? _state;
+    private DateTimeOffset _stateAt;
+    private PeriodicTimer? _clock;
+    private IDisposable? _subscription;
+
+    private IArenaTournamentGrain T => Grains.GetGrain<IArenaTournamentGrain>(Id);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        if (user.Identity?.IsAuthenticated != true) return;
+        _authenticated = true;
+        _sub = user.FindFirst("sub")?.Value ?? user.Identity.Name ?? "anon";
+        _name = user.Identity.Name ?? "Игрок";
+
+        await Refresh();
+
+        // Push: грейн уведомляет об изменениях — перерисовываемся без опроса.
+        _subscription = Notifier.Subscribe(Id, () => _ = OnNotifiedAsync());
+
+        // Локальная анимация часов между обновлениями (без обращения к грейну).
+        _ = AnimateClockAsync();
+    }
+
+    private async Task OnNotifiedAsync()
+    {
+        await Refresh();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Refresh()
+    {
+        _state = await T.GetStateAsync(_sub);
+        _stateAt = DateTimeOffset.UtcNow;
+    }
+
+    private async Task AnimateClockAsync()
+    {
+        _clock = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
+        while (await _clock.WaitForNextTickAsync())
+            if (_state?.MyGame is { Status: GameStatus.InProgress })
+                await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Join() { await T.JoinAsync(_sub, _name); await Refresh(); }
+
+    private async Task DoMove((string From, string To, string? Promotion) m)
+    {
+        await T.MoveAsync(_sub, new MoveInput(m.From, m.To, m.Promotion));
+        await Refresh();
+    }
+
+    private async Task Berserk() { await T.BerserkAsync(_sub); await Refresh(); }
+
+    private async Task Resign() { await T.ResignAsync(_sub); await Refresh(); }
+
+    private long EffMs(ArenaGameDto g, bool white)
+    {
+        long baseMs = white ? g.WhiteMs : g.BlackMs;
+        bool active = g.Status == GameStatus.InProgress &&
+            ((white && g.Turn == PieceColor.White) || (!white && g.Turn == PieceColor.Black));
+        if (!active) return baseMs;
+        return Math.Max(0, baseMs - (long)(DateTimeOffset.UtcNow - _stateAt).TotalMilliseconds);
+    }
+
+    private static string Mmss(long seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
+    }
+
+    private static string StatusText(TournamentStatus s) => s switch
+    {
+        TournamentStatus.Running => "идёт",
+        TournamentStatus.Finished => "завершён",
+        _ => "скоро"
+    };
+
+    private static string ResultText(ArenaGameDto g) => g.Result switch
+    {
+        GameResult.WhiteWins => "Победили белые",
+        GameResult.BlackWins => "Победили чёрные",
+        GameResult.Draw => "Ничья",
+        _ => "—"
+    };
+
+    public ValueTask DisposeAsync()
+    {
+        _subscription?.Dispose();
+        _clock?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
+
+<style>
+    .head { display: flex; justify-content: space-between; align-items: center; }
+    .meta { display: flex; gap: 1rem; align-items: center; }
+    .badge { background: #2d7d46; color: #fff; padding: .2rem .6rem; border-radius: 6px; }
+    .timer { font-variant-numeric: tabular-nums; font-size: 1.2rem; }
+    .layout { display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 1rem; }
+    .board-col { flex: 1; min-width: 320px; }
+    .players { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .5rem; }
+    .clock { font-variant-numeric: tabular-nums; padding: 0 .4rem; border-radius: 4px; background: #2a3744; }
+    .clock.active { background: #1b6ec2; color: #fff; }
+    .gstatus { margin-top: .75rem; display: flex; gap: 1rem; align-items: center; }
+    .waiting { padding: 2rem; background: #1b2430; border-radius: 12px; text-align: center; }
+    .standings { width: 100%; border-collapse: collapse; }
+    .standings th, .standings td { padding: .4rem .6rem; border-bottom: 1px solid #2a3744; text-align: left; }
+    .standings tr.playing { background: #16202b; }
+    .btn-primary { display: inline-block; padding: .5rem 1rem; background: #1b6ec2; color: #fff; border-radius: 8px; text-decoration: none; border: 0; cursor: pointer; }
+    .btn-sm { padding: .2rem .6rem; background: #b02a37; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    .btn-berserk { padding: .2rem .6rem; background: #d98a00; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .muted { color: #8b98a5; }
+</style>

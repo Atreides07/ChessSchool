@@ -1,0 +1,49 @@
+@* График динамики рейтинга. Чистый SVG — рендерится на сервере (SSR), хорошо для SEO. *@
+
+@if (Points is { Count: > 1 })
+{
+    <svg viewBox="0 0 @Width @Height" class="rating-chart" role="img" aria-label="График рейтинга">
+        <polyline fill="none" stroke="#1b6ec2" stroke-width="2" points="@_polyline" />
+        @foreach (var (x, y) in _dots)
+        {
+            <circle cx="@x.ToString(Inv)" cy="@y.ToString(Inv)" r="3" fill="#1b6ec2" />
+        }
+        <text x="4" y="14" font-size="12" fill="#666">@_max</text>
+        <text x="4" y="@(Height - 4)" font-size="12" fill="#666">@_min</text>
+    </svg>
+}
+else
+{
+    <p class="text-muted">Недостаточно данных для графика.</p>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    [Parameter, EditorRequired] public IReadOnlyList<RatingPointDto> Points { get; set; } = [];
+    [Parameter] public int Width { get; set; } = 600;
+    [Parameter] public int Height { get; set; } = 200;
+
+    private string _polyline = "";
+    private List<(double X, double Y)> _dots = [];
+    private int _min, _max;
+
+    protected override void OnParametersSet()
+    {
+        if (Points is not { Count: > 1 }) return;
+
+        _min = Points.Min(p => p.Rating);
+        _max = Points.Max(p => p.Rating);
+        var range = Math.Max(1, _max - _min);
+        const int pad = 24;
+
+        _dots = Points.Select((p, i) =>
+        {
+            double x = pad + (Width - 2 * pad) * i / (double)(Points.Count - 1);
+            double y = pad + (Height - 2 * pad) * (1 - (p.Rating - _min) / (double)range);
+            return (x, y);
+        }).ToList();
+
+        _polyline = string.Join(" ", _dots.Select(d => $"{d.X.ToString(Inv)},{d.Y.ToString(Inv)}"));
+    }
+}

@@ -1,0 +1,112 @@
+@page "/school"
+@rendermode InteractiveServer
+@inject SchoolApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>ЛК школы — ученики</PageTitle>
+
+<h1>Шахматная школа №1</h1>
+<p class="text-muted">Таблица учеников группы. Нажмите на ученика, чтобы открыть профиль с графиком рейтинга.</p>
+
+<div class="add-row">
+    <input @bind="_newName" placeholder="Имя нового ученика" class="form-control" />
+    <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">Добавить</button>
+</div>
+
+@if (_students is null)
+{
+    <p><em>Загрузка…</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr><th>Ученик</th><th>Рейтинг</th><th>Партий</th><th>% побед</th><th>Аккаунт</th><th>Родителю</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var s in _students)
+            {
+                <tr>
+                    <td><a href="students/@s.Id">@s.DisplayName</a></td>
+                    <td><strong>@s.Rating</strong> <span class="rd">±@s.RatingDeviation</span></td>
+                    <td>@s.GamesPlayed</td>
+                    <td>@s.WinRate%</td>
+                    <td>
+                        @if (s.AccountLinked)
+                        {
+                            <span class="badge-ok">✓ привязан</span>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _linkingId = s.Id">Привязать</button>
+                        }
+                    </td>
+                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="() => Share(s.Id)">🔗 Ссылка</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @if (_linkingId is { } lid)
+    {
+        <div class="link-panel">
+            <span>Email онлайн-аккаунта ученика:</span>
+            <input @bind="_linkEmail" placeholder="player@example.com" class="form-control" />
+            <button class="btn btn-primary btn-sm" @onclick="() => LinkAccount(lid)">Привязать</button>
+            <button class="btn btn-link btn-sm" @onclick="() => _linkingId = null">Отмена</button>
+            @if (_linkError is not null) { <span class="text-danger">@_linkError</span> }
+        </div>
+    }
+
+    @if (_shareUrl is not null)
+    {
+        <div class="alert alert-info">
+            Ссылка для родителя (только просмотр): <a href="@_shareUrl">@_shareUrl</a>
+        </div>
+    }
+}
+
+@code {
+    private IReadOnlyList<StudentDto>? _students;
+    private string _newName = "";
+    private string? _shareUrl;
+    private Guid? _linkingId;
+    private string _linkEmail = "";
+    private string? _linkError;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load() => _students = await Api.GetStudentsAsync(Demo.SchoolId);
+
+    private async Task AddStudent()
+    {
+        await Api.CreateStudentAsync(Demo.SchoolId, new CreateStudentRequest(Demo.GroupId, _newName.Trim(), null));
+        _newName = "";
+        await Load();
+    }
+
+    private async Task Share(Guid studentId)
+    {
+        var link = await Api.CreateShareAsync(studentId);
+        if (link is not null)
+            _shareUrl = new Uri(new Uri(Nav.BaseUri), link.Url).ToString();
+    }
+
+    private async Task LinkAccount(Guid studentId)
+    {
+        _linkError = null;
+        var updated = await Api.LinkAccountAsync(studentId, _linkEmail.Trim());
+        if (updated is null) { _linkError = "Пользователь с таким email не найден."; return; }
+        _linkingId = null;
+        _linkEmail = "";
+        await Load();
+    }
+}
+
+<style>
+    .add-row { display: flex; gap: .5rem; max-width: 480px; margin-bottom: 1rem; }
+    .rd { color: #999; font-size: .8rem; }
+    .badge-ok { color: #198754; font-weight: 600; }
+    .link-panel { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; padding: .75rem; background: #f6f8fa; border-radius: 8px; max-width: 640px; }
+    .link-panel input { max-width: 260px; }
+</style>

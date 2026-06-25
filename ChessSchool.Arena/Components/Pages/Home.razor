@@ -1,0 +1,72 @@
+@page "/"
+@inject IGrainFactory Grains
+
+<PageTitle>Arena — турниры</PageTitle>
+<HeadContent>
+    <meta name="description" content="Арена-турниры по шахматам: bullet, blitz, rapid. Непрерывный пейринг и стрики, как на lichess." />
+</HeadContent>
+
+<h1>♟ Arena</h1>
+<p class="lead">Арена-турниры с непрерывным пейрингом и стриками. Единый аккаунт ChessSchool ID.</p>
+
+<AuthorizeView>
+    <NotAuthorized>
+        <a class="btn-primary" href="/signin?returnUrl=/">Войти через ChessSchool ID</a>
+    </NotAuthorized>
+    <Authorized>
+        <p class="hi">Вы вошли как <strong>@context.User.Identity?.Name</strong> · <a href="/signout">выйти</a></p>
+    </Authorized>
+</AuthorizeView>
+
+@if (_tournaments is null)
+{
+    <p><em>Загрузка…</em></p>
+}
+else
+{
+    <div class="grid">
+        @foreach (var t in _tournaments)
+        {
+            <a class="tcard @t.Status.ToString().ToLower()" href="/t/@t.Id">
+                <div class="ttitle">@t.Name</div>
+                <div class="tmeta">
+                    <span class="tc">⏱ @t.TimeControl</span>
+                    <span class="status">@StatusText(t.Status)</span>
+                </div>
+                <div class="tfoot">
+                    <span>👥 @t.PlayerCount</span>
+                    @if (t.Status == TournamentStatus.Running)
+                    {
+                        <span>⏳ @(t.SecondsLeft / 60) мин</span>
+                    }
+                </div>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<TournamentSummaryDto>? _tournaments;
+
+    protected override async Task OnInitializedAsync() =>
+        _tournaments = await Grains.GetGrain<IArenaDirectoryGrain>(0).ListAsync();
+
+    private static string StatusText(TournamentStatus s) => s switch
+    {
+        TournamentStatus.Running => "идёт",
+        TournamentStatus.Finished => "завершён",
+        _ => "скоро"
+    };
+}
+
+<style>
+    .lead { color: #8b98a5; }
+    .hi { color: #8b98a5; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .tcard { display: block; padding: 1rem; border-radius: 12px; background: #1b2430; color: #eee; text-decoration: none; border: 1px solid #2a3744; }
+    .tcard.running { border-color: #2d7d46; }
+    .ttitle { font-size: 1.2rem; font-weight: 600; }
+    .tmeta, .tfoot { display: flex; justify-content: space-between; margin-top: .5rem; color: #8b98a5; font-size: .9rem; }
+    .status { color: #62b562; }
+    .btn-primary { display: inline-block; padding: .5rem 1rem; background: #1b6ec2; color: #fff; border-radius: 8px; text-decoration: none; }
+</style>

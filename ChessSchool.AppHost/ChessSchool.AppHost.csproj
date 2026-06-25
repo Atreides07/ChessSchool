@@ -1,0 +1,23 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>12dc5a96-389c-4bcf-b4be-0a0c8980d7f5</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ChessSchool.ApiService\ChessSchool.ApiService.csproj" />
+    <ProjectReference Include="..\ChessSchool.Web\ChessSchool.Web.csproj" />
+    <ProjectReference Include="..\ChessSchool.Auth\ChessSchool.Auth.csproj" />
+    <ProjectReference Include="..\ChessSchool.GameServer\ChessSchool.GameServer.csproj" />
+    <ProjectReference Include="..\ChessSchool.Arena\ChessSchool.Arena.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
+  </ItemGroup>
+
+</Project>

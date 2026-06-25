@@ -1,0 +1,21 @@
+@page "/students/{Id:guid}"
+@inject SchoolApiClient Api
+
+<PageTitle>@(_profile?.Student.DisplayName ?? "Профиль ученика")</PageTitle>
+
+@if (_profile is null)
+{
+    <p><em>Загрузка…</em></p>
+}
+else
+{
+    <ProfileView Profile="_profile" />
+    <p><a href="school">← К списку учеников</a></p>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private StudentProfileDto? _profile;
+
+    protected override async Task OnInitializedAsync() => _profile = await Api.GetProfileAsync(Id);
+}

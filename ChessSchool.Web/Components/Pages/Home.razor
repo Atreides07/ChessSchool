@@ -1,0 +1,41 @@
+@page "/"
+
+<PageTitle>ChessSchool — прогресс юных шахматистов</PageTitle>
+<HeadContent>
+    <meta name="description" content="Платформа для шахматных школ: автоматический учёт партий, рейтинг ученика, прогресс для родителей и онлайн-игра." />
+</HeadContent>
+
+<div class="hero">
+    <h1>ChessSchool</h1>
+    <p class="lead">
+        Тренеры видят прогресс каждого ученика, родители — рост рейтинга своего ребёнка,
+        а ученики играют онлайн в реальном времени.
+    </p>
+
+    <div class="cards">
+        <div class="card-tile">
+            <h3>📊 ЛК школы</h3>
+            <p>Таблица учеников, рейтинг, статистика партий.</p>
+            <a class="btn" href="school">Открыть кабинет</a>
+        </div>
+        <div class="card-tile">
+            <h3>♟️ Онлайн-партии</h3>
+            <p>Игра в реальном времени на Orleans + SignalR — под десятки тысяч партий.</p>
+            <a class="btn" href="play">Играть</a>
+        </div>
+        <div class="card-tile">
+            <h3>👨‍👩‍👧 Для родителей</h3>
+            <p>Тренер делится ссылкой на профиль ребёнка — без регистрации.</p>
+            <a class="btn" href="attribution">Атрибуция партий</a>
+        </div>
+    </div>
+</div>
+
+<style>
+    .hero { max-width: 960px; }
+    .hero h1 { font-size: 3rem; }
+    .lead { font-size: 1.25rem; color: #444; margin-bottom: 2rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+    .card-tile { border: 1px solid #e0e0e0; border-radius: 12px; padding: 1.25rem; background: #fff; }
+    .btn { display: inline-block; margin-top: .5rem; padding: .4rem .9rem; background: #1b6ec2; color: #fff; border-radius: 8px; text-decoration: none; }
+</style>

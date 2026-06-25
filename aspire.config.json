@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "ChessSchool.AppHost/ChessSchool.AppHost.csproj"
+  }
+}

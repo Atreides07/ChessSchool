@@ -1,0 +1,18 @@
+## .NET
+bin/
+obj/
+*.user
+
+## Локальные данные/секреты
+.env
+*.db
+*.db-shm
+*.db-wal
+**/data/*.db
+**/data/*.db-*
+**/keys/
+**/keys/*.pem
+
+## IDE
+.vs/
+.idea/

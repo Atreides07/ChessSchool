@@ -1,0 +1,87 @@
+@page "/attribution"
+@rendermode InteractiveServer
+@inject SchoolApiClient Api
+
+<PageTitle>Очередь атрибуции партий</PageTitle>
+
+<h1>Атрибуция тренировочных партий</h1>
+<p class="text-muted">
+    Партии, записанные приложением без чек-ина, попадают сюда. Назначьте игроков и цвета —
+    после этого партия учитывается в рейтинге.
+</p>
+
+@if (_pending is null || _students is null)
+{
+    <p><em>Загрузка…</em></p>
+}
+else if (_pending.Count == 0)
+{
+    <div class="alert alert-success">Очередь пуста — все партии атрибутированы. 🎉</div>
+}
+else
+{
+    @foreach (var g in _pending)
+    {
+        <div class="pending-card">
+            <div class="meta">
+                <span>Доска: <strong>@g.DeviceRef</strong></span>
+                <span>@g.PlayedAt.LocalDateTime.ToString("dd.MM HH:mm")</span>
+            </div>
+            <code>@g.Pgn</code>
+            <div class="assign">
+                <label>Белые:
+                    <select @bind="_form[g.Id].White">
+                        <option value="">—</option>
+                        @foreach (var s in _students) { <option value="@s.Id">@s.DisplayName</option> }
+                    </select>
+                </label>
+                <label>Чёрные:
+                    <select @bind="_form[g.Id].Black">
+                        <option value="">—</option>
+                        @foreach (var s in _students) { <option value="@s.Id">@s.DisplayName</option> }
+                    </select>
+                </label>
+                <label>Итог:
+                    <select @bind="_form[g.Id].Result">
+                        <option value="@GameResult.WhiteWins">1–0</option>
+                        <option value="@GameResult.Draw">½–½</option>
+                        <option value="@GameResult.BlackWins">0–1</option>
+                    </select>
+                </label>
+                <button class="btn btn-primary btn-sm" @onclick="() => Attribute(g.Id)">Сохранить</button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private IReadOnlyList<PendingGameDto>? _pending;
+    private IReadOnlyList<StudentDto>? _students;
+    private readonly Dictionary<Guid, Form> _form = [];
+
+    private sealed class Form { public string White = ""; public string Black = ""; public GameResult Result = GameResult.WhiteWins; }
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _students = await Api.GetStudentsAsync(Demo.SchoolId);
+        _pending = await Api.GetPendingAsync(Demo.SchoolId);
+        foreach (var g in _pending)
+            _form.TryAdd(g.Id, new Form());
+    }
+
+    private async Task Attribute(Guid gameId)
+    {
+        var f = _form[gameId];
+        if (!Guid.TryParse(f.White, out var w) || !Guid.TryParse(f.Black, out var bl) || w == bl) return;
+        await Api.AttributeAsync(gameId, new AttributeGameRequest(w, bl, f.Result));
+        await Load();
+    }
+}
+
+<style>
+    .pending-card { border: 1px solid #e0e0e0; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    .meta { display: flex; justify-content: space-between; color: #666; }
+    .assign { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-top: .75rem; }
+</style>

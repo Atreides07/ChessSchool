@@ -1,0 +1,6 @@
+@ChessSchool.Auth_HostAddress = http://localhost:5286
+
+GET {{ChessSchool.Auth_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

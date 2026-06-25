@@ -5,6 +5,7 @@
 @using ChessSchool.WebAuth
 @inject IConfiguration Config
 @inject AuthenticationStateProvider AuthState
+@inject ChessSchool.Web.Clients.GameTokenProvider GameTokens
 @implements IAsyncDisposable
 
 <PageTitle>Играть онлайн</PageTitle>
@@ -12,30 +13,32 @@
 
 @if (!_authenticated)
 {
-    <div class="login">
-        <p class="text-muted">Войдите единым аккаунтом ChessSchool ID, чтобы играть.</p>
+    <div class="card ds-narrow">
+        <p class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы играть.</p>
         <a class="btn btn-primary" href="/signin?returnUrl=/play">Войти через ChessSchool ID</a>
     </div>
 }
 else if (_state is null)
 {
-    <p>Вы вошли как <strong>@_name</strong>.</p>
-    @if (_searching)
-    {
-        <p><em>Ищем соперника…</em></p>
-    }
-    else
-    {
-        <button class="btn btn-primary" @onclick="FindMatch">Найти соперника (блиц 5+2)</button>
-    }
-    @if (_error is not null) { <div class="alert alert-danger">@_error</div> }
+    <div class="card ds-narrow">
+        <p class="text-secondary">Вы вошли как <strong>@_name</strong>.</p>
+        @if (_searching)
+        {
+            <p class="text-muted"><em>Ищем соперника…</em></p>
+        }
+        else
+        {
+            <button class="btn btn-primary" @onclick="FindMatch">Найти соперника (блиц 5+2)</button>
+        }
+        @if (_error is not null) { <div class="alert alert-danger mt-2">@_error</div> }
+    </div>
 }
 else
 {
-    <div class="game">
+    <div class="card game">
         <div class="players">
-            <span>♟️ @_state.BlackPlayerName — <span class="clock @(ActiveBlack ? "active" : "")">@Clock(EffectiveMs(false))</span></span>
-            <span>♙ @_state.WhitePlayerName — <span class="clock @(ActiveWhite ? "active" : "")">@Clock(EffectiveMs(true))</span></span>
+            <span>@_state.BlackPlayerName <span class="clock @(ActiveBlack ? "active" : "")">@Clock(EffectiveMs(false))</span></span>
+            <span>@_state.WhitePlayerName <span class="clock @(ActiveWhite ? "active" : "")">@Clock(EffectiveMs(true))</span></span>
         </div>
 
         <Chessboard Fen="@_state.Fen" FlipForBlack="_color == PieceColor.Black"
@@ -45,22 +48,22 @@ else
         <div class="status">
             @if (_state.Status == GameStatus.Finished)
             {
-                <strong>Партия завершена: @ResultText() (@_state.EndReason)</strong>
+                <strong>Партия завершена: @ResultText()</strong>
             }
             else
             {
-                <span>@(MyTurn ? "Ваш ход" : "Ход соперника")</span>
+                <span class="text-secondary">@(MyTurn ? "Ваш ход" : "Ход соперника")</span>
+                <span class="ds-spacer"></span>
                 <button class="btn btn-sm btn-outline-danger" @onclick="Resign">Сдаться</button>
             }
         </div>
-        @if (_error is not null) { <div class="alert alert-warning">@_error</div> }
+        @if (_error is not null) { <div class="alert alert-warning mt-2">@_error</div> }
     </div>
 }
 
 @code {
     private bool _authenticated;
     private string _name = "Игрок";
-    private string? _token;
     private string? _error;
     private bool _searching;
 
@@ -82,8 +85,8 @@ else
         {
             _authenticated = true;
             _name = user.Identity.Name ?? "Игрок";
-            _token = user.FindFirst(SsoExtensions.AccessTokenClaim)?.Value;
-            await Connect();
+            try { await Connect(); }
+            catch { _error = "Не удалось подключиться к игровому серверу. Обновите страницу."; }
         }
     }
 
@@ -107,7 +110,7 @@ else
     {
         var baseUrl = Config["services:gameserver:https:0"] ?? Config["services:gameserver:http:0"];
         _conn = new HubConnectionBuilder()
-            .WithUrl($"{baseUrl}/gamehub", opts => opts.AccessTokenProvider = () => Task.FromResult(_token)!)
+            .WithUrl($"{baseUrl}/gamehub", opts => opts.AccessTokenProvider = async () => await GameTokens.GetTokenAsync() ?? "")
             .WithAutomaticReconnect()
             .Build();
 
@@ -185,9 +188,9 @@ else
 }
 
 <style>
-    .login { max-width: 360px; display: flex; flex-direction: column; gap: .5rem; }
-    .players { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .5rem; font-size: 1.1rem; }
-    .clock { font-variant-numeric: tabular-nums; padding: 0 .4rem; border-radius: 4px; background: #eee; }
-    .clock.active { background: #1b6ec2; color: #fff; }
-    .status { margin-top: .75rem; display: flex; gap: 1rem; align-items: center; }
+    .game { width: max-content; max-width: 100%; }
+    .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
+    .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); font-weight: 600; margin-left: .4rem; }
+    .clock.active { background: var(--accent); color: #fff; }
+    .status { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
 </style>

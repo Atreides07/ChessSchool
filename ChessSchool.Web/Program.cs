@@ -24,6 +24,9 @@ builder.AddChessSchoolSso();
 // HTTP-клиент к IdP для обновления access-токена по refresh_token.
 builder.Services.AddHttpClient("idp", c => c.BaseAddress = new("https+http://auth"));
 
+// Провайдер свежего токена для SignalR из Blazor-цепи (обновляет по refresh при истечении).
+builder.Services.AddScoped<ChessSchool.Web.Clients.GameTokenProvider>();
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 

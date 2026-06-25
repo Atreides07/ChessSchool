@@ -10,83 +10,92 @@
 
 @if (!_authenticated)
 {
-    <h1>Турнир</h1>
-    <a class="btn-primary" href="/signin?returnUrl=/t/@Id">Войти через ChessSchool ID</a>
+    <div class="card ds-narrow">
+        <h1>Турнир</h1>
+        <p class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы участвовать.</p>
+        <a class="btn btn-primary" href="/signin?returnUrl=/t/@Id">Войти через ChessSchool ID</a>
+    </div>
 }
 else if (_state is null)
 {
-    <p><em>Загрузка…</em></p>
+    <p class="text-muted"><em>Загрузка…</em></p>
 }
 else
 {
-    <div class="head">
-        <h1>@_state.Name</h1>
-        <div class="meta">
-            <span class="badge">@StatusText(_state.Status)</span>
-            @if (_state.Status == TournamentStatus.Running)
-            {
-                <span class="timer">⏳ @Mmss(_state.SecondsLeft)</span>
-            }
+    <div class="section-head">
+        <div>
+            <h1 class="mb-0">@_state.Name</h1>
+            <div class="row mt-1">
+                <span class="badge @(_state.Status == TournamentStatus.Running ? "badge-success" : "")">@StatusText(_state.Status)</span>
+                @if (_state.Status == TournamentStatus.Running)
+                {
+                    <span class="timer">@Mmss(_state.SecondsLeft)</span>
+                }
+            </div>
         </div>
+        @if (!_state.Joined)
+        {
+            <button class="btn btn-primary" @onclick="Join" disabled="@(_state.Status != TournamentStatus.Running)">Участвовать</button>
+        }
     </div>
-
-    @if (!_state.Joined)
-    {
-        <button class="btn-primary" @onclick="Join" disabled="@(_state.Status != TournamentStatus.Running)">Участвовать</button>
-    }
 
     <div class="layout">
         <div class="board-col">
             @if (_state.MyGame is { } g)
             {
-                <div class="players">
-                    <span>@(g.BlackBerserk ? "⚡ " : "")@g.BlackName — <span class="clock @(g.Turn == PieceColor.Black && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, false) / 1000)</span></span>
-                    <span>@(g.WhiteBerserk ? "⚡ " : "")@g.WhiteName — <span class="clock @(g.Turn == PieceColor.White && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, true) / 1000)</span></span>
-                </div>
-                <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
-                            LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
-                            Disabled="@(g.Status != GameStatus.InProgress || g.Turn != g.MyColor)" OnMove="DoMove" />
-                <div class="gstatus">
-                    @if (g.Status == GameStatus.Finished)
-                    {
-                        <strong>@ResultText(g)</strong> <span class="muted">— ждём следующего соперника…</span>
-                    }
-                    else
-                    {
-                        <span>@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника")</span>
-                        @if (g.MyBerserkAvailable)
+                <div class="card">
+                    <div class="players">
+                        <span>@(g.BlackBerserk ? "⚡ " : "")@g.BlackName <span class="clock @(g.Turn == PieceColor.Black && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, false) / 1000)</span></span>
+                        <span>@(g.WhiteBerserk ? "⚡ " : "")@g.WhiteName <span class="clock @(g.Turn == PieceColor.White && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, true) / 1000)</span></span>
+                    </div>
+                    <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
+                                LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
+                                Disabled="@(g.Status != GameStatus.InProgress || g.Turn != g.MyColor)" OnMove="DoMove" />
+                    <div class="gstatus">
+                        @if (g.Status == GameStatus.Finished)
                         {
-                            <button class="btn-berserk" @onclick="Berserk" title="Время пополам, без инкремента, +1 очко за победу">⚡ Berserk</button>
+                            <strong>@ResultText(g)</strong> <span class="text-muted">— ждём следующего соперника…</span>
                         }
-                        <button class="btn-sm" @onclick="Resign">Сдаться</button>
-                    }
+                        else
+                        {
+                            <span class="text-secondary">@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника")</span>
+                            <span class="ds-spacer"></span>
+                            @if (g.MyBerserkAvailable)
+                            {
+                                <button class="btn btn-warn btn-sm" @onclick="Berserk" title="Время пополам, без инкремента, +1 очко за победу">⚡ Berserk</button>
+                            }
+                            <button class="btn btn-outline-danger btn-sm" @onclick="Resign">Сдаться</button>
+                        }
+                    </div>
                 </div>
             }
             else if (_state.Joined && _state.Status == TournamentStatus.Running)
             {
-                <div class="waiting">⏳ Ищем соперника… (очки: <strong>@_state.MyScore</strong>)</div>
+                <div class="card waiting">Ищем соперника… <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div></div>
             }
             else if (_state.Status == TournamentStatus.Finished)
             {
-                <div class="waiting">Турнир завершён.</div>
+                <div class="card waiting">Турнир завершён.</div>
             }
         </div>
 
         <div class="board-col">
-            <h2>Таблица лидеров</h2>
-            <table class="standings">
-                <thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead>
-                <tbody>
-                    @foreach (var row in _state.Standings)
-                    {
-                        <tr class="@(row.Playing ? "playing" : "")">
-                            <td>@row.Rank</td>
-                            <td>@(row.OnFire ? "🔥 " : "")@row.Name</td>
-                            <td><strong>@row.Score</strong>@(row.Streak >= 2 ? $" (×{row.Streak})" : "")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <div class="card">
+                <h3 class="card-title">Таблица лидеров</h3>
+                <table class="table hover">
+                    <thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead>
+                    <tbody>
+                        @foreach (var row in _state.Standings)
+                        {
+                            <tr class="@(row.Playing ? "is-active" : "")">
+                                <td>@row.Rank</td>
+                                <td>@(row.OnFire ? "🔥 " : "")@row.Name</td>
+                                <td><strong>@row.Score</strong>@(row.Streak >= 2 ? $" (×{row.Streak})" : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 }
@@ -191,22 +200,12 @@ else
 }
 
 <style>
-    .head { display: flex; justify-content: space-between; align-items: center; }
-    .meta { display: flex; gap: 1rem; align-items: center; }
-    .badge { background: #2d7d46; color: #fff; padding: .2rem .6rem; border-radius: 6px; }
-    .timer { font-variant-numeric: tabular-nums; font-size: 1.2rem; }
-    .layout { display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 1rem; }
+    .timer { font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 600; }
+    .layout { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
     .board-col { flex: 1; min-width: 320px; }
-    .players { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .5rem; }
-    .clock { font-variant-numeric: tabular-nums; padding: 0 .4rem; border-radius: 4px; background: #2a3744; }
-    .clock.active { background: #1b6ec2; color: #fff; }
-    .gstatus { margin-top: .75rem; display: flex; gap: 1rem; align-items: center; }
-    .waiting { padding: 2rem; background: #1b2430; border-radius: 12px; text-align: center; }
-    .standings { width: 100%; border-collapse: collapse; }
-    .standings th, .standings td { padding: .4rem .6rem; border-bottom: 1px solid #2a3744; text-align: left; }
-    .standings tr.playing { background: #16202b; }
-    .btn-primary { display: inline-block; padding: .5rem 1rem; background: #1b6ec2; color: #fff; border-radius: 8px; text-decoration: none; border: 0; cursor: pointer; }
-    .btn-sm { padding: .2rem .6rem; background: #b02a37; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
-    .btn-berserk { padding: .2rem .6rem; background: #d98a00; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-weight: 600; }
-    .muted { color: #8b98a5; }
+    .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
+    .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
+    .clock.active { background: var(--accent); color: #fff; }
+    .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
+    .waiting { text-align: center; padding: 2.5rem 1rem; font-size: 1.05rem; color: var(--ink-2); }
 </style>

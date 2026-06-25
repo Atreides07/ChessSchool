@@ -6,40 +6,35 @@
     <meta name="description" content="Арена-турниры по шахматам: bullet, blitz, rapid. Непрерывный пейринг и стрики, как на lichess." />
 </HeadContent>
 
-<h1>♟ Arena</h1>
-<p class="lead">Арена-турниры с непрерывным пейрингом и стриками. Единый аккаунт ChessSchool ID.</p>
-
-<AuthorizeView>
-    <NotAuthorized>
-        <a class="btn-primary" href="/signin?returnUrl=/">Войти через ChessSchool ID</a>
-    </NotAuthorized>
-    <Authorized>
-        <p class="hi">Вы вошли как <strong>@context.User.Identity?.Name</strong> · <a href="/signout">выйти</a></p>
-    </Authorized>
-</AuthorizeView>
+<div class="section-head">
+    <div>
+        <h1>Турниры</h1>
+        <p class="text-secondary mb-0">Арена с непрерывным пейрингом и стриками. Единый аккаунт ChessSchool ID.</p>
+    </div>
+</div>
 
 @if (_tournaments is null)
 {
-    <p><em>Загрузка…</em></p>
+    <p class="text-muted"><em>Загрузка…</em></p>
 }
 else
 {
-    <div class="grid">
+    <div class="grid grid-auto">
         @foreach (var t in _tournaments)
         {
-            <a class="tcard @t.Status.ToString().ToLower()" href="/t/@t.Id">
-                <div class="ttitle">@t.Name</div>
+            <a class="tcard" href="/t/@t.Id">
+                <div class="row between">
+                    <span class="ttitle">@t.Name</span>
+                    <span class="badge @StatusBadge(t.Status)">@StatusText(t.Status)</span>
+                </div>
                 <div class="tmeta">
-                    <span class="tc">⏱ @t.TimeControl</span>
-                    <span class="status">@StatusText(t.Status)</span>
+                    <span>@t.TimeControl</span>
+                    <span>@t.PlayerCount участников</span>
                 </div>
-                <div class="tfoot">
-                    <span>👥 @t.PlayerCount</span>
-                    @if (t.Status == TournamentStatus.Running)
-                    {
-                        <span>⏳ @(t.SecondsLeft / 60) мин</span>
-                    }
-                </div>
+                @if (t.Status == TournamentStatus.Running)
+                {
+                    <div class="tmeta"><span>Осталось ~@(t.SecondsLeft / 60) мин</span></div>
+                }
             </a>
         }
     </div>
@@ -57,16 +52,18 @@ else
         TournamentStatus.Finished => "завершён",
         _ => "скоро"
     };
+
+    private static string StatusBadge(TournamentStatus s) => s switch
+    {
+        TournamentStatus.Running => "badge-success",
+        TournamentStatus.Finished => "",
+        _ => "badge-warn"
+    };
 }
 
 <style>
-    .lead { color: #8b98a5; }
-    .hi { color: #8b98a5; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; margin-top: 1rem; }
-    .tcard { display: block; padding: 1rem; border-radius: 12px; background: #1b2430; color: #eee; text-decoration: none; border: 1px solid #2a3744; }
-    .tcard.running { border-color: #2d7d46; }
-    .ttitle { font-size: 1.2rem; font-weight: 600; }
-    .tmeta, .tfoot { display: flex; justify-content: space-between; margin-top: .5rem; color: #8b98a5; font-size: .9rem; }
-    .status { color: #62b562; }
-    .btn-primary { display: inline-block; padding: .5rem 1rem; background: #1b6ec2; color: #fff; border-radius: 8px; text-decoration: none; }
+    .tcard { display: block; padding: 18px; border-radius: var(--r-lg); background: var(--surface); color: var(--ink); text-decoration: none; border: 1px solid var(--line); box-shadow: var(--shadow-sm); transition: box-shadow .12s, border-color .12s, transform .12s; }
+    .tcard:hover { box-shadow: var(--shadow-md); border-color: var(--line-strong); transform: translateY(-1px); color: var(--ink); }
+    .ttitle { font-size: 1.1rem; font-weight: 660; }
+    .tmeta { display: flex; justify-content: space-between; margin-top: .6rem; color: var(--muted); font-size: .9rem; }
 </style>

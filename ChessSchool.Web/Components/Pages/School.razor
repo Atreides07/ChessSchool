@@ -5,47 +5,53 @@
 
 <PageTitle>ЛК школы — ученики</PageTitle>
 
-<h1>Шахматная школа №1</h1>
-<p class="text-muted">Таблица учеников группы. Нажмите на ученика, чтобы открыть профиль с графиком рейтинга.</p>
-
-<div class="add-row">
-    <input @bind="_newName" placeholder="Имя нового ученика" class="form-control" />
-    <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">Добавить</button>
+<div class="section-head">
+    <div>
+        <h1>Шахматная школа №1</h1>
+        <p class="text-secondary mb-0">Рейтинг и статистика учеников. Нажмите на имя — откроется профиль с графиком.</p>
+    </div>
 </div>
 
-@if (_students is null)
-{
-    <p><em>Загрузка…</em></p>
-}
-else
-{
-    <table class="table">
-        <thead>
-            <tr><th>Ученик</th><th>Рейтинг</th><th>Партий</th><th>% побед</th><th>Аккаунт</th><th>Родителю</th></tr>
-        </thead>
-        <tbody>
-            @foreach (var s in _students)
-            {
-                <tr>
-                    <td><a href="students/@s.Id">@s.DisplayName</a></td>
-                    <td><strong>@s.Rating</strong> <span class="rd">±@s.RatingDeviation</span></td>
-                    <td>@s.GamesPlayed</td>
-                    <td>@s.WinRate%</td>
-                    <td>
-                        @if (s.AccountLinked)
-                        {
-                            <span class="badge-ok">✓ привязан</span>
-                        }
-                        else
-                        {
-                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _linkingId = s.Id">Привязать</button>
-                        }
-                    </td>
-                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="() => Share(s.Id)">🔗 Ссылка</button></td>
-                </tr>
-            }
-        </tbody>
-    </table>
+<div class="card">
+    <div class="add-row">
+        <input @bind="_newName" placeholder="Имя нового ученика" class="input" />
+        <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">Добавить</button>
+    </div>
+
+    @if (_students is null)
+    {
+        <p class="text-muted"><em>Загрузка…</em></p>
+    }
+    else
+    {
+        <table class="table hover">
+            <thead>
+                <tr><th>Ученик</th><th>Рейтинг</th><th>Партий</th><th>% побед</th><th>Аккаунт</th><th>Родителю</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var s in _students)
+                {
+                    <tr>
+                        <td><a href="students/@s.Id">@s.DisplayName</a></td>
+                        <td><strong>@s.Rating</strong> <span class="rd">±@s.RatingDeviation</span></td>
+                        <td>@s.GamesPlayed</td>
+                        <td>@s.WinRate%</td>
+                        <td>
+                            @if (s.AccountLinked)
+                            {
+                                <span class="badge badge-success">привязан</span>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-ghost" @onclick="() => _linkingId = s.Id">Привязать</button>
+                            }
+                        </td>
+                        <td><button class="btn btn-sm btn-ghost" @onclick="() => Share(s.Id)">Ссылка</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
 
     @if (_linkingId is { } lid)
     {
@@ -60,11 +66,11 @@ else
 
     @if (_shareUrl is not null)
     {
-        <div class="alert alert-info">
+        <div class="alert alert-info mt-2">
             Ссылка для родителя (только просмотр): <a href="@_shareUrl">@_shareUrl</a>
         </div>
     }
-}
+</div>
 
 @code {
     private IReadOnlyList<StudentDto>? _students;
@@ -104,9 +110,8 @@ else
 }
 
 <style>
-    .add-row { display: flex; gap: .5rem; max-width: 480px; margin-bottom: 1rem; }
-    .rd { color: #999; font-size: .8rem; }
-    .badge-ok { color: #198754; font-weight: 600; }
-    .link-panel { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; padding: .75rem; background: #f6f8fa; border-radius: 8px; max-width: 640px; }
+    .add-row { display: flex; gap: .5rem; max-width: 480px; margin-bottom: 1.25rem; }
+    .rd { color: var(--muted); font-size: .8rem; }
+    .link-panel { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0 0; padding: .85rem; background: var(--surface-2); border-radius: var(--r-md); max-width: 640px; }
     .link-panel input { max-width: 260px; }
 </style>

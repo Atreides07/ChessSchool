@@ -54,14 +54,21 @@ public static class SsoExtensions
             o.Scope.Add("chess.api");
             o.Scope.Add("offline_access"); // нужен refresh_token для обновления access-токена
 
-            // Кладём access-токен в claim, чтобы компоненты (SignalR) могли его взять из сессии.
+            // Кладём токены в claims, чтобы Blazor-цепь (server-side) могла брать access-токен
+            // для SignalR и обновлять его по refresh_token при истечении.
             o.Events = new OpenIdConnectEvents
             {
                 OnTokenValidated = ctx =>
                 {
-                    var accessToken = ctx.TokenEndpointResponse?.AccessToken;
-                    if (accessToken is not null && ctx.Principal?.Identity is ClaimsIdentity identity)
-                        identity.AddClaim(new Claim(AccessTokenClaim, accessToken));
+                    var r = ctx.TokenEndpointResponse;
+                    if (r?.AccessToken is { } at && ctx.Principal?.Identity is ClaimsIdentity identity)
+                    {
+                        identity.AddClaim(new Claim(AccessTokenClaim, at));
+                        if (!string.IsNullOrEmpty(r.RefreshToken))
+                            identity.AddClaim(new Claim("refresh_token", r.RefreshToken));
+                        if (int.TryParse(r.ExpiresIn, out var exp))
+                            identity.AddClaim(new Claim("token_expires_at", DateTimeOffset.UtcNow.AddSeconds(exp).ToString("o")));
+                    }
                     return Task.CompletedTask;
                 }
             };

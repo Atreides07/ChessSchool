@@ -4,6 +4,7 @@
     <ProjectReference Include="..\ChessSchool.ServiceDefaults\ChessSchool.ServiceDefaults.csproj" />
     <ProjectReference Include="..\ChessSchool.Contracts\ChessSchool.Contracts.csproj" />
     <ProjectReference Include="..\ChessSchool.WebAuth\ChessSchool.WebAuth.csproj" />
+    <ProjectReference Include="..\ChessSchool.Design\ChessSchool.Design.csproj" />
   </ItemGroup>
 
   <ItemGroup>

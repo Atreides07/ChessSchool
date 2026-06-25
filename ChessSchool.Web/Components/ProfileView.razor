@@ -1,59 +1,68 @@
 @* Профиль ученика: рейтинг, график, последние партии. Используется в ЛК и на публичной странице. *@
 
 <h1>@Profile.Student.DisplayName</h1>
-<div class="stats">
-    <div class="stat"><span>Рейтинг</span><strong>@Profile.Student.Rating</strong></div>
-    <div class="stat"><span>Партий</span><strong>@Profile.Student.GamesPlayed</strong></div>
-    <div class="stat"><span>Побед</span><strong>@Profile.Student.Wins</strong></div>
-    <div class="stat"><span>% побед</span><strong>@Profile.Student.WinRate%</strong></div>
+
+<div class="card">
+    <div class="stats">
+        <div class="stat"><span class="stat-label">Рейтинг</span><span class="stat-value">@Profile.Student.Rating</span></div>
+        <div class="stat"><span class="stat-label">Партий</span><span class="stat-value">@Profile.Student.GamesPlayed</span></div>
+        <div class="stat"><span class="stat-label">Побед</span><span class="stat-value">@Profile.Student.Wins</span></div>
+        <div class="stat"><span class="stat-label">% побед</span><span class="stat-value">@Profile.Student.WinRate%</span></div>
+    </div>
 </div>
 
-<h2>Динамика рейтинга</h2>
-<RatingChart Points="Profile.RatingHistory" />
+<div class="card mt-2">
+    <h3 class="card-title">Динамика рейтинга</h3>
+    <RatingChart Points="Profile.RatingHistory" />
+</div>
 
-<h2>Последние партии</h2>
-@if (Profile.RecentGames.Count == 0)
-{
-    <p class="text-muted">Партий пока нет.</p>
-}
-else
-{
-    <table class="table">
-        <thead><tr><th>Дата</th><th>Цвет</th><th>Соперник</th><th>Итог</th><th>± рейтинг</th></tr></thead>
-        <tbody>
-            @foreach (var g in Profile.RecentGames)
-            {
-                <tr>
-                    <td>@g.PlayedAt.LocalDateTime.ToString("dd.MM.yyyy")</td>
-                    <td>@(g.Color == PieceColor.White ? "Белые" : "Чёрные")</td>
-                    <td>@g.OpponentName</td>
-                    <td>@ResultText(g)</td>
-                    <td>@(g.RatingChange > 0 ? "+" : "")@g.RatingChange</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
+<div class="card mt-2">
+    <h3 class="card-title">Последние партии</h3>
+    @if (Profile.RecentGames.Count == 0)
+    {
+        <p class="text-muted mb-0">Партий пока нет.</p>
+    }
+    else
+    {
+        <table class="table hover">
+            <thead><tr><th>Дата</th><th>Цвет</th><th>Соперник</th><th>Итог</th><th>± рейтинг</th></tr></thead>
+            <tbody>
+                @foreach (var g in Profile.RecentGames)
+                {
+                    <tr>
+                        <td>@g.PlayedAt.LocalDateTime.ToString("dd.MM.yyyy")</td>
+                        <td>@(g.Color == PieceColor.White ? "Белые" : "Чёрные")</td>
+                        <td>@g.OpponentName</td>
+                        <td>@ResultBadge(g)</td>
+                        <td><span class="@(g.RatingChange >= 0 ? "delta-up" : "delta-down")">@(g.RatingChange > 0 ? "+" : "")@g.RatingChange</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
 
 @code {
     [Parameter, EditorRequired] public StudentProfileDto Profile { get; set; } = default!;
 
-    private static string ResultText(GameSummaryDto g)
+    private static RenderFragment ResultBadge(GameSummaryDto g) => builder =>
     {
         bool isWhite = g.Color == PieceColor.White;
-        return g.Result switch
+        var (text, cls) = g.Result switch
         {
-            GameResult.Draw => "Ничья",
-            GameResult.WhiteWins => isWhite ? "Победа" : "Поражение",
-            GameResult.BlackWins => isWhite ? "Поражение" : "Победа",
-            _ => "—"
+            GameResult.Draw => ("Ничья", "badge"),
+            GameResult.WhiteWins => isWhite ? ("Победа", "badge badge-success") : ("Поражение", "badge badge-danger"),
+            GameResult.BlackWins => isWhite ? ("Поражение", "badge badge-danger") : ("Победа", "badge badge-success"),
+            _ => ("—", "badge")
         };
-    }
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", cls);
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
 }
 
 <style>
-    .stats { display: flex; gap: 1.5rem; margin: 1rem 0; }
-    .stat { display: flex; flex-direction: column; }
-    .stat span { color: #666; font-size: .85rem; }
-    .stat strong { font-size: 1.5rem; }
+    .delta-up { color: var(--success); font-weight: 600; }
+    .delta-down { color: var(--danger); font-weight: 600; }
 </style>

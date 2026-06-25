@@ -255,25 +255,43 @@ static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
 static string LoginPage(string ret, string? error) => $$"""
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Вход — ChessSchool ID</title>
-<style>body{font-family:system-ui,sans-serif;background:#0f1419;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
-.card{background:#1b2430;padding:2rem;border-radius:12px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
-h1{font-size:1.3rem;margin:0 0 1rem}input{width:100%;padding:.6rem;margin:.3rem 0;border-radius:6px;border:1px solid #334;background:#0f1419;color:#eee;box-sizing:border-box}
-button{width:100%;padding:.6rem;margin-top:.5rem;border:0;border-radius:6px;background:#1b6ec2;color:#fff;font-weight:600;cursor:pointer}
-.err{color:#ff6b6b;font-size:.85rem}.muted{color:#8b98a5;font-size:.8rem;text-align:center;margin-top:1rem}</style></head>
-<body><div class="card"><h1>♟ ChessSchool ID</h1>
-{{(error is not null ? "<p class=\"err\">Неверные данные или email занят.</p>" : "")}}
+<style>
+:root{--ink:#0e1116;--ink2:#5b6470;--muted:#8b93a1;--line:#d6dae1;--accent:#2b6ef2;--accent-h:#1f5ad8;--bg:#f6f7f9;--surface:#fff}
+*{box-sizing:border-box}
+body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+.card{background:var(--surface);padding:2rem;border-radius:18px;width:340px;border:1px solid var(--line);box-shadow:0 12px 40px rgba(14,17,22,.10)}
+.brand{display:flex;align-items:center;gap:.55rem;font-weight:720;font-size:1.15rem;letter-spacing:-.02em;margin-bottom:.3rem}
+.brand .logo{width:30px;height:30px;display:grid;place-items:center;background:var(--ink);border-radius:8px}
+.sub{color:var(--muted);font-size:.85rem;margin:0 0 1.25rem}
+label{font-size:.8rem;color:var(--ink2);font-weight:600}
+input{width:100%;padding:.6rem .7rem;margin:.25rem 0 .7rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:.92rem}
+input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px #eaf1fe}
+button{width:100%;padding:.65rem;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:.95rem;cursor:pointer}
+button:hover{background:var(--accent-h)}
+.alt{margin-top:1.1rem;padding-top:1.1rem;border-top:1px solid var(--line)}
+.alt button{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.err{color:#e5484d;font-size:.85rem;background:#fdecec;padding:.5rem .7rem;border-radius:8px;margin:0 0 1rem}
+.muted{color:var(--muted);font-size:.78rem;text-align:center;margin:1.1rem 0 0}
+</style></head>
+<body><div class="card">
+<div class="brand"><span class="logo"><svg viewBox="0 0 45 45" width="18" height="18" fill="#fff"><path d="M18 10c1-1 3-2 5-2 7 0 12 6 12 16v14H13c0-6 3-9 7-12-2 1-5 2-7 1-2-1-2-3-1-5-2 1-4 1-5-1-1-3 1-5 4-7 .5-1 1-2 0-3 1-1 2-1 3 0z"/></svg></span> ChessSchool ID</div>
+<p class="sub">Единый аккаунт для ChessSchool и Arena</p>
+{{(error is not null ? "<p class=\"err\">Неверные данные или email уже занят.</p>" : "")}}
 <form method="post" action="/account/login">
 <input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
-<input name="email" type="email" placeholder="email" required>
-<input name="password" type="password" placeholder="пароль" required>
+<label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
+<label>Пароль</label><input name="password" type="password" placeholder="••••••••" required>
 <button type="submit">Войти</button></form>
+<div class="alt">
 <form method="post" action="/account/register">
 <input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
-<input name="name" placeholder="имя (для регистрации)">
-<input name="email" type="email" placeholder="email">
-<input name="password" type="password" placeholder="пароль (мин. 6)">
-<button type="submit" style="background:#2d7d46">Зарегистрироваться</button></form>
-<p class="muted">Единый аккаунт для ChessSchool и Arena</p></div></body></html>
+<label>Регистрация нового аккаунта</label>
+<input name="name" placeholder="Имя">
+<input name="email" type="email" placeholder="you@example.com">
+<input name="password" type="password" placeholder="Пароль (мин. 6)">
+<button type="submit">Создать аккаунт</button></form>
+</div>
+<p class="muted">Защищено OpenID Connect</p></div></body></html>
 """;
 
 record ByEmailRequest(string Email);

@@ -22,17 +22,12 @@
 
 **Связанные грабли:** см. CLAUDE.md (раздел «Грабли») и память проекта про тонкий клиент.
 
-### Вернуть тест безопасности JWKS (runtime-проверка)
-**Приоритет:** средний.
-
-Старый `JwksSecurityTests` проверял, что публичный JWKS не содержит приватных параметров RSA.
-Он был привязан к удалённому `SigningKeyProvider` (см. ниже) и удалён вместе с ним. Теперь JWKS
-отдаёт OpenIddict на `/.well-known/jwks` — корректность гарантирует библиотека, но регрессионного
-теста нет.
-
-**Что сделать:** добавить интеграционный тест против Auth `/.well-known/jwks` (поднять Auth через
-`WebApplicationFactory` + Testcontainers PostgreSQL или InMemory-override), убедиться, что в ответе
-есть `n`/`e` и нет `d,p,q,dp,dq,qi`. Требует контейнер-рантайма для полноценного прогона.
+### ✅ Возвращён тест безопасности JWKS (runtime-проверка)
+**Сделано.** Добавлен интеграционный тест `AuthIntegrationTests.Jwks_ExposesOnlyPublicKeyMaterial`
+(поднимает Auth через `WebApplicationFactory` + Testcontainers PostgreSQL, бьёт по `/.well-known/jwks`,
+проверяет наличие `n`/`e` и отсутствие `d,p,q,dp,dq,qi`). Там же
+`Authorize_WhenCookieUserMissing_RedirectsToLogin_NotServerError` — регрессия на graceful re-login.
+Требует Docker (образ `postgres:18.3`).
 
 ## Чистка кода
 

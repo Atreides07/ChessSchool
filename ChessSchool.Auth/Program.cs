@@ -61,11 +61,16 @@ builder.Services.AddOpenIddict()
         o.AddDevelopmentEncryptionCertificate().AddDevelopmentSigningCertificate();
         o.DisableAccessTokenEncryption();
 
-        o.UseAspNetCore()
+        var aspnet = o.UseAspNetCore()
          .EnableAuthorizationEndpointPassthrough()
          .EnableTokenEndpointPassthrough()
          .EnableUserInfoEndpointPassthrough()
          .EnableEndSessionEndpointPassthrough();
+
+        // В Development разрешаем HTTP (локальная разработка/интеграционные тесты без TLS).
+        // В проде требование HTTPS-транспорта остаётся (Aspire отдаёт https-эндпоинты).
+        if (builder.Environment.IsDevelopment())
+            aspnet.DisableTransportSecurityRequirement();
     })
     .AddValidation(o =>
     {

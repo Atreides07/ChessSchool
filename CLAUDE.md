@@ -13,6 +13,8 @@
 Docker). Онлайн-игра — **Microsoft Orleans** (грейн на партию) + **SignalR**. Авторизация — отдельный
 переиспользуемый **IdP на OpenIddict 7.5** (OIDC/JWT/JWKS), как Google Auth (явное требование заказчика).
 
+Известный технический долг и отложенные задачи — [docs/TODO.md](docs/TODO.md).
+
 ## Команды
 
 ```bash

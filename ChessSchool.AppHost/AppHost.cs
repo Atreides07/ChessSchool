@@ -6,9 +6,11 @@ const string internalKey = "dev-internal-key";
 // БД — PostgreSQL для всех окружений (dev и прод на одном провайдере, схема через EF-миграции).
 // Требует контейнер-рантайм (Docker/Podman): Aspire поднимает контейнер Postgres локально.
 // Данные переживают перезапуск (volume), чтобы не терять seeded-клиентов IdP и учеников.
+// Имена ресурсов БД отличны от имён проектов (resource-имена Aspire уникальны и case-insensitive:
+// "auth" уже занято проектом IdP). Имя ресурса = ключ connection string в сервисе.
 var postgres = builder.AddPostgres("postgres").WithDataVolume();
-var authDb = postgres.AddDatabase("auth");
-var schoolDb = postgres.AddDatabase("school");
+var authDb = postgres.AddDatabase("authdb");
+var schoolDb = postgres.AddDatabase("schooldb");
 
 // Отдельный сервис авторизации (IdP) — переиспользуемый, как Google Auth.
 var auth = builder.AddProject<Projects.ChessSchool_Auth>("auth")

@@ -4,8 +4,9 @@ namespace ChessSchool.Tests;
 
 public class WebTests
 {
-    // Холодный старт поднимает 4 сервиса + Orleans-силос, поэтому таймаут с запасом.
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(180);
+    // Холодный старт поднимает контейнер Postgres (при первом прогоне ещё и тянется образ ~479MB) +
+    // 4 сервиса + Orleans-силос. Таймаут с запасом на первую загрузку образа (с кэшем прогон ~30с).
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(300);
 
     [Fact]
     public async Task GetWebResourceRootReturnsOkStatusCode()

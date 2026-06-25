@@ -20,7 +20,7 @@ builder.AddServiceDefaults();
 // Хранилище OpenIddict — в том же контексте.
 builder.Services.AddDbContext<AuthDbContext>(o =>
 {
-    o.UseNpgsql(builder.Configuration.GetConnectionString("auth"));
+    o.UseNpgsql(builder.Configuration.GetConnectionString("authdb"));
     o.UseOpenIddict(); // регистрирует сущности OpenIddict в модели
 });
 

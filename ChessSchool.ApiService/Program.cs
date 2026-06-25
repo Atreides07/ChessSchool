@@ -13,7 +13,7 @@ builder.Services.AddOpenApi();
 
 // БД — PostgreSQL (connection string инжектит Aspire по ссылке на ресурс "school").
 builder.Services.AddDbContext<SchoolDbContext>(o =>
-    o.UseNpgsql(builder.Configuration.GetConnectionString("school")));
+    o.UseNpgsql(builder.Configuration.GetConnectionString("schooldb")));
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
 

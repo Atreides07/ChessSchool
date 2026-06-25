@@ -1,196 +1,224 @@
 @page "/play"
-@rendermode InteractiveServer
-@using Microsoft.AspNetCore.SignalR.Client
-@using Microsoft.AspNetCore.Components.Authorization
-@using ChessSchool.WebAuth
 @inject IConfiguration Config
-@inject AuthenticationStateProvider AuthState
-@inject ChessSchool.Web.Clients.GameTokenProvider GameTokens
-@implements IAsyncDisposable
+
+@* Онлайн-партия на «тонком» клиенте: статический SSR-каркас без .NET в браузере и без
+   серверной Blazor-цепи. Правила и оптимистичный ход — chess.js локально, синхронизация —
+   браузерный SignalR прямо к игровому хабу. Это снимает нагрузку «состояние на каждого игрока»
+   с веб-сервера (масштаб) и переживает плохую сеть (reconnect → ресинк). *@
 
 <PageTitle>Играть онлайн</PageTitle>
+
+@{
+    var authed = HttpContext?.User?.Identity?.IsAuthenticated == true;
+    var hub = Config["services:gameserver:https:0"] ?? Config["services:gameserver:http:0"] ?? "";
+}
+
 <h1>Онлайн-партия</h1>
 
-@if (!_authenticated)
+@if (!authed)
 {
     <div class="card ds-narrow">
         <p class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы играть.</p>
         <a class="btn btn-primary" href="/signin?returnUrl=/play">Войти через ChessSchool ID</a>
     </div>
 }
-else if (_state is null)
-{
-    <div class="card ds-narrow">
-        <p class="text-secondary">Вы вошли как <strong>@_name</strong>.</p>
-        @if (_searching)
-        {
-            <p class="text-muted"><em>Ищем соперника…</em></p>
-        }
-        else
-        {
-            <button class="btn btn-primary" @onclick="FindMatch">Найти соперника (блиц 5+2)</button>
-        }
-        @if (_error is not null) { <div class="alert alert-danger mt-2">@_error</div> }
-    </div>
-}
 else
 {
     <div class="card game">
-        <div class="players">
-            <span>@_state.BlackPlayerName <span class="clock @(ActiveBlack ? "active" : "")">@Clock(EffectiveMs(false))</span></span>
-            <span>@_state.WhitePlayerName <span class="clock @(ActiveWhite ? "active" : "")">@Clock(EffectiveMs(true))</span></span>
+        <div id="status" class="status text-secondary">Подключение к игровому серверу…</div>
+        <div id="players" class="players"></div>
+        <div class="board-wrap">
+            <div id="board" class="board"></div>
+            <div id="promo" class="promo" hidden></div>
         </div>
-
-        <Chessboard Fen="@_state.Fen" FlipForBlack="_color == PieceColor.Black"
-                    LastFrom="@_state.LastFrom" LastTo="@_state.LastTo" CheckSquare="@_state.CheckSquare"
-                    Disabled="!MyTurn" OnMove="DoMove" />
-
-        <div class="status">
-            @if (_state.Status == GameStatus.Finished)
-            {
-                <strong>Партия завершена: @ResultText()</strong>
-            }
-            else
-            {
-                <span class="text-secondary">@(MyTurn ? "Ваш ход" : "Ход соперника")</span>
-                <span class="ds-spacer"></span>
-                <button class="btn btn-sm btn-outline-danger" @onclick="Resign">Сдаться</button>
-            }
+        <div class="controls">
+            <button id="find" class="btn btn-primary">Найти соперника (блиц 5+2)</button>
+            <button id="resign" class="btn btn-sm btn-outline-danger" hidden>Сдаться</button>
         </div>
-        @if (_error is not null) { <div class="alert alert-warning mt-2">@_error</div> }
     </div>
+
+    <script type="module">
+        const HUB = @((MarkupString)System.Text.Json.JsonSerializer.Serialize(hub));
+        // Свежий токен берём с серверного эндпоинта (обновляется по refresh) — не вшиваем в страницу.
+        const getToken = async () => {
+            const r = await fetch('/api/game-token', { credentials: 'include' });
+            return r.ok ? (await r.json()).access_token : '';
+        };
+
+        const { Chess } = await import('https://esm.sh/chess.js@1');
+        const signalR = await import('https://esm.sh/@@microsoft/signalr@8');
+
+        // Фигуры — тот же набор Cburnett, что и на серверной доске (статика из дизайн-системы).
+        const PIECE_SRC = (p) => `_content/ChessSchool.Design/pieces/${p.color}${p.type.toUpperCase()}.svg`;
+        const pieceImg = (p) => `<img class="cp" draggable="false" alt="" src="${PIECE_SRC(p)}">`;
+
+        const boardEl = document.getElementById('board');
+        const statusEl = document.getElementById('status');
+        const playersEl = document.getElementById('players');
+        const promoEl = document.getElementById('promo');
+        const findBtn = document.getElementById('find');
+        const resignBtn = document.getElementById('resign');
+
+        const chess = new Chess();
+        let gameId = null, myColor = 'w', flip = false, sel = null, finished = false;
+        let lastState = null, stateAt = 0, pendingPromo = null;
+        const cells = {}, coordHtml = {};
+
+        const files = ['a','b','c','d','e','f','g','h'];
+        function buildBoard() {
+            boardEl.innerHTML = '';
+            const ranks = flip ? [1,2,3,4,5,6,7,8] : [8,7,6,5,4,3,2,1];
+            const cols = flip ? [...files].reverse() : files;
+            for (const r of ranks) for (const f of cols) {
+                const sq = f + r;
+                const dark = (files.indexOf(f) + r) % 2 === 0;
+                const el = document.createElement('div');
+                el.className = 'sq ' + (dark ? 'dark' : 'light');
+                el.dataset.sq = sq;
+                el.onclick = () => onClick(sq);
+                // Координаты: ранги по левому столбцу, файлы по нижней горизонтали (как на серверной доске).
+                let cd = '';
+                const tone = dark ? 'on-dark' : 'on-light';
+                if (f === cols[0]) cd += `<span class="coord rank ${tone}">${r}</span>`;
+                if (r === ranks[ranks.length - 1]) cd += `<span class="coord file ${tone}">${f}</span>`;
+                coordHtml[sq] = cd;
+                boardEl.appendChild(el);
+                cells[sq] = el;
+            }
+        }
+
+        function render(state) {
+            if (state && state.fen) chess.load(state.fen);
+            if (state) { lastState = state; stateAt = Date.now(); finished = state.status === 2; }
+            for (const f of files) for (let r = 1; r <= 8; r++) {
+                const sq = f + r, el = cells[sq];
+                const p = chess.get(sq);
+                el.innerHTML = coordHtml[sq] + (p ? pieceImg(p) : '');
+                el.classList.remove('hl', 'chk', 'sel');
+            }
+            if (lastState) {
+                if (lastState.lastFrom && cells[lastState.lastFrom]) cells[lastState.lastFrom].classList.add('hl');
+                if (lastState.lastTo && cells[lastState.lastTo]) cells[lastState.lastTo].classList.add('hl');
+                if (lastState.checkSquare && cells[lastState.checkSquare]) cells[lastState.checkSquare].classList.add('chk');
+                statusEl.textContent = finished ? ('Партия завершена — ' + result(lastState.result))
+                    : (chess.turn() === myColor ? 'Ваш ход' : 'Ход соперника');
+                resignBtn.hidden = finished;
+            }
+            renderClocks();
+        }
+
+        // Часы тикают локально между серверными апдейтами — плавный отсчёт без round-trip на каждый тик.
+        function renderClocks() {
+            if (!lastState) return;
+            const ticking = lastState.status === 1;
+            const elapsed = Date.now() - stateAt;
+            const wActive = ticking && chess.turn() === 'w';
+            const bActive = ticking && chess.turn() === 'b';
+            const wms = lastState.whiteMs - (wActive ? elapsed : 0);
+            const bms = lastState.blackMs - (bActive ? elapsed : 0);
+            playersEl.innerHTML =
+                `<span>${esc(lastState.blackPlayerName)} <span class="clock ${bActive ? 'active' : ''}">${fmt(bms)}</span></span>` +
+                `<span>${esc(lastState.whitePlayerName)} <span class="clock ${wActive ? 'active' : ''}">${fmt(wms)}</span></span>`;
+        }
+
+        function onClick(sq) {
+            if (finished || !gameId || pendingPromo || chess.turn() !== myColor) return;
+            const p = chess.get(sq);
+            if (sel === null) { if (p && p.color === myColor) { sel = sq; cells[sq].classList.add('sel'); } return; }
+            const from = sel; cells[from]?.classList.remove('sel'); sel = null;
+            if (from === sq) return;
+            // Превращение пешки: показываем выбор фигуры (ферзь/ладья/слон/конь), ход шлём после выбора.
+            const mover = chess.get(from);
+            const isPromo = mover && mover.type === 'p' && (sq[1] === '8' || sq[1] === '1');
+            if (isPromo) { askPromotion(from, sq); return; }
+            commitMove(from, sq, null);
+        }
+
+        function commitMove(from, to, promotion) {
+            let mv;
+            try { mv = chess.move({ from, to, promotion: promotion || undefined }); } catch { mv = null; }
+            if (!mv) { return; }
+            render(null); // мгновенно показываем свой ход (без round-trip)
+            conn.invoke('Move', gameId, from, to, mv.promotion || null)
+                .then(r => { if (r && !r.accepted && r.state) render(r.state); }) // сервер отверг → ресинк
+                .catch(() => {});
+        }
+
+        function askPromotion(from, to) {
+            pendingPromo = { from, to };
+            const color = chess.get(from).color;
+            promoEl.innerHTML = ['q','r','b','n']
+                .map(t => `<button class="promo-btn" data-p="${t}">${pieceImg({ color, type: t })}</button>`).join('');
+            promoEl.querySelectorAll('button').forEach(b => b.onclick = () => {
+                const t = b.dataset.p, mv = pendingPromo; pendingPromo = null; promoEl.hidden = true;
+                commitMove(mv.from, mv.to, t);
+            });
+            promoEl.hidden = false;
+        }
+
+        const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        const fmt = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+        const result = (r) => r === 1 ? 'победили белые' : r === 2 ? 'победили чёрные' : r === 3 ? 'ничья' : '—';
+
+        const conn = new signalR.HubConnectionBuilder()
+            .withUrl(HUB + '/gamehub', { accessTokenFactory: getToken })
+            .withAutomaticReconnect()
+            .build();
+
+        conn.on('GameState', s => render(s));
+        conn.onreconnecting(() => statusEl.textContent = 'Переподключение…');
+        conn.onreconnected(async () => { // плохая сеть: после reconnect ресинхронизируемся с сервером
+            if (gameId) { const s = await conn.invoke('JoinGame', gameId); if (s) render(s); }
+        });
+
+        buildBoard();
+        setInterval(renderClocks, 250);
+        await conn.start();
+        statusEl.textContent = 'Подключено. Нажмите «Найти соперника».';
+
+        findBtn.onclick = async () => {
+            findBtn.disabled = true; statusEl.textContent = 'Ищем соперника…';
+            try {
+                const f = await conn.invoke('FindMatch', 300, 2);
+                gameId = f.gameId; myColor = f.color === 0 ? 'w' : 'b'; flip = myColor === 'b';
+                buildBoard();
+                render(await conn.invoke('JoinGame', gameId));
+            } catch { statusEl.textContent = 'Соперник не найден. Попробуйте ещё раз.'; findBtn.disabled = false; }
+        };
+        resignBtn.onclick = () => { if (gameId) conn.invoke('Resign', gameId).then(s => s && render(s)); };
+    </script>
 }
 
 @code {
-    private bool _authenticated;
-    private string _name = "Игрок";
-    private string? _error;
-    private bool _searching;
-
-    private HubConnection? _conn;
-    private GameStateDto? _state;
-    private DateTimeOffset _stateAt;
-    private string? _gameId;
-    private PieceColor? _color;
-    private PeriodicTimer? _ticker;
-
-    private bool MyTurn => _state is { Status: GameStatus.InProgress } && _state.Turn == _color;
-    private bool ActiveWhite => _state is { Status: GameStatus.InProgress, Turn: PieceColor.White };
-    private bool ActiveBlack => _state is { Status: GameStatus.InProgress, Turn: PieceColor.Black };
-
-    protected override async Task OnInitializedAsync()
-    {
-        var user = (await AuthState.GetAuthenticationStateAsync()).User;
-        if (user.Identity?.IsAuthenticated == true)
-        {
-            _authenticated = true;
-            _name = user.Identity.Name ?? "Игрок";
-            try { await Connect(); }
-            catch { _error = "Не удалось подключиться к игровому серверу. Обновите страницу."; }
-        }
-    }
-
-    private void SetState(GameStateDto? s)
-    {
-        _state = s;
-        _stateAt = DateTimeOffset.UtcNow;
-    }
-
-    private long EffectiveMs(bool white)
-    {
-        if (_state is null) return 0;
-        long baseMs = white ? _state.WhiteMs : _state.BlackMs;
-        bool active = _state.Status == GameStatus.InProgress &&
-                      ((white && _state.Turn == PieceColor.White) || (!white && _state.Turn == PieceColor.Black));
-        if (!active) return baseMs;
-        return baseMs - (long)(DateTimeOffset.UtcNow - _stateAt).TotalMilliseconds;
-    }
-
-    private async Task Connect()
-    {
-        var baseUrl = Config["services:gameserver:https:0"] ?? Config["services:gameserver:http:0"];
-        _conn = new HubConnectionBuilder()
-            .WithUrl($"{baseUrl}/gamehub", opts => opts.AccessTokenProvider = async () => await GameTokens.GetTokenAsync() ?? "")
-            .WithAutomaticReconnect()
-            .Build();
-
-        _conn.On<GameStateDto>("GameState", s =>
-        {
-            SetState(s);
-            return InvokeAsync(StateHasChanged);
-        });
-
-        await _conn.StartAsync();
-        _ = RunClockAsync();
-    }
-
-    private async Task RunClockAsync()
-    {
-        _ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
-        while (await _ticker.WaitForNextTickAsync())
-        {
-            if (_state is { Status: GameStatus.InProgress })
-                await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private async Task FindMatch()
-    {
-        if (_conn is null) return;
-        _searching = true; _error = null;
-        try
-        {
-            var found = await _conn.InvokeAsync<MatchFound>("FindMatch", 300, 2);
-            _gameId = found.GameId;
-            _color = found.Color;
-            SetState(await _conn.InvokeAsync<GameStateDto?>("JoinGame", _gameId));
-        }
-        catch (Exception)
-        {
-            _error = "Соперник не найден за отведённое время. Попробуйте ещё раз.";
-        }
-        finally { _searching = false; }
-    }
-
-    private async Task DoMove((string From, string To, string? Promotion) m)
-    {
-        if (_conn is null || _gameId is null) return;
-        var result = await _conn.InvokeAsync<MoveResult>("Move", _gameId, m.From, m.To, m.Promotion);
-        if (!result.Accepted) _error = result.Error;
-        else { _error = null; if (result.State is not null) SetState(result.State); }
-    }
-
-    private async Task Resign()
-    {
-        if (_conn is not null && _gameId is not null)
-            SetState(await _conn.InvokeAsync<GameStateDto>("Resign", _gameId));
-    }
-
-    private string ResultText() => _state!.Result switch
-    {
-        GameResult.WhiteWins => "победили белые",
-        GameResult.BlackWins => "победили чёрные",
-        GameResult.Draw => "ничья",
-        _ => "—"
-    };
-
-    private static string Clock(long ms)
-    {
-        var t = TimeSpan.FromMilliseconds(Math.Max(0, ms));
-        return $"{t.Minutes:D2}:{t.Seconds:D2}";
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        _ticker?.Dispose();
-        if (_conn is not null) await _conn.DisposeAsync();
-    }
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
 }
 
 <style>
     .game { width: max-content; max-width: 100%; }
+    .status { margin-bottom: .6rem; }
     .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
-    .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); font-weight: 600; margin-left: .4rem; }
-    .clock.active { background: var(--accent); color: #fff; }
-    .status { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
+    .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm, 6px); background: var(--surface-2, #eef0f3); font-weight: 600; margin-left: .4rem; }
+    .clock.active { background: var(--accent, #2b6ef2); color: #fff; }
+
+    .board-wrap { position: relative; width: min(92vw, 480px); }
+    .board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.12)); }
+    .sq { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .sq.light { background: #ecd6b3; }
+    .sq.dark { background: #b58863; }
+    .sq.hl.light { background: #cdd279; }
+    .sq.hl.dark { background: #aaa23a; }
+    .sq.chk { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
+    .sq.sel { outline: 3px solid var(--accent, #2b6ef2); outline-offset: -3px; }
+    .coord { position: absolute; font-size: clamp(8px, 2.2vw, 11px); font-weight: 700; line-height: 1; user-select: none; pointer-events: none; }
+    .coord.rank { top: 3px; left: 4px; }
+    .coord.file { bottom: 2px; right: 4px; }
+    .coord.on-light { color: #b58863; }
+    .coord.on-dark { color: #ecd6b3; }
+    .cp { width: 90%; height: 90%; display: block; }
+
+    .promo { position: absolute; top: 35%; left: 50%; transform: translateX(-50%); display: flex; gap: .25rem; background: #fff; border: 1px solid var(--border, #d5d9e0); border-radius: 8px; padding: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    .promo-btn { width: 48px; height: 48px; padding: 4px; border: 1px solid var(--border, #d5d9e0); background: var(--surface-2, #f4f5f7); border-radius: 6px; cursor: pointer; }
+    .promo-btn .cp { width: 100%; height: 100%; }
+
+    .controls { display: flex; gap: .6rem; align-items: center; margin-top: .85rem; }
 </style>

@@ -28,11 +28,14 @@
 
     @if (_promotionFrom is not null)
     {
+        var (pr, pc) = Index(_promotionFrom);
+        var white = char.IsUpper(_grid[pr, pc]);
         <div class="promo">
             <span>Превратить в:</span>
-            @foreach (var p in new[] { ("q", '♛'), ("r", '♜'), ("b", '♝'), ("n", '♞') })
+            @foreach (var (code, glyph) in new[] { ("q", 'Q'), ("r", 'R'), ("b", 'B'), ("n", 'N') })
             {
-                <button class="promo-btn" @onclick="() => ChoosePromotion(p.Item1)">@p.Item2</button>
+                var ch = white ? glyph : char.ToLowerInvariant(glyph);
+                <button class="promo-btn" @onclick="() => ChoosePromotion(code)">@((MarkupString)ChessPieces.Svg(ch))</button>
             }
         </div>
     }
@@ -123,8 +126,8 @@
 }
 
 <style>
-    .board-wrap { position: relative; width: 448px; }
-    .board { display: grid; grid-template-columns: repeat(8, 56px); grid-template-rows: repeat(8, 56px); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.12)); }
+    .board-wrap { position: relative; width: min(92vw, 448px); }
+    .board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.12)); }
     .board.disabled { opacity: .75; }
     .sq { position: relative; border: none; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
     .sq.light { background: #ecd6b3; }
@@ -132,7 +135,7 @@
     .sq.lastmove.light { background: #cdd279; }
     .sq.lastmove.dark { background: #aaa23a; }
     .sq.check { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
-    .coord { position: absolute; font-size: 11px; font-weight: 700; line-height: 1; user-select: none; pointer-events: none; }
+    .coord { position: absolute; font-size: clamp(8px, 2.2vw, 11px); font-weight: 700; line-height: 1; user-select: none; pointer-events: none; }
     .coord.rank { top: 3px; left: 4px; }
     .coord.file { bottom: 2px; right: 4px; }
     .coord.on-light { color: #b58863; }
@@ -141,5 +144,6 @@
     .cp { width: 90%; height: 90%; display: block; }
     .sq.sel { outline: 3px solid #2b6ef2; outline-offset: -3px; }
     .promo { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid #333; border-radius: 8px; padding: .5rem; display: flex; gap: .25rem; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
-    .promo-btn { font-size: 28px; border: 1px solid #ccc; background: #f8f8f8; border-radius: 6px; cursor: pointer; }
+    .promo-btn { width: 48px; height: 48px; padding: 4px; border: 1px solid #ccc; background: #f8f8f8; border-radius: 6px; cursor: pointer; }
+    .promo-btn .cp { width: 100%; height: 100%; }
 </style>

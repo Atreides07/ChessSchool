@@ -30,6 +30,30 @@ public class ChessboardRenderTests : BunitContext
     }
 
     [Fact]
+    public void PromotionPickerShowsCburnettPiecesOfMovingColor()
+    {
+        // Белая пешка на e7, поле e8 пустое — клик e7→e8 должен открыть выбор фигуры превращения.
+        const string promoFen = "4k3/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        var cut = Render<ChessSchool.Arena.Components.Chessboard>(p => p.Add(c => c.Fen, promoFen));
+
+        // Перевыбираем клетки перед каждым кликом: после выбора пешки доска перерисовывается
+        // и прежняя коллекция кнопок становится недействительной.
+        cut.FindAll("button.sq")[12].Click(); // e7 (row 1, col 4) — выбираем пешку
+        cut.FindAll("button.sq")[4].Click();  // e8 (row 0, col 4) — целевое поле превращения
+
+        var picker = cut.FindAll(".promo-btn");
+        Assert.Equal(4, picker.Count); // ферзь/ладья/слон/конь — есть недопревращение, не только ферзь
+
+        var html = cut.Markup;
+        // Картинки Cburnett именно белого цвета (ходит белая пешка), а не юникод-глифы.
+        Assert.Contains("/pieces/wQ.svg", html);
+        Assert.Contains("/pieces/wR.svg", html);
+        Assert.Contains("/pieces/wB.svg", html);
+        Assert.Contains("/pieces/wN.svg", html);
+        Assert.DoesNotContain("♛", html);
+    }
+
+    [Fact]
     public void HighlightsLastMoveAndCheck()
     {
         var cut = Render<ChessSchool.Arena.Components.Chessboard>(p => p

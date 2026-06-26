@@ -501,4 +501,18 @@ else
         .pod.gold, .pod.silver, .pod.bronze { order: 0; }
         .st-chips { padding-left: 0; }
     }
+
+    @@media (max-width: 560px) {
+        /* Шапка в столбик: превью-баннер на всю ширину, затем мета/заголовок и действия. */
+        .t-hero { gap: .9rem; }
+        .t-thumb { width: 100%; aspect-ratio: 16 / 7; }
+        .t-title { font-size: 1.3rem; }
+        .t-hero-side { align-items: stretch; }
+        .t-hero-side .btn-join { width: 100%; }
+        .t-parts { justify-content: center; }
+        .boards-grid { grid-template-columns: 1fr; }
+        .sec-head { flex-wrap: wrap; gap: .3rem; }
+        .crumbs { font-size: .85rem; }
+        .results { gap: 1rem; }
+    }
 </style>

@@ -260,8 +260,8 @@ static string LoginPage(string ret, string? error, bool register) => $$"""
 <style>
 :root{--ink:#0e1116;--ink2:#5b6470;--muted:#8b93a1;--line:#d6dae1;--accent:#2b6ef2;--accent-h:#1f5ad8;--bg:#f6f7f9;--surface:#fff}
 *{box-sizing:border-box}
-body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
-.card{background:var(--surface);padding:2rem;border-radius:18px;width:340px;border:1px solid var(--line);box-shadow:0 12px 40px rgba(14,17,22,.10)}
+body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;justify-content:center;align-items:center;min-height:100dvh;margin:0;padding:16px}
+.card{background:var(--surface);padding:2rem;border-radius:18px;width:340px;max-width:100%;border:1px solid var(--line);box-shadow:0 12px 40px rgba(14,17,22,.10)}
 .brand{display:flex;align-items:center;gap:.55rem;font-weight:720;font-size:1.15rem;letter-spacing:-.02em;margin-bottom:.3rem}
 .brand .logo{width:30px;height:30px;display:grid;place-items:center;background:var(--ink);border-radius:8px}
 .sub{color:var(--muted);font-size:.85rem;margin:0 0 1.25rem}

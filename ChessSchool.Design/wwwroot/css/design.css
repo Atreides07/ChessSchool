@@ -211,3 +211,42 @@ label { font-size: .86rem; color: var(--ink-2); font-weight: 560; }
 /* ----------------------- Section header ----------------------- */
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 2rem 0 1rem; }
 .section-head:first-child { margin-top: 0; }
+
+/* ----------------------- Адаптив (mobile) ----------------------- */
+/* Обёртка для широкого контента (таблицы, доски) — горизонтальный скролл вместо переполнения. */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap > .table { min-width: 480px; }
+
+img, svg, video { max-width: 100%; }
+
+@media (max-width: 860px) {
+    .ds-container { padding: 24px 18px 56px; }
+    /* Топбар: бренд + действия в строке, навигация уходит на свою прокручиваемую строку. */
+    .ds-topbar { height: auto; min-height: 56px; padding: 8px 16px; flex-wrap: wrap; gap: .4rem .9rem; }
+    .ds-nav { order: 99; width: 100%; gap: .15rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+    .ds-nav::-webkit-scrollbar { display: none; }
+    .ds-navlink { white-space: nowrap; }
+}
+
+@media (max-width: 640px) {
+    h1 { font-size: 1.7rem; }
+    h2 { font-size: 1.22rem; }
+    .ds-container { padding: 18px 14px 48px; }
+    .card { padding: 16px; }
+    .card-pad-lg { padding: 18px; }
+
+    .hero { padding: 28px 0 20px; }
+    .hero h1 { font-size: 2rem; }
+    .hero .lead { font-size: 1.02rem; }
+
+    .stats { gap: 1.1rem 1.6rem; }
+    .stat .stat-value { font-size: 1.35rem; }
+
+    .section-head { flex-direction: column; align-items: flex-start; gap: .25rem; }
+
+    /* Кнопки удобнее тапать; в стопках растягиваем на ширину. */
+    .btn { padding: .6rem 1.05rem; }
+
+    /* Широкие таблицы прокручиваются по горизонтали, а не ломают страницу. */
+    .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+}

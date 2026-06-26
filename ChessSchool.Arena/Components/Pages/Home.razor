@@ -357,8 +357,8 @@ else
     .tlb-sub { display: flex; justify-content: space-between; gap: 6px; font-size: .76rem; opacity: .78; white-space: nowrap; }
     .tlb-pop { font-variant-numeric: tabular-nums; }
     .tlb .live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
-    /* Турниры, где участвует пользователь — акцентная рамка и убираем «гашение» прошедших */
-    .tlb.tlb-mine { box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); border-color: var(--accent); opacity: 1; filter: none; }
+    /* Турниры, где участвует пользователь — насыщенный акцентный фон, рамка, без «гашения» прошедших */
+    .tlb.tlb-mine { background: #d6e4ff; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); color: var(--accent-hover); opacity: 1; filter: none; }
     .tlb.tlb-mine:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow-md); }
     .mine-badge { color: var(--accent); font-size: .8rem; line-height: 1; }
 
@@ -375,10 +375,10 @@ else
     .lcard.rapid { border-left-color: #a9cf9a; }
     .lcard.lcard-past { opacity: .6; }
     .lcard.lcard-past:hover { opacity: 1; }
-    /* Участие пользователя — акцентная рамка слева и кольцо, без «гашения» */
-    .lcard.lcard-mine { border-left-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak, #dbe7ff), var(--shadow-sm); opacity: 1; }
+    /* Участие пользователя — лёгкий акцентный фон (как в дизайне), рамка слева, без «гашения» */
+    .lcard.lcard-mine { background: var(--accent-weak); border-left-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); opacity: 1; }
     .badge-mine { background: var(--accent); color: #fff; }
-    .up-item.up-mine { border-left-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak, #dbe7ff), var(--shadow-sm); }
+    .up-item.up-mine { background: var(--accent-weak); border-left-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); }
     .lcard-head { display: flex; align-items: center; gap: .5rem; }
     .lcard-title { font-weight: 660; font-size: 1.05rem; flex: 1; min-width: 0; }
     .lcard-meta { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem; color: var(--muted); font-size: .88rem; }

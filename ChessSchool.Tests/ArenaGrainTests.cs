@@ -79,6 +79,36 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task SoloHuman_WaitsForOpponent_ThenGetsBotAfterGrace()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("wait-arena");
+            await t.ConfigureAsync("Ожидание", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+            await t.JoinAsync("solo", "Один");
+
+            // Сразу после входа соперника-бота ещё нет — даём время найти человека.
+            var immediate = await t.GetStateAsync("solo");
+            Assert.True(immediate.Joined);
+            Assert.Null(immediate.MyGame);
+
+            // Спустя время ожидания (10с) к человеку подключается бот и начинается партия.
+            await Task.Delay(TimeSpan.FromSeconds(11));
+            var after = await t.GetStateAsync("solo");
+
+            Assert.NotNull(after.MyGame);
+            var opponent = after.MyGame!.MyColor == PieceColor.White ? after.MyGame.BlackName : after.MyGame.WhiteName;
+            Assert.Contains("🤖", opponent); // соперник — бот
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
+
+    [Fact]
     public async Task CreatedArena_AllowsRegistration_WithoutBots()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

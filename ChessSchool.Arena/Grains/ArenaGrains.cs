@@ -113,6 +113,8 @@ public sealed class ArenaTournamentGrain(
     // Минимум участников в идущем турнире — добираем ботами; при достатке людей боты убираются.
     private const int MinParticipants = 6;
     private const int BotSkill = 5; // уровень Stockfish (0..20)
+    // Сколько секунд человек ждёт соперника-человека, прежде чем к нему подключат бота.
+    private const int WaitForBotSeconds = 10;
     private int _botCounter;
 
     private static readonly string[] BotNames =
@@ -522,11 +524,8 @@ public sealed class ArenaTournamentGrain(
 
         while (bots < targetBots)
         {
-            _botCounter++;
-            var key = $"bot-{Id}-{_botCounter}";
-            _players[key] = new Player { Name = BotName(_botCounter), IsBot = true, WaitingSince = DateTimeOffset.UtcNow };
+            SpawnBot();
             bots++;
-            _dirty = true;
         }
 
         if (bots > targetBots)
@@ -622,33 +621,62 @@ public sealed class ArenaTournamentGrain(
 
     private void PairIdlePlayers()
     {
-        var idle = _players.Where(kv => !kv.Value.Playing)
-            .OrderByDescending(kv => kv.Value.Score)
+        var now = DateTimeOffset.UtcNow;
+
+        var idleHumans = _players.Where(kv => !kv.Value.IsBot && !kv.Value.Playing)
+            .OrderByDescending(kv => kv.Value.Score).Select(kv => kv.Key).ToList();
+        var idleBots = _players.Where(kv => kv.Value.IsBot && !kv.Value.Playing)
             .Select(kv => kv.Key).ToList();
 
-        for (int i = 0; i + 1 < idle.Count; i += 2)
+        // 1) Человек с человеком — мгновенно (приоритет живым соперникам).
+        int hi = 0;
+        while (hi + 1 < idleHumans.Count) { CreateGame(idleHumans[hi], idleHumans[hi + 1]); hi += 2; }
+
+        // 2) Оставшийся человек ждёт соперника-человека; если за WaitForBotSeconds не нашёлся —
+        //    подключаем бота (берём свободного либо создаём нового) и сразу спариваем.
+        int bi = 0;
+        for (; hi < idleHumans.Count; hi++)
         {
-            string a = idle[i], b = idle[i + 1];
-            bool aWhite = _gameCounter % 2 == 0;
-            var gid = $"{Id}-g{_gameCounter++}";
-            var game = new Game
-            {
-                Id = gid,
-                WhiteSub = aWhite ? a : b,
-                WhiteName = _players[aWhite ? a : b].Name,
-                BlackSub = aWhite ? b : a,
-                BlackName = _players[aWhite ? b : a].Name,
-                WhiteMs = _tc.InitialSeconds * 1000L,
-                BlackMs = _tc.InitialSeconds * 1000L,
-                LastMoveAt = DateTimeOffset.UtcNow
-            };
-            _games[gid] = game;
-            foreach (var s in new[] { a, b })
-            {
-                _players[s].Playing = true;
-                _players[s].GameId = gid;
-                _players[s].WaitingSince = null;
-            }
+            var human = _players[idleHumans[hi]];
+            if (human.WaitingSince is not { } since || (now - since).TotalSeconds < WaitForBotSeconds)
+                continue; // ещё ищем — оставляем «Ищем соперника…»
+            var bot = bi < idleBots.Count ? idleBots[bi++] : SpawnBot();
+            CreateGame(idleHumans[hi], bot);
+        }
+
+        // 3) Свободные боты играют между собой (живость арены), не занимая место будущего соперника.
+        for (; bi + 1 < idleBots.Count; bi += 2) CreateGame(idleBots[bi], idleBots[bi + 1]);
+    }
+
+    private string SpawnBot()
+    {
+        _botCounter++;
+        var key = $"bot-{Id}-{_botCounter}";
+        _players[key] = new Player { Name = BotName(_botCounter), IsBot = true, WaitingSince = DateTimeOffset.UtcNow };
+        _dirty = true;
+        return key;
+    }
+
+    private void CreateGame(string a, string b)
+    {
+        bool aWhite = _gameCounter % 2 == 0;
+        var gid = $"{Id}-g{_gameCounter++}";
+        _games[gid] = new Game
+        {
+            Id = gid,
+            WhiteSub = aWhite ? a : b,
+            WhiteName = _players[aWhite ? a : b].Name,
+            BlackSub = aWhite ? b : a,
+            BlackName = _players[aWhite ? b : a].Name,
+            WhiteMs = _tc.InitialSeconds * 1000L,
+            BlackMs = _tc.InitialSeconds * 1000L,
+            LastMoveAt = DateTimeOffset.UtcNow
+        };
+        foreach (var s in new[] { a, b })
+        {
+            _players[s].Playing = true;
+            _players[s].GameId = gid;
+            _players[s].WaitingSince = null;
         }
     }
 

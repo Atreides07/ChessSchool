@@ -16,3 +16,6 @@ obj/
 ## IDE
 .vs/
 .idea/
+
+# Нагрузочный тест: добытые access-токены (секреты)
+tools/loadtest/tokens.json

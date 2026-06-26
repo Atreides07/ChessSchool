@@ -95,13 +95,18 @@ var app = builder.Build();
 // Секрет server-to-server вызовов — резолвим на старте (вне Development падаем, если не задан).
 var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
 
+// Применение схемы. В проде миграции выкатываются ОТДЕЛЬНЫМ шагом (тот же образ с аргументом `migrate`
+// как k8s Job), а боевые реплики стартуют без авто-миграции (нет гонки нескольких реплик за первую
+// миграцию). Флаг Database:MigrateAtStartup (по умолчанию = Development) и режим `migrate` это включают.
+var migrateRequested = args.Contains("migrate");
+var migrateAtStartup = builder.Configuration.GetValue("Database:MigrateAtStartup", builder.Environment.IsDevelopment());
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-    // Postgres — через миграции (схема версионируется, переживает апдейты); иной провайдер — EnsureCreated.
-    if (db.Database.IsNpgsql()) db.Database.Migrate();
-    else db.Database.EnsureCreated();
+    if (!db.Database.IsNpgsql()) db.Database.EnsureCreated();          // InMemory (тесты)
+    else if (migrateRequested || migrateAtStartup) db.Database.Migrate();
 }
+if (migrateRequested) return; // режим миграции: схему применили — выходим (job завершён)
 
 app.UseAuthentication();
 app.UseAuthorization();

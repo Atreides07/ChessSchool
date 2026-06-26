@@ -31,14 +31,19 @@ var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environmen
 
 var app = builder.Build();
 
+// Применение схемы. В проде миграции — ОТДЕЛЬНЫМ шагом (тот же образ с аргументом `migrate` как k8s Job),
+// боевые реплики стартуют без авто-миграции (нет гонки реплик). Флаг Database:MigrateAtStartup
+// (по умолчанию = Development) и режим `migrate` это включают.
+var migrateRequested = args.Contains("migrate");
+var migrateAtStartup = builder.Configuration.GetValue("Database:MigrateAtStartup", builder.Environment.IsDevelopment());
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
-    // Postgres — через миграции (схема версионируется); иной провайдер (InMemory в тестах) — EnsureCreated.
-    if (db.Database.IsNpgsql()) db.Database.Migrate();
-    else db.Database.EnsureCreated();
-    SeedData.Ensure(db);
+    if (!db.Database.IsNpgsql()) db.Database.EnsureCreated();          // InMemory (тесты)
+    else if (migrateRequested || migrateAtStartup) db.Database.Migrate();
+    if (!migrateRequested) SeedData.Ensure(db); // в чистом режиме миграции сид не трогаем
 }
+if (migrateRequested) return; // режим миграции: схему применили — выходим (job завершён)
 
 app.UseExceptionHandler();
 if (app.Environment.IsDevelopment()) app.MapOpenApi();

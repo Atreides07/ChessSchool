@@ -199,15 +199,17 @@ query на прокси.
 ## 7. База данных и миграции
 
 - Схема версионируется **EF-миграциями**; провайдер — **PostgreSQL** для всех окружений.
-- Сейчас миграции применяются **на старте** каждого сервиса (`db.Database.Migrate()` в Auth и ApiService).
-  При нескольких репликах это гонка. **Рекомендация для прода:** выносить миграции в отдельный шаг
-  деплоя (init-job/`Job` в k8s, запускающий миграцию один раз перед раскаткой реплик), а в приложении
-  отключить авто-миграцию (или оставить как идемпотентную страховку — `Migrate()` безопасен повторно, но
-  одновременный первый запуск нескольких реплик нежелателен).
+- Миграции выкатываются **отдельным шагом** — тем же образом, запущенным с аргументом `migrate`:
+  он применяет схему и завершается (для k8s `Job`/init-контейнера перед раскаткой реплик). Боевые
+  реплики стартуют **без** авто-миграции (нет гонки реплик за первую миграцию).
   ```bash
-  dotnet ef database update -p ChessSchool.Auth      -s ChessSchool.Auth      --connection "$AUTHDB"
-  dotnet ef database update -p ChessSchool.ApiService -s ChessSchool.ApiService --connection "$SCHOOLDB"
+  # k8s Job (один раз перед обновлением реплик), образ тот же:
+  #   command: ["dotnet","ChessSchool.Auth.dll","migrate"]
+  #   command: ["dotnet","ChessSchool.ApiService.dll","migrate"]
   ```
+- Поведение управляется флагом `Database:MigrateAtStartup` (по умолчанию = `IsDevelopment()`): в
+  Development реплики мигрируют сами (удобно локально), в Production — нет (мигрирует только Job).
+  При необходимости можно временно включить авто-миграцию на старте: `Database__MigrateAtStartup=true`.
 - `EnsureCreated()` используется только для InMemory в тестах — в проде не задействован.
 - **Seed-данные** (`SeedData.Ensure`, демо-школа `Demo.SchoolId`) — для прода уберите/огородите флагом,
   чтобы не плодить демо-сущности в боевой БД.
@@ -310,7 +312,8 @@ DataProtection-ключи общие → **rolling-рестарты не раз�
 ## 13. Порядок выката (нулевой простой)
 
 1. **Postgres** и **Redis** (managed) подняты, доступны, секреты в хранилище.
-2. **Миграции** (`ef database update` для `authdb` и `schooldb`) — отдельным job'ом.
+2. **Миграции** — job'ом на том же образе: `dotnet ChessSchool.Auth.dll migrate` и
+   `dotnet ChessSchool.ApiService.dll migrate` (см. §7).
 3. **Auth** → дождаться `/health` Ready (ClientSeeder создаст/обновит OIDC-клиентов из `Sso__Clients`).
 4. **ApiService** → Ready.
 5. **GameServer** и **Arena** (Orleans-силосы) → Ready (формируют кластеры в Redis).

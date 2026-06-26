@@ -5,7 +5,7 @@ using Color = ChessSchool.Contracts.PieceColor;
 
 namespace ChessSchool.GameServer.Grains;
 
-public sealed class GameGrain(IGameArchiveClient archive, ILogger<GameGrain> logger) : Grain, IGameGrain
+public sealed class GameGrain(IGameArchiveClient archive, ILogger<GameGrain> logger, IAnalytics analytics) : Grain, IGameGrain
 {
     private ChessBoard _board = new();
     private string _whiteSub = "", _whiteName = "", _blackSub = "", _blackName = "";
@@ -138,6 +138,11 @@ public sealed class GameGrain(IGameArchiveClient archive, ILogger<GameGrain> log
         {
             logger.LogError(ex, "Не удалось заархивировать партию {GameId}", GameId);
         }
+        analytics.Capture("online_game_finished", GameId, new Dictionary<string, object?>
+        {
+            ["result"] = _result.ToString(),
+            ["reason"] = _reason.ToString(),
+        });
         // Завершённую партию выгружаем из памяти — в RAM живут только активные (масштаб 1M).
         DeactivateOnIdle();
     }

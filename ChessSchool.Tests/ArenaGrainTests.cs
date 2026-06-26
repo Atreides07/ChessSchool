@@ -2,6 +2,7 @@ using ChessSchool.Arena.Grains;
 using ChessSchool.Arena.Services;
 using ChessSchool.Contracts;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 
 namespace ChessSchool.Tests;
@@ -26,6 +27,7 @@ public class ArenaGrainTests
                 s.AddSingleton<ArenaNotifier>();
                 s.AddSingleton<IChessEngine, FakeEngine>();
                 s.AddSingleton(new ArenaRuntimeOptions(RemindersEnabled: false));
+                s.AddSingleton<IAnalytics, NoopAnalytics>();
             });
         }
     }

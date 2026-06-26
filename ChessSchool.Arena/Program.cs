@@ -55,6 +55,9 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();
 
+// Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
+builder.AddChessSchoolAnalytics();
+
 // Доступ к cookie запроса (запоминание выбранного вида расписания при SSR-навигации).
 builder.Services.AddHttpContextAccessor();
 

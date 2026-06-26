@@ -42,6 +42,9 @@ if (redisConn is not null) builder.Services.AddHealthChecks().AddRedis(redisConn
 builder.Services.AddHttpClient<IGameArchiveClient, GameArchiveClient>(c =>
     c.BaseAddress = new("https+http://apiservice"));
 
+// Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
+builder.AddChessSchoolAnalytics();
+
 // --- Валидация JWT, выпущенных отдельным IdP (общий сервис авторизации) ---
 var authority = builder.Configuration["services:auth:https:0"]
     ?? builder.Configuration["services:auth:http:0"];

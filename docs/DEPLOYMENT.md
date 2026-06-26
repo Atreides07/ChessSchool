@@ -296,6 +296,16 @@ DataProtection-ключи общие → **rolling-рестарты не раз�
   Seq так же управляется наличием его строки подключения.
 - Рекомендуется добавить health-checks на зависимости (Postgres/Redis) перед боевым запуском (сейчас
   health = базовый `self`).
+- **Продуктовая аналитика** — switchable `IAnalytics` ([Analytics.cs](../ChessSchool.ServiceDefaults/Analytics.cs)):
+  при заданном ключе шлёт доменные события в PostHog, иначе no-op (dev/тесты ничего не отправляют).
+  События эмитятся на сервере (ApiService/GameServer/Arena), **без PII** — только id/sub (критично для
+  данных детей; хост по умолчанию — EU-облако). Ключи:
+  ```
+  Analytics__PostHog__ApiKey=phc_xxx
+  Analytics__PostHog__Host=https://eu.i.posthog.com   # по умолчанию EU
+  ```
+  Текущие события: `student_created`, `game_attributed`, `share_link_created`, `online_game_finished`,
+  `tournament_joined`. На горячих путях (ходы) события не эмитятся — только доменные вехи.
 
 ---
 

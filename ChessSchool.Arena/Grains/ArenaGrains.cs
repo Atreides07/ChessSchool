@@ -96,6 +96,7 @@ public sealed class ArenaTournamentGrain(
     ArenaNotifier notifier,
     IChessEngine engine,
     ArenaRuntimeOptions runtime,
+    IAnalytics analytics,
     ILogger<ArenaTournamentGrain> logger) : Grain, IArenaTournamentGrain, IRemindable
 {
     private sealed class Player
@@ -404,6 +405,11 @@ public sealed class ArenaTournamentGrain(
         {
             _players[sub] = new Player { Name = name, WaitingSince = DateTimeOffset.UtcNow };
             _dirty = true;
+            analytics.Capture("tournament_joined", sub, new Dictionary<string, object?>
+            {
+                ["tournament_id"] = Id,
+                ["time_control"] = _tc.ToString(),
+            });
         }
         EnsureTimer();
         Tick();

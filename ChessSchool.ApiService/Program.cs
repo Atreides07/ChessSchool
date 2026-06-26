@@ -16,6 +16,7 @@ builder.Services.AddDbContext<SchoolDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("schooldb")));
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
+builder.AddChessSchoolAnalytics();
 
 // Readiness-проверка доступности БД (попадает в /health, не в /alive). Без строки подключения
 // (InMemory в тестах) — пропускаем.
@@ -143,7 +144,7 @@ app.MapGet("/schools/{schoolId:guid}/pending-games",
 // ---------- ЛК школы (мутации) ----------
 // Для локального демо открыты; в проде гейтятся JWT от IdP (см. docs).
 app.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStudentRequest req,
-    SchoolDbContext db, CancellationToken ct) =>
+    SchoolDbContext db, IAnalytics analytics, CancellationToken ct) =>
 {
     if (!await db.Groups.AnyAsync(g => g.Id == req.GroupId && g.SchoolId == schoolId, ct))
         return Results.BadRequest(new { error = "Группа не найдена в этой школе." });
@@ -151,11 +152,12 @@ app.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStu
     var student = new Student { GroupId = req.GroupId, DisplayName = req.DisplayName, BirthDate = req.BirthDate };
     db.Students.Add(student);
     await db.SaveChangesAsync(ct);
+    analytics.Capture("student_created", schoolId.ToString(), new Dictionary<string, object?> { ["group_id"] = req.GroupId });
     return Results.Created($"/students/{student.Id}", ToDto(student));
 });
 
 app.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest req,
-    SchoolDbContext db, GameArchiver archiver, CancellationToken ct) =>
+    SchoolDbContext db, GameArchiver archiver, IAnalytics analytics, CancellationToken ct) =>
 {
     var game = await db.Games.FindAsync([id], ct);
     if (game is null) return Results.NotFound();
@@ -164,6 +166,7 @@ app.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest r
     if (white is null || black is null) return Results.BadRequest(new { error = "Ученик не найден." });
 
     await archiver.AttributeAsync(game, white, black, req.Result, ct);
+    analytics.Capture("game_attributed", id.ToString(), new Dictionary<string, object?> { ["result"] = req.Result.ToString() });
     return Results.Ok();
 });
 
@@ -191,12 +194,13 @@ app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req, 
 });
 
 // ---------- Шаринг профиля родителю ----------
-app.MapPost("/students/{id:guid}/share", async (Guid id, SchoolDbContext db, CancellationToken ct) =>
+app.MapPost("/students/{id:guid}/share", async (Guid id, SchoolDbContext db, IAnalytics analytics, CancellationToken ct) =>
 {
     if (!await db.Students.AnyAsync(s => s.Id == id, ct)) return Results.NotFound();
     var token = Guid.NewGuid().ToString("N");
     db.ShareLinks.Add(new ShareLink { StudentId = id, Token = token, ExpiresAt = DateTimeOffset.UtcNow.AddDays(90) });
     await db.SaveChangesAsync(ct);
+    analytics.Capture("share_link_created", id.ToString());
     return Results.Ok(new ShareLinkDto(token, $"/p/{token}", DateTimeOffset.UtcNow.AddDays(90)));
 });
 

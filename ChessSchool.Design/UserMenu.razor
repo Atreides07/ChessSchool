@@ -1,0 +1,55 @@
+@namespace ChessSchool.Design
+
+@* Меню пользователя: только аватар, по клику — выпадающее меню (как на большинстве сайтов).
+   Без JS: открывается при фокусе на аватаре (:focus-within), закрывается по клику вне (потеря фокуса). *@
+<div class="um">
+    <button type="button" class="um-avatar" title="@DisplayName" aria-label="Меню пользователя" aria-haspopup="menu">@Initial</button>
+
+    <div class="um-menu" role="menu">
+        <div class="um-head">
+            <span class="um-avatar lg">@Initial</span>
+            <div class="um-id">
+                <div class="um-name">@DisplayName</div>
+                @if (!string.IsNullOrWhiteSpace(Email))
+                {
+                    <div class="um-mail" title="@Email">@Email</div>
+                }
+            </div>
+        </div>
+        <a class="um-item" href="@SignOutHref" role="menuitem">
+            <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M12 19H6a2 2 0 01-2-2V7a2 2 0 012-2h6" /></svg>
+            Выйти
+        </a>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Email { get; set; }
+    [Parameter] public string SignOutHref { get; set; } = "/signout";
+
+    private string DisplayName => string.IsNullOrWhiteSpace(Name) ? "Аккаунт" : Name!;
+    private string Initial => DisplayName.Trim()[..1].ToUpperInvariant();
+}
+
+<style>
+    .um { position: relative; display: inline-block; }
+
+    .um-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; cursor: pointer; user-select: none; flex: none; border: 0; font-size: 1rem; padding: 0; }
+    .um-avatar:hover { filter: brightness(.95); }
+    .um-avatar.lg { width: 44px; height: 44px; font-size: 1.15rem; cursor: default; }
+
+    .um-menu { display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; width: 248px;
+        background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg, 14px); box-shadow: var(--shadow-md, 0 12px 40px rgba(14,17,22,.14)); padding: 10px; }
+    /* Открыто, пока фокус внутри (кнопка-аватар или пункты меню). Клик вне → потеря фокуса → закрытие. */
+    .um:focus-within .um-menu { display: block; }
+
+    .um-head { display: flex; gap: .6rem; align-items: center; padding: 8px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+    .um-id { min-width: 0; }
+    .um-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .um-mail { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .um-item { display: flex; align-items: center; gap: .55rem; padding: .55rem .6rem; border-radius: var(--r-md, 10px); color: var(--ink); font-weight: 600; text-decoration: none; }
+    .um-item:hover { background: var(--surface-2); color: var(--ink); }
+    .um-item svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+</style>

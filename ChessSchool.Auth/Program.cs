@@ -94,8 +94,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // ---------------- Страница входа / регистрации (cookie-сессия IdP) ----------------
-app.MapGet("/account/login", (string? @return, string? error) =>
-    Results.Content(LoginPage(@return ?? "/", error), "text/html; charset=utf-8"));
+app.MapGet("/account/login", (string? @return, string? error, string? mode) =>
+    Results.Content(LoginPage(@return ?? "/", error, mode == "register"), "text/html; charset=utf-8"));
 
 app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher) =>
 {
@@ -117,7 +117,7 @@ app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPass
     string ret = form["return"].ToString();
     string password = form["password"]!;
     if (string.IsNullOrWhiteSpace(email) || password.Length < 6 || await db.Users.AnyAsync(u => u.Email == email))
-        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1&mode=register");
 
     var user = new AppUser { Email = email, DisplayName = form["name"].ToString() };
     user.PasswordHash = hasher.HashPassword(user, password);
@@ -254,9 +254,9 @@ static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
     _ => [Destinations.AccessToken]
 };
 
-static string LoginPage(string ret, string? error) => $$"""
+static string LoginPage(string ret, string? error, bool register) => $$"""
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Вход — ChessSchool ID</title>
+<title>{{(register ? "Регистрация" : "Вход")}} — ChessSchool ID</title>
 <style>
 :root{--ink:#0e1116;--ink2:#5b6470;--muted:#8b93a1;--line:#d6dae1;--accent:#2b6ef2;--accent-h:#1f5ad8;--bg:#f6f7f9;--surface:#fff}
 *{box-sizing:border-box}
@@ -265,34 +265,53 @@ body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var
 .brand{display:flex;align-items:center;gap:.55rem;font-weight:720;font-size:1.15rem;letter-spacing:-.02em;margin-bottom:.3rem}
 .brand .logo{width:30px;height:30px;display:grid;place-items:center;background:var(--ink);border-radius:8px}
 .sub{color:var(--muted);font-size:.85rem;margin:0 0 1.25rem}
+h1{font-size:1.25rem;margin:0 0 1rem}
 label{font-size:.8rem;color:var(--ink2);font-weight:600}
 input{width:100%;padding:.6rem .7rem;margin:.25rem 0 .7rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:.92rem}
 input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px #eaf1fe}
-button{width:100%;padding:.65rem;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:.95rem;cursor:pointer}
+button{width:100%;padding:.65rem;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:.95rem;cursor:pointer;margin-top:.3rem}
 button:hover{background:var(--accent-h)}
-.alt{margin-top:1.1rem;padding-top:1.1rem;border-top:1px solid var(--line)}
-.alt button{background:#fff;color:var(--ink);border:1px solid var(--line)}
 .err{color:#e5484d;font-size:.85rem;background:#fdecec;padding:.5rem .7rem;border-radius:8px;margin:0 0 1rem}
+.switch{color:var(--ink2);font-size:.85rem;text-align:center;margin:1.1rem 0 0}
+.switch a{color:var(--accent);font-weight:600;text-decoration:none}
+.switch a:hover{text-decoration:underline}
 .muted{color:var(--muted);font-size:.78rem;text-align:center;margin:1.1rem 0 0}
+/* Переключение вход/регистрация без JS: чекбокс хранит режим */
+#mode{display:none}
+.view-reg{display:none}
+#mode:checked ~ .card .view-login{display:none}
+#mode:checked ~ .card .view-reg{display:block}
+.switch .as-link{background:none;border:0;color:var(--accent);font-weight:600;cursor:pointer;font-size:.85rem;padding:0;width:auto;margin:0}
+.switch .as-link:hover{background:none;text-decoration:underline}
 </style></head>
-<body><div class="card">
+<body>
+<input type="checkbox" id="mode" {{(register ? "checked" : "")}}>
+<div class="card">
 <div class="brand"><span class="logo"><svg viewBox="0 0 45 45" width="18" height="18" fill="#fff"><path d="M18 10c1-1 3-2 5-2 7 0 12 6 12 16v14H13c0-6 3-9 7-12-2 1-5 2-7 1-2-1-2-3-1-5-2 1-4 1-5-1-1-3 1-5 4-7 .5-1 1-2 0-3 1-1 2-1 3 0z"/></svg></span> ChessSchool ID</div>
 <p class="sub">Единый аккаунт для ChessSchool и Arena</p>
 {{(error is not null ? "<p class=\"err\">Неверные данные или email уже занят.</p>" : "")}}
+
+<div class="view-login">
+<h1>Вход</h1>
 <form method="post" action="/account/login">
 <input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
 <label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
 <label>Пароль</label><input name="password" type="password" placeholder="••••••••" required>
 <button type="submit">Войти</button></form>
-<div class="alt">
+<p class="switch">Нет аккаунта? <label for="mode" class="as-link">Зарегистрироваться</label></p>
+</div>
+
+<div class="view-reg">
+<h1>Регистрация</h1>
 <form method="post" action="/account/register">
 <input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
-<label>Регистрация нового аккаунта</label>
-<input name="name" placeholder="Имя">
-<input name="email" type="email" placeholder="you@example.com">
-<input name="password" type="password" placeholder="Пароль (мин. 6)">
+<label>Имя</label><input name="name" placeholder="Ваше имя">
+<label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
+<label>Пароль</label><input name="password" type="password" placeholder="Минимум 6 символов" required>
 <button type="submit">Создать аккаунт</button></form>
+<p class="switch">Уже есть аккаунт? <label for="mode" class="as-link">Войти</label></p>
 </div>
+
 <p class="muted">Защищено OpenID Connect</p></div></body></html>
 """;
 

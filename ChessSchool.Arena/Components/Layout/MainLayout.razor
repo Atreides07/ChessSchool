@@ -33,8 +33,9 @@
             <span class="ar-spacer"></span>
             <AuthorizeView>
                 <Authorized>
-                    <span class="ar-avatar" title="@context.User.Identity?.Name">@Initial(context.User.Identity?.Name)</span>
-                    <a class="ds-navlink" href="/signout">Выйти</a>
+                    <ChessSchool.Design.UserMenu Name="@context.User.Identity?.Name"
+                                                 Email='@(context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? context.User.FindFirst("email")?.Value)'
+                                                 SignOutHref="/signout" />
                 </Authorized>
                 <NotAuthorized>
                     <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/">Войти</a>
@@ -53,11 +54,6 @@
     <a href="." class="reload">Перезагрузить</a>
     <span class="dismiss">🗙</span>
 </div>
-
-@code {
-    private static string Initial(string? name) =>
-        string.IsNullOrWhiteSpace(name) ? "?" : name.Trim()[..1].ToUpperInvariant();
-}
 
 <style>
     /* ---------- Оболочка с сайдбаром (стиль idChess) ---------- */
@@ -96,7 +92,6 @@
     .ar-search input { border: 0; background: transparent; outline: 0; width: 100%; font-size: .92rem; color: var(--ink); }
 
     .ar-spacer { flex: 1; }
-    .ar-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--success); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: .9rem; }
 
     .ar-content { padding: 26px 28px 60px; width: 100%; max-width: 1200px; }
 

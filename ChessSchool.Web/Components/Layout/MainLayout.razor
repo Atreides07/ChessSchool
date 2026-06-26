@@ -18,8 +18,9 @@
         <span class="ds-spacer"></span>
         <AuthorizeView>
             <Authorized>
-                <span class="badge badge-accent">@context.User.Identity?.Name</span>
-                <a class="ds-navlink" href="/signout">Выйти</a>
+                <ChessSchool.Design.UserMenu Name="@context.User.Identity?.Name"
+                                             Email='@(context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? context.User.FindFirst("email")?.Value)'
+                                             SignOutHref="/signout" />
             </Authorized>
             <NotAuthorized>
                 <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/play">Войти</a>

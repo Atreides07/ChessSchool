@@ -106,7 +106,14 @@ else
                 }
                 else
                 {
-                    <div class="card waiting">Ищем соперника… <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div></div>
+                    <div class="card waiting">
+                        <div class="search-anim" aria-hidden="true">
+                            <span class="search-ring"></span>
+                            <span class="search-piece">@((MarkupString)ChessPieces.Svg('n'))</span>
+                        </div>
+                        <div class="search-text">Ищем соперника<span class="dots"><i></i><i></i><i></i></span></div>
+                        <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div>
+                    </div>
                 }
             }
 
@@ -459,6 +466,26 @@ else
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
     .waiting { text-align: center; padding: 2.5rem 1rem; font-size: 1.05rem; color: var(--ink-2); margin-top: 1.2rem; }
+    .search-anim { position: relative; width: 76px; height: 76px; margin: 0 auto .9rem; display: grid; place-items: center; }
+    .search-ring { position: absolute; inset: 0; border-radius: 50%; border: 3px solid var(--accent); border-top-color: transparent; animation: search-spin 1s linear infinite; }
+    .search-ring::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); animation: search-pulse 1.6s ease-out infinite; }
+    .search-piece { width: 42px; height: 42px; display: block; animation: search-bob 1.6s ease-in-out infinite; }
+    .search-piece .cp { width: 100%; height: 100%; display: block; }
+    .search-text { font-weight: 600; color: var(--ink); }
+    .search-text .dots { display: inline-block; letter-spacing: .05em; }
+    .search-text .dots i { display: inline-block; opacity: .2; animation: search-dot 1.4s infinite; }
+    .search-text .dots i::before { content: "."; }
+    .search-text .dots i:nth-child(2) { animation-delay: .2s; }
+    .search-text .dots i:nth-child(3) { animation-delay: .4s; }
+    @@keyframes search-spin { to { transform: rotate(360deg); } }
+    @@keyframes search-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 100% { box-shadow: 0 0 0 18px transparent; } }
+    @@keyframes search-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    @@keyframes search-dot { 0%, 60%, 100% { opacity: .2; } 30% { opacity: 1; } }
+    @@media (prefers-reduced-motion: reduce) {
+        .search-ring, .search-ring::after, .search-piece, .search-text .dots i { animation: none; }
+        .search-ring { border-top-color: var(--accent); }
+        .search-text .dots i { opacity: 1; }
+    }
     .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm); }
 
     /* ----- Таблица лидеров ----- */

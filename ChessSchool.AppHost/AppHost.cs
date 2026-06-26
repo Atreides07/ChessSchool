@@ -17,11 +17,16 @@ var schoolDb = postgres.AddDatabase("schooldb");
 // при наличии строки подключения "redis" (иначе — dev-путь in-memory/localhost).
 var redis = builder.AddRedis("redis").WithDataVolume();
 
+// Seq — локальный сервер структурированных логов/трейсов (OTel). Позволяет проверить «прод-путь»
+// наблюдаемости локально: сервисы шлют в него телеметрию при наличии ConnectionStrings:seq.
+var seq = builder.AddSeq("seq").WithDataVolume().ExcludeFromManifest();
+
 // Отдельный сервис авторизации (IdP) — переиспользуемый, как Google Auth.
 var auth = builder.AddProject<Projects.ChessSchool_Auth>("auth")
     .WithEnvironment("InternalApiKey", internalKey)
     .WithReference(authDb)
     .WithReference(redis) // общий DataProtection-keyring (cookie IdP расшифровывается любой нодой)
+    .WithReference(seq)
     .WaitFor(authDb)
     .WaitFor(redis);
 
@@ -30,6 +35,7 @@ var apiService = builder.AddProject<Projects.ChessSchool_ApiService>("apiservice
     .WithEnvironment("InternalApiKey", internalKey)
     .WithReference(auth)
     .WithReference(schoolDb)
+    .WithReference(seq)
     .WaitFor(schoolDb);
 
 // Игровой сервер: Orleans-силос (живые партии) + SignalR. Валидирует токены IdP,
@@ -40,6 +46,7 @@ var gameServer = builder.AddProject<Projects.ChessSchool_GameServer>("gameserver
     .WithReference(auth)
     .WithReference(apiService)
     .WithReference(redis) // SignalR backplane + Orleans clustering между нодами
+    .WithReference(seq)
     .WaitFor(auth)
     .WaitFor(apiService)
     .WaitFor(redis);
@@ -52,6 +59,7 @@ var web = builder.AddProject<Projects.ChessSchool_Web>("webfrontend")
     .WithReference(apiService)
     .WithReference(gameServer)
     .WithReference(redis) // общий DataProtection-keyring + распределённый ticket-store (SSO)
+    .WithReference(seq)
     .WaitFor(apiService)
     .WaitFor(gameServer)
     .WaitFor(redis);
@@ -62,6 +70,7 @@ var arena = builder.AddProject<Projects.ChessSchool_Arena>("arena")
     .WithEnvironment("Sso__ClientId", "arena-web")
     .WithReference(auth)
     .WithReference(redis) // Orleans clustering+persist турниров, DataProtection, ticket-store
+    .WithReference(seq)
     .WaitFor(auth)
     .WaitFor(redis);
 

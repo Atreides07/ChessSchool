@@ -31,6 +31,12 @@ public static class Extensions
 
         builder.ConfigureOpenTelemetry();
 
+        // Seq — сервер структурированных логов/трейсов. Подключаем, только если ресурс заведён
+        // (ConnectionStrings:seq инжектит Aspire по ссылке на ресурс "seq"); иначе телеметрия идёт
+        // в дашборд Aspire по OTLP, как и раньше.
+        if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("seq")))
+            builder.AddSeqEndpoint("seq");
+
         builder.AddDefaultHealthChecks();
 
         builder.Services.AddServiceDiscovery();

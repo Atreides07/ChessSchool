@@ -289,6 +289,11 @@ DataProtection-ключи общие → **rolling-рестарты не раз�
   readinessProbe: { httpGet: { path: /health, port: 8080 } }
   ```
 - Телеметрия (логи/метрики/трейсы) — OpenTelemetry → коллектор через `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- **Локально** для проверки «прод-пути» наблюдаемости заведён **Seq** как Aspire-ресурс
+  ([AppHost.cs](../ChessSchool.AppHost/AppHost.cs)): сервисы шлют в него логи/трейсы при наличии
+  `ConnectionStrings:seq` ([AddSeqEndpoint](../ChessSchool.ServiceDefaults/Extensions.cs)). В проде
+  Seq не обязателен — направьте OTLP на свой бэкенд (Grafana/Tempo/Loki, Datadog, и т.п.); подключение
+  Seq так же управляется наличием его строки подключения.
 - Рекомендуется добавить health-checks на зависимости (Postgres/Redis) перед боевым запуском (сейчас
   health = базовый `self`).
 

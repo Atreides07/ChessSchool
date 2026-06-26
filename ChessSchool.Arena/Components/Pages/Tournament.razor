@@ -20,147 +20,139 @@ else
         <span class="crumbs-cur">@_state.Name</span>
     </nav>
 
-    <div class="t-meta">
-        <span>@_state.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
-        <span>@(_state.DurationSeconds / 60) минут</span><span class="sep">•</span>
-        <span>Контроль @(_state.TimeControl.InitialSeconds / 60) + @_state.TimeControl.IncrementSeconds</span>
-    </div>
-    <h1 class="t-title">@_state.Name</h1>
-
-    <div class="t-parts">
-        <span class="t-ava-row">
-            @foreach (var s in _state.Standings.Take(4))
-            {
-                <span class="t-ava">@Avatar(s.Name)</span>
-            }
-        </span>
-        <span>@HumanCount 👤 @Plural(HumanCount, "игрок", "игрока", "игроков")</span>
-        @if (_state.BotCount > 0)
-        {
-            <span class="text-muted">· @_state.BotCount 🤖 @Plural(_state.BotCount, "бот", "бота", "ботов")</span>
-        }
-    </div>
-
-    @* ----- Игровая зона (только идущий турнир) ----- *@
-    @if (_state.Status == TournamentStatus.Running)
-    {
-        <div class="play-area">
-            @if (!_authenticated)
-            {
-                <div class="card">
-                    <strong>Турнир идёт.</strong>
-                    <span class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы участвовать.</span>
-                    <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/t/@Id">Войти</a>
+    <div class="t-grid">
+        <div class="t-main">
+            @* ----- Шапка турнира ----- *@
+            <div class="t-hero card">
+                <div class="t-thumb @(_state.Status == TournamentStatus.Running ? "" : "dim")">
+                    @if (_state.Status == TournamentStatus.Running)
+                    {
+                        <span class="t-live"><span class="t-dot"></span>Live</span>
+                    }
+                    else if (_state.Status == TournamentStatus.Finished)
+                    {
+                        <span class="t-live past">Завершён</span>
+                    }
+                    else
+                    {
+                        <span class="t-live past">Скоро</span>
+                    }
                 </div>
-            }
-            else if (_state.MyGame is { } g)
-            {
-                <div class="card">
-                    <div class="players">
-                        <span>@(g.BlackBerserk ? "⚡ " : "")@g.BlackName <span class="clock @(g.Turn == PieceColor.Black && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, false) / 1000)</span></span>
-                        <span>@(g.WhiteBerserk ? "⚡ " : "")@g.WhiteName <span class="clock @(g.Turn == PieceColor.White && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, true) / 1000)</span></span>
+
+                <div class="t-hero-mid">
+                    <div class="t-meta">
+                        <span>@_state.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
+                        <span>@(_state.DurationSeconds / 60) минут</span><span class="sep">•</span>
+                        <span>Контроль @(_state.TimeControl.InitialSeconds / 60) + @_state.TimeControl.IncrementSeconds</span>
                     </div>
-                    <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
-                                LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
-                                Disabled="@(g.Status != GameStatus.InProgress || g.Turn != g.MyColor)" OnMove="DoMove" />
-                    <div class="gstatus">
-                        @if (g.Status == GameStatus.Finished)
-                        {
-                            <strong>@ResultText(g)</strong> <span class="text-muted">— ждём следующего соперника…</span>
-                        }
-                        else
-                        {
-                            <span class="text-secondary">@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника")</span>
-                            <span class="ds-spacer"></span>
-                            @if (g.MyBerserkAvailable)
+                    <h1 class="t-title">@_state.Name</h1>
+                </div>
+
+                <div class="t-hero-side">
+                    @if (_state.Status == TournamentStatus.Running)
+                    {
+                        <div class="t-countdown">Окончание через: <strong>@Hms(Remaining())</strong></div>
+                    }
+                    else if (_state.Status == TournamentStatus.Created)
+                    {
+                        <div class="t-countdown">Старт: <strong>@_state.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm")</strong></div>
+                    }
+
+                    <div class="t-parts" title="@HumanCount чел. · @_state.BotCount ботов">
+                        <span class="t-ava-row">
+                            @foreach (var s in _state.Standings.Take(3))
                             {
-                                <button class="btn btn-warn btn-sm" @onclick="Berserk" title="Время пополам, без инкремента, +1 очко за победу">⚡ Berserk</button>
+                                <span class="t-ava">@Avatar(s.Name)</span>
                             }
-                            <button class="btn btn-outline-danger btn-sm" @onclick="Resign">Сдаться</button>
-                        }
+                        </span>
+                        <span>@_state.Standings.Count @Plural(_state.Standings.Count, "участник", "участника", "участников")</span>
                     </div>
-                </div>
-            }
-            else if (_state.Joined)
-            {
-                <div class="card waiting">Ищем соперника… <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div></div>
-            }
-            else
-            {
-                <div class="card join-card">
-                    <span>Турнир идёт — осталось <strong>@Mmss(_state.SecondsLeft)</strong></span>
-                    <button class="btn btn-primary" @onclick="Join">Участвовать</button>
-                </div>
-            }
-        </div>
 
-        @if (Broadcast().Count > 0)
-        {
-            <h2 class="sec-title">Идёт сейчас</h2>
-            <div class="boards-grid">
-                @foreach (var b in Broadcast())
-                {
-                    <div class="bcard @(b.Status == GameStatus.Finished ? "done" : "")">
-                        <div class="bplayer">
-                            <span class="bava">@Avatar(b.BlackName)</span>
-                            <span class="bname">@b.BlackName</span>
-                            <span class="bscore">@b.BlackScore</span>
-                        </div>
-                        <div class="bclock @(b.Turn == PieceColor.Black && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.BlackMs / 1000)</div>
-                        <div class="bboard">
-                            <Chessboard Fen="@b.Fen" LastFrom="@b.LastFrom" LastTo="@b.LastTo" CheckSquare="@b.CheckSquare" Disabled="true" />
-                            @if (b.Status == GameStatus.Finished)
-                            {
-                                <div class="bresult">
-                                    <span class="rcell w">@GResult(b.Result, true)</span>
-                                    <span class="rdash">–</span>
-                                    <span class="rcell b">@GResult(b.Result, false)</span>
-                                </div>
-                            }
-                        </div>
-                        <div class="bclock @(b.Turn == PieceColor.White && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.WhiteMs / 1000)</div>
-                        <div class="bplayer">
-                            <span class="bava">@Avatar(b.WhiteName)</span>
-                            <span class="bname">@b.WhiteName</span>
-                            <span class="bscore">@b.WhiteScore</span>
-                        </div>
-                    </div>
-                }
+                    @ActionButton()
+                </div>
             </div>
-        }
-    }
-    else if (_state.Status == TournamentStatus.Created)
-    {
-        <div class="play-area">
-            <div class="card join-card">
-                <div>
-                    <strong>Регистрация открыта</strong>
-                    <div class="text-secondary">Старт @_state.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm") · играть можно будет после старта</div>
-                </div>
-                @if (!_authenticated)
+
+            @* ----- Своя интерактивная партия (когда участвуешь и идёт турнир) ----- *@
+            @if (_state.Status == TournamentStatus.Running && _state.Joined)
+            {
+                @if (_state.MyGame is { } g)
                 {
-                    <a class="btn btn-primary" href="/signin?returnUrl=/t/@Id">Войти и записаться</a>
-                }
-                else if (_state.Joined)
-                {
-                    <span class="badge badge-success">Вы записаны ✓</span>
+                    <div class="card my-game">
+                        <div class="players">
+                            <span>@(g.BlackBerserk ? "⚡ " : "")@g.BlackName <span class="clock @(g.Turn == PieceColor.Black && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, false) / 1000)</span></span>
+                            <span>@(g.WhiteBerserk ? "⚡ " : "")@g.WhiteName <span class="clock @(g.Turn == PieceColor.White && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, true) / 1000)</span></span>
+                        </div>
+                        <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
+                                    LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
+                                    Disabled="@(g.Status != GameStatus.InProgress || g.Turn != g.MyColor)" OnMove="DoMove" />
+                        <div class="gstatus">
+                            @if (g.Status == GameStatus.Finished)
+                            {
+                                <strong>@ResultText(g)</strong> <span class="text-muted">— ждём следующего соперника…</span>
+                            }
+                            else
+                            {
+                                <span class="text-secondary">@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника")</span>
+                                <span class="ds-spacer"></span>
+                                @if (g.MyBerserkAvailable)
+                                {
+                                    <button class="btn btn-warn btn-sm" @onclick="Berserk" title="Время пополам, без инкремента, +1 очко за победу">⚡ Berserk</button>
+                                }
+                                <button class="btn btn-outline-danger btn-sm" @onclick="Resign">Сдаться</button>
+                            }
+                        </div>
+                    </div>
                 }
                 else
                 {
-                    <button class="btn btn-primary" @onclick="Join">Записаться</button>
+                    <div class="card waiting">Ищем соперника… <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div></div>
                 }
-            </div>
-        </div>
-    }
+            }
 
-    @* ----- Результаты / таблица лидеров ----- *@
-    <div class="results">
-        <div class="results-main">
+            @* ----- Трансляция партий (4 доски + «Все игры») ----- *@
+            @if (Broadcast().Count > 0)
+            {
+                <div class="sec-head">
+                    <h2 class="sec-title">Партии</h2>
+                    <a class="all-games" href="/t/@Id/games">Все игры</a>
+                </div>
+                <div class="boards-grid">
+                    @foreach (var b in Broadcast().Take(4))
+                    {
+                        <div class="bcard @(b.Status == GameStatus.Finished ? "done" : "")">
+                            <div class="bplayer">
+                                <span class="bava">@Avatar(b.BlackName)</span>
+                                <span class="bname">@b.BlackName</span>
+                                <span class="bscore">@b.BlackScore</span>
+                            </div>
+                            <div class="bclock @(b.Turn == PieceColor.Black && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.BlackMs / 1000)</div>
+                            <div class="bboard">
+                                <Chessboard Fen="@b.Fen" LastFrom="@b.LastFrom" LastTo="@b.LastTo" CheckSquare="@b.CheckSquare" Disabled="true" />
+                                @if (b.Status == GameStatus.Finished)
+                                {
+                                    <div class="bresult">
+                                        <span class="rcell w">@GResult(b.Result, true)</span>
+                                        <span class="rdash">–</span>
+                                        <span class="rcell b">@GResult(b.Result, false)</span>
+                                    </div>
+                                }
+                            </div>
+                            <div class="bclock @(b.Turn == PieceColor.White && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.WhiteMs / 1000)</div>
+                            <div class="bplayer">
+                                <span class="bava">@Avatar(b.WhiteName)</span>
+                                <span class="bname">@b.WhiteName</span>
+                                <span class="bscore">@b.WhiteScore</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* ----- Таблица лидеров ----- *@
             @{
                 var ranked = _state.Standings;
                 var podium = ranked.Take(3).ToList();
             }
-
             @if (podium.Count > 0)
             {
                 <div class="podium">
@@ -174,7 +166,6 @@ else
                     }
                 </div>
             }
-
             <div class="st-list">
                 @foreach (var s in ranked)
                 {
@@ -199,7 +190,8 @@ else
             </div>
         </div>
 
-        <aside class="results-side">
+        @* ----- Правая колонка: правила (на мобиле уезжает вниз страницы) ----- *@
+        <aside class="t-side">
             <div class="card score-rules">
                 <h3 class="card-title">Порядок начисления очков</h3>
                 <div class="sr-sub">Результаты партий</div>
@@ -231,6 +223,56 @@ else
         ? []
         : _state.Boards.Where(b => _state.MyGame is null || b.GameId != _state.MyGame.GameId).ToList();
 
+    // Осталось до конца турнира (с локальной анимацией между обновлениями состояния).
+    private int Remaining() => _state is null ? 0
+        : Math.Max(0, _state.SecondsLeft - (int)(DateTimeOffset.UtcNow - _stateAt).TotalSeconds);
+
+    private RenderFragment ActionButton() => builder =>
+    {
+        // Кнопка действия в шапке: вход / запись / участие — в зависимости от статуса и авторизации.
+        string? label = null, css = "btn btn-join", badge = null;
+        Action? onClick = null;
+
+        if (!_authenticated && _state!.Status != TournamentStatus.Finished)
+        {
+            label = _state.Status == TournamentStatus.Created ? "Войти и записаться" : "Войти";
+        }
+        else if (_state!.Status == TournamentStatus.Running && _authenticated)
+        {
+            if (_state.Joined) badge = "Вы в турнире ✓";
+            else { label = "Присоединиться"; onClick = () => _ = Join(); }
+        }
+        else if (_state.Status == TournamentStatus.Created && _authenticated)
+        {
+            if (_state.Joined) badge = "Вы записаны ✓";
+            else { label = "Записаться"; onClick = () => _ = Join(); }
+        }
+
+        if (badge is not null)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "badge badge-success t-badge");
+            builder.AddContent(2, badge);
+            builder.CloseElement();
+        }
+        else if (label is not null && onClick is not null)
+        {
+            builder.OpenElement(10, "button");
+            builder.AddAttribute(11, "class", css);
+            builder.AddAttribute(12, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, onClick));
+            builder.AddContent(13, label);
+            builder.CloseElement();
+        }
+        else if (label is not null)
+        {
+            builder.OpenElement(20, "a");
+            builder.AddAttribute(21, "class", css);
+            builder.AddAttribute(22, "href", $"/signin?returnUrl=/t/{Id}");
+            builder.AddContent(23, label);
+            builder.CloseElement();
+        }
+    };
+
     protected override async Task OnInitializedAsync()
     {
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
@@ -261,13 +303,13 @@ else
 
     private async Task AnimateClockAsync()
     {
-        _clock = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
+        _clock = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
         while (await _clock.WaitForNextTickAsync())
-            if (_state?.MyGame is { Status: GameStatus.InProgress })
+            if (_state is { Status: TournamentStatus.Running }) // тикают часы партий и обратный отсчёт
                 await InvokeAsync(StateHasChanged);
     }
 
-    private async Task Join() { await T.JoinAsync(_sub, _name); await Refresh(); }
+    private async Task Join() { await T.JoinAsync(_sub, _name); await Refresh(); await InvokeAsync(StateHasChanged); }
 
     private async Task DoMove((string From, string To, string? Promotion) m)
     {
@@ -292,6 +334,12 @@ else
     {
         var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
         return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
+    }
+
+    private static string Hms(int seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(int)t.TotalHours:D2}:{t.Minutes:D2}:{t.Seconds:D2}";
     }
 
     private static string Trophy(int rank) => rank switch { 1 => "🥇", 2 => "🥈", 3 => "🥉", _ => rank.ToString() };
@@ -346,19 +394,47 @@ else
     .crumbs span { color: var(--muted); }
     .crumbs .crumbs-cur { color: var(--ink); font-weight: 600; }
 
-    .t-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; color: var(--ink-2); font-size: .98rem; margin-top: .4rem; }
+    /* ----- Сетка страницы: контент + правая колонка с правилами ----- */
+    .t-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1.4rem; align-items: start; }
+    .t-main { min-width: 0; }
+    .t-side { position: sticky; top: 1rem; }
+
+    /* ----- Шапка турнира ----- */
+    .t-hero { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+    .t-thumb { flex: none; width: 220px; aspect-ratio: 16 / 10; border-radius: var(--r-md); position: relative; overflow: hidden;
+        background-color: #1a1714; background-image: repeating-conic-gradient(#3b352e 0 25%, #2a2622 0 50%); background-size: 44px 44px; }
+    .t-thumb::after { content: ""; position: absolute; inset: 0; background: radial-gradient(120% 90% at 72% 18%, transparent, rgba(0,0,0,.6)); }
+    .t-thumb.dim { filter: grayscale(.5) brightness(.85); }
+    .t-live { position: absolute; z-index: 1; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: .35rem; background: #e23b3b; color: #fff; font-weight: 700; font-size: .75rem; padding: .25rem .6rem; border-radius: var(--r-pill); }
+    .t-live.past { background: rgba(20, 22, 26, .72); }
+    .t-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 0 rgba(255,255,255,.7); animation: tpulse 1.4s infinite; }
+    @@keyframes tpulse { 0% { box-shadow: 0 0 0 0 rgba(255,255,255,.6); } 70% { box-shadow: 0 0 0 6px rgba(255,255,255,0); } 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); } }
+
+    .t-hero-mid { flex: 1 1 220px; min-width: 0; }
+    .t-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; color: var(--ink-2); font-size: .95rem; }
     .t-meta .sep { color: var(--muted); }
-    .t-title { margin: .35rem 0 1rem; }
+    .t-title { margin: .3rem 0 0; font-size: 1.5rem; }
 
-    .t-parts { display: inline-flex; align-items: center; gap: .7rem; background: var(--surface-2); border-radius: var(--r-pill); padding: .5rem 1rem; color: var(--ink-2); font-weight: 600; }
+    .t-hero-side { display: flex; flex-direction: column; align-items: flex-end; gap: .6rem; }
+    .t-countdown { color: var(--ink-2); font-size: .95rem; }
+    .t-countdown strong { font-variant-numeric: tabular-nums; color: var(--ink); font-size: 1.05rem; }
+    .t-parts { display: inline-flex; align-items: center; gap: .6rem; background: var(--surface-2); border-radius: var(--r-pill); padding: .4rem .9rem; color: var(--ink-2); font-weight: 600; }
     .t-ava-row { display: inline-flex; }
-    .t-ava { width: 30px; height: 30px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; font-size: 1rem; border: 2px solid var(--surface); margin-left: -10px; box-shadow: var(--shadow-sm); }
+    .t-ava { width: 28px; height: 28px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; font-size: 1rem; border: 2px solid var(--surface); margin-left: -10px; box-shadow: var(--shadow-sm); }
     .t-ava-row .t-ava:first-child { margin-left: 0; }
+    .t-badge { font-size: .9rem; }
 
-    .sec-title { font-size: 1.5rem; margin: 1.8rem 0 1rem; }
+    .btn-join { background: #21b85a; color: #fff; font-weight: 700; border: none; padding: .7rem 1.6rem; border-radius: var(--r-md); cursor: pointer; }
+    .btn-join:hover { background: #1ca350; }
 
-    /* ----- Трансляция «идёт сейчас» ----- */
-    .boards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.2rem; }
+    /* ----- Заголовок секции «Партии» + «Все игры» ----- */
+    .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 1.8rem 0 1rem; }
+    .sec-title { font-size: 1.5rem; margin: 0; }
+    .all-games { color: var(--accent); font-weight: 700; }
+    .all-games:hover { text-decoration: underline; }
+
+    /* ----- Трансляция партий ----- */
+    .boards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.2rem; }
     .bcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px; box-shadow: var(--shadow-sm); }
     .bcard.done { opacity: .9; }
     .bplayer { display: flex; align-items: center; gap: .5rem; padding: .15rem 0; }
@@ -375,21 +451,17 @@ else
     .bresult .rcell.b { background: #111; color: #fff; }
     .bresult .rdash { color: #fff; font-weight: 800; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
 
-    .play-area { margin: 1.4rem 0; }
-    .play-area .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
+    /* ----- Своя партия ----- */
+    .my-game { margin-top: 1.2rem; }
+    .my-game .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
     .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
-    .waiting { text-align: center; padding: 2.5rem 1rem; font-size: 1.05rem; color: var(--ink-2); }
-    .join-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .waiting { text-align: center; padding: 2.5rem 1rem; font-size: 1.05rem; color: var(--ink-2); margin-top: 1.2rem; }
     .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm); }
-    .card + .card { margin-top: 1rem; }
 
-    /* ----- Результаты ----- */
-    .results { display: grid; grid-template-columns: 1fr 320px; gap: 1.2rem; align-items: start; margin-top: 1.6rem; }
-    .results-main { min-width: 0; }
-
-    .podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.2rem; }
+    /* ----- Таблица лидеров ----- */
+    .podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.6rem 0 1.2rem; }
     .pod { background: var(--surface-2); border-radius: var(--r-lg); padding: 1.2rem 1rem; text-align: center; }
     .pod-cup { font-size: 2.4rem; line-height: 1; }
     .pod-name { font-weight: 700; margin-top: .5rem; }
@@ -413,14 +485,18 @@ else
     .chip.c-draw { color: var(--ink-2); }
     .chip.c-loss { color: var(--muted); }
 
+    /* ----- Правила начисления (правая колонка) ----- */
     .score-rules .card-title { font-size: 1.3rem; margin: 0 0 1rem; }
     .sr-sub { font-weight: 700; color: var(--ink); margin-bottom: .6rem; }
     .sr-row { display: flex; justify-content: space-between; padding: .55rem 0; border-bottom: 1px solid var(--line); }
     .sr-row strong { font-variant-numeric: tabular-nums; }
     .sr-bonus { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; background: var(--warn-weak); color: var(--warn); font-weight: 700; padding: .7rem 1rem; border-radius: var(--r-md); }
 
+    /* На узких экранах правая колонка уезжает вниз (после контента). */
     @@media (max-width: 900px) {
-        .results { grid-template-columns: 1fr; }
+        .t-grid { grid-template-columns: 1fr; }
+        .t-side { position: static; }
+        .t-hero-side { align-items: flex-start; width: 100%; }
         .podium { grid-template-columns: 1fr; }
         .pod.gold, .pod.silver, .pod.bronze { order: 0; }
         .st-chips { padding-left: 0; }

@@ -1,0 +1,162 @@
+@page "/t/{Id}/games"
+@rendermode InteractiveServer
+@using ChessSchool.Arena.Services
+@inject IGrainFactory Grains
+@inject ArenaNotifier Notifier
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Все игры — @Id</PageTitle>
+
+<nav class="crumbs">
+    <a href="/">Главная</a><span>›</span>
+    <a href="/t/@Id">Турнир</a><span>›</span>
+    <span class="crumbs-cur">Все игры</span>
+</nav>
+
+<div class="ag-head">
+    <h1 class="ag-title">Все партии</h1>
+    <span class="ag-count">@_boards.Count на доске</span>
+</div>
+
+@if (_boards.Count == 0)
+{
+    <div class="ag-empty">Сейчас нет активных партий. <a href="/t/@Id">Вернуться к турниру</a></div>
+}
+else
+{
+    <div class="boards-grid">
+        @foreach (var b in _boards.Take(_visible))
+        {
+            <div class="bcard @(b.Status == GameStatus.Finished ? "done" : "")" @key="b.GameId">
+                <div class="bplayer">
+                    <span class="bava">@Avatar(b.BlackName)</span>
+                    <span class="bname">@b.BlackName</span>
+                    <span class="bscore">@b.BlackScore</span>
+                </div>
+                <div class="bclock @(b.Turn == PieceColor.Black && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.BlackMs / 1000)</div>
+                <div class="bboard">
+                    <Chessboard Fen="@b.Fen" LastFrom="@b.LastFrom" LastTo="@b.LastTo" CheckSquare="@b.CheckSquare" Disabled="true" />
+                    @if (b.Status == GameStatus.Finished)
+                    {
+                        <div class="bresult">
+                            <span class="rcell w">@GResult(b.Result, true)</span>
+                            <span class="rdash">–</span>
+                            <span class="rcell b">@GResult(b.Result, false)</span>
+                        </div>
+                    }
+                </div>
+                <div class="bclock @(b.Turn == PieceColor.White && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.WhiteMs / 1000)</div>
+                <div class="bplayer">
+                    <span class="bava">@Avatar(b.WhiteName)</span>
+                    <span class="bname">@b.WhiteName</span>
+                    <span class="bscore">@b.WhiteScore</span>
+                </div>
+            </div>
+        }
+    </div>
+
+    @* Скрытая кнопка + сентинел: games.js «кликает» её, когда сентинел появляется при скролле. *@
+    @if (_visible < _boards.Count)
+    {
+        <button id="games-more" class="ag-more" @onclick="LoadMore">Показать ещё (@(_boards.Count - _visible))</button>
+        <div id="games-sentinel" class="ag-sentinel"></div>
+    }
+}
+
+<script src="js/games.js"></script>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private const int PageSize = 12;
+    private int _visible = PageSize;
+    private IReadOnlyList<ArenaBoardDto> _boards = [];
+    private IDisposable? _subscription;
+
+    private IArenaTournamentGrain T => Grains.GetGrain<IArenaTournamentGrain>(Id);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Refresh();
+        _subscription = Notifier.Subscribe(Id, () => _ = OnNotifiedAsync());
+    }
+
+    private async Task OnNotifiedAsync()
+    {
+        await Refresh();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Refresh() => _boards = await T.GetBoardsAsync();
+
+    private void LoadMore() => _visible = Math.Min(_visible + PageSize, _boards.Count);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Переинициализируем IntersectionObserver на текущий сентинел после каждого рендера.
+        await JS.InvokeVoidAsync("arenaGamesSetup");
+    }
+
+    private static string Mmss(long seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
+    }
+
+    private static string GResult(GameResult r, bool white) => r switch
+    {
+        GameResult.Draw => "½",
+        GameResult.WhiteWins => white ? "1" : "0",
+        GameResult.BlackWins => white ? "0" : "1",
+        _ => "—"
+    };
+
+    private static readonly string[] Avatars = ["👶", "🧑", "🧔", "🧓", "👩", "🧒", "👨", "👧"];
+    private static string Avatar(string name)
+    {
+        int h = 0;
+        foreach (var ch in name) h = (h * 31 + ch) & 0x7fffffff;
+        return Avatars[h % Avatars.Length];
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _subscription?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
+
+<style>
+    .crumbs { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink-2); margin-bottom: 1rem; flex-wrap: wrap; }
+    .crumbs a { color: var(--ink-2); font-weight: 600; }
+    .crumbs a:hover { color: var(--accent); }
+    .crumbs span { color: var(--muted); }
+    .crumbs .crumbs-cur { color: var(--ink); font-weight: 600; }
+
+    .ag-head { display: flex; align-items: baseline; gap: .8rem; margin-bottom: 1.2rem; }
+    .ag-title { margin: 0; font-size: 1.6rem; }
+    .ag-count { color: var(--muted); font-weight: 600; }
+    .ag-empty { color: var(--ink-2); padding: 2rem 0; }
+    .ag-empty a { color: var(--accent); font-weight: 700; }
+
+    .boards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.2rem; }
+    .bcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px; box-shadow: var(--shadow-sm); }
+    .bcard.done { opacity: .9; }
+    .bplayer { display: flex; align-items: center; gap: .5rem; padding: .15rem 0; }
+    .bava { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; font-size: .95rem; flex: none; }
+    .bname { font-weight: 650; font-size: .95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bscore { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .bclock { align-self: flex-end; font-variant-numeric: tabular-nums; font-size: .82rem; font-weight: 600; color: var(--ink-2); background: var(--surface-2); border-radius: var(--r-sm); padding: .05rem .45rem; margin: .15rem 0; display: inline-block; }
+    .bclock.active { background: var(--ink); color: #fff; }
+    .bboard { position: relative; margin: .35rem 0; }
+    .bboard .board-wrap { width: 100%; }
+    .bresult { position: absolute; inset: 0; margin: auto; width: max-content; height: max-content; display: flex; align-items: center; gap: .15rem; }
+    .bresult .rcell { width: 48px; height: 60px; display: grid; place-items: center; font-size: 2rem; font-weight: 800; box-shadow: var(--shadow-md); }
+    .bresult .rcell.w { background: #fff; color: #111; }
+    .bresult .rcell.b { background: #111; color: #fff; }
+    .bresult .rdash { color: #fff; font-weight: 800; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+
+    .ag-more { display: block; margin: 1.4rem auto 0; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font-weight: 700; padding: .6rem 1.4rem; border-radius: var(--r-md); cursor: pointer; }
+    .ag-sentinel { height: 1px; }
+</style>

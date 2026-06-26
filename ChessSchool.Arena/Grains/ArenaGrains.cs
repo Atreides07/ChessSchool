@@ -24,6 +24,7 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
     Task JoinAsync(string sub, string name);
     Task<ArenaStateDto> GetStateAsync(string sub);
     Task<TournamentSummaryDto> GetSummaryAsync();
+    Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync();
     Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move);
     Task BerserkAsync(string sub);
     Task ResignAsync(string sub);
@@ -385,11 +386,20 @@ public sealed class ArenaTournamentGrain(
             Id, _name, Status(), SecondsLeft(), _players.ContainsKey(sub),
             _players.TryGetValue(sub, out var p2) ? p2.Score : 0, standings, myGame,
             _tc, _startsAt, _durationSeconds, _players.Values.Count(p => p.IsBot),
-            BuildBoards());
+            BuildBoards(4)); // в шапке турнира — только 4 доски, остальное на /games
+    }
+
+    public async Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync()
+    {
+        EnsureConfigured();
+        Tick();
+        EnsureTimer();
+        await FlushAsync();
+        return BuildBoards(int.MaxValue); // все доски — для страницы «Все игры»
     }
 
     /// <summary>Трансляция «идёт сейчас»: активные + только что завершённые партии (с финальным счётом).</summary>
-    private IReadOnlyList<ArenaBoardDto> BuildBoards()
+    private IReadOnlyList<ArenaBoardDto> BuildBoards(int take)
     {
         var now = DateTimeOffset.UtcNow;
         return _games.Values
@@ -397,7 +407,7 @@ public sealed class ArenaTournamentGrain(
                 || (g.FinishedAt is { } f && (now - f).TotalSeconds <= 6))
             .OrderByDescending(g => g.Status == GameStatus.InProgress)
             .ThenByDescending(g => ScoreOf(g.WhiteSub) + ScoreOf(g.BlackSub))
-            .Take(6)
+            .Take(take)
             .Select(g => new ArenaBoardDto(
                 g.Id, g.Board.Fen, g.WhiteName, g.BlackName,
                 ScoreOf(g.WhiteSub), ScoreOf(g.BlackSub),

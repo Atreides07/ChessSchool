@@ -106,6 +106,30 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task GetBoards_OnRunningArena_ReturnsActiveGames()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("boards-arena");
+            await t.ConfigureAsync("Доски", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+
+            // Идущий турнир без людей добирается ботами и спаривает их → есть активные партии.
+            await t.GetSummaryAsync(); // триггерит Tick/ManageBots/PairIdlePlayers
+            var boards = await t.GetBoardsAsync();
+
+            Assert.NotEmpty(boards);
+            // Полный список (для «Все игры») не урезан до 4, как лента в шапке.
+            Assert.All(boards, b => Assert.False(string.IsNullOrEmpty(b.WhiteName)));
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
+
+    [Fact]
     public async Task FinishedTournament_ExposesRealSimulatedHistoryConsistentWithScoring()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

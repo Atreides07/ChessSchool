@@ -1,9 +1,23 @@
 @page "/majors"
+@inject NavigationManager Nav
 
 @* Известные мировые шахматные турниры на ближайшие ~2 месяца. Статический SSR: только чтение,
-   статус (идёт/скоро/завершён) считается на сервере от текущей даты. *@
+   статус (идёт/скоро/завершён) считается на сервере от текущей даты. Публичная контентная страница —
+   оптимизирована под SEO (meta/canonical/OpenGraph + schema.org Event/ItemList/BreadcrumbList). *@
 
-<PageTitle>Турниры — ChessArena</PageTitle>
+<PageTitle>Турниры мировых шахмат — расписание | ChessArena</PageTitle>
+
+<HeadContent>
+    <meta name="description" content="@MetaDescription" />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="@Canonical" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Турниры мировых шахмат — расписание" />
+    <meta property="og:description" content="@MetaDescription" />
+    <meta property="og:url" content="@Canonical" />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">@((MarkupString)JsonLd())</script>
+</HeadContent>
 
 <div class="mj-head">
     <h1 class="mj-title">Известные турниры</h1>
@@ -90,6 +104,69 @@
         a.Month == b.Month
             ? $"{a.Day}–{b.Day} {MonthsShort[b.Month]}"
             : $"{a.Day} {MonthsShort[a.Month]} – {b.Day} {MonthsShort[b.Month]}";
+
+    // ---- SEO ----
+    private string Canonical => $"{Nav.BaseUri}majors";
+
+    private string MetaDescription
+    {
+        get
+        {
+            var list = Upcoming().Take(4).Select(t => t.Name);
+            return $"Расписание известных мировых шахматных турниров на ближайшие два месяца: " +
+                   $"{string.Join(", ", list)} и другие. Даты, города, форматы.";
+        }
+    }
+
+    // schema.org: ItemList из Event-ов + BreadcrumbList (rich-результаты в поиске).
+    private string JsonLd()
+    {
+        var items = Upcoming().Select((t, i) => (object)new Dictionary<string, object?>
+        {
+            ["@type"] = "ListItem",
+            ["position"] = i + 1,
+            ["item"] = new Dictionary<string, object?>
+            {
+                ["@type"] = "Event",
+                ["name"] = t.Name,
+                ["startDate"] = t.Start.ToString("yyyy-MM-dd"),
+                ["endDate"] = t.End.ToString("yyyy-MM-dd"),
+                ["eventAttendanceMode"] = "https://schema.org/OfflineEventAttendanceMode",
+                ["location"] = new Dictionary<string, object?>
+                {
+                    ["@type"] = "Place",
+                    ["name"] = $"{t.City}, {t.Country}",
+                },
+                ["url"] = t.Url,
+            },
+        }).ToList();
+
+        var graph = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["@context"] = "https://schema.org",
+                ["@type"] = "ItemList",
+                ["name"] = "Известные шахматные турниры",
+                ["itemListElement"] = items,
+            },
+            new Dictionary<string, object?>
+            {
+                ["@context"] = "https://schema.org",
+                ["@type"] = "BreadcrumbList",
+                ["itemListElement"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 1, ["name"] = "Главная", ["item"] = Nav.BaseUri },
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 2, ["name"] = "Турниры", ["item"] = Canonical },
+                },
+            },
+        };
+
+        return System.Text.Json.JsonSerializer.Serialize(graph, new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+    }
 }
 
 <style>

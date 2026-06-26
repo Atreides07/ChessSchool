@@ -82,6 +82,25 @@ app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapSsoEndpoints();
+
+// SEO: robots.txt и sitemap.xml. Хост берём из запроса (за прокси корректен благодаря forwarded headers),
+// поэтому абсолютные URL верны без хардкода домена.
+app.MapGet("/robots.txt", (HttpRequest r) =>
+{
+    var b = $"{r.Scheme}://{r.Host}";
+    return Results.Text(
+        $"User-agent: *\nAllow: /\nDisallow: /signin\nDisallow: /signout\nSitemap: {b}/sitemap.xml\n",
+        "text/plain");
+});
+app.MapGet("/sitemap.xml", (HttpRequest r) =>
+{
+    var b = $"{r.Scheme}://{r.Host}";
+    var locs = string.Join("\n", new[] { "", "majors" }.Select(u => $"  <url><loc>{b}/{u}</loc></url>"));
+    return Results.Text(
+        $"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n{locs}\n</urlset>\n",
+        "application/xml");
+});
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

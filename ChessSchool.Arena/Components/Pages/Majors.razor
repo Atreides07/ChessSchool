@@ -1,0 +1,131 @@
+@page "/majors"
+
+@* Известные мировые шахматные турниры на ближайшие ~2 месяца. Статический SSR: только чтение,
+   статус (идёт/скоро/завершён) считается на сервере от текущей даты. *@
+
+<PageTitle>Турниры — ChessArena</PageTitle>
+
+<div class="mj-head">
+    <h1 class="mj-title">Известные турниры</h1>
+    <p class="mj-sub">Топ-события мировых шахмат на ближайшие два месяца. Время местное у организаторов.</p>
+</div>
+
+<div class="mj-grid">
+    @foreach (var t in Upcoming())
+    {
+        var st = Status(t);
+        <article class="mj-card @st.Cls">
+            <div class="mj-row">
+                <span class="mj-series @t.SeriesCls">@t.Series</span>
+                <span class="mj-status @st.Cls">@st.Label</span>
+            </div>
+            <h2 class="mj-name">@t.Name</h2>
+            <div class="mj-meta">
+                <span class="mj-date">@DateRange(t.Start, t.End)</span>
+                <span class="mj-dot">·</span>
+                <span class="mj-place">@t.Flag @t.City, @t.Country</span>
+            </div>
+            <div class="mj-foot">
+                <span class="mj-format">@t.Format</span>
+                <a class="mj-link" href="@t.Url" target="_blank" rel="noopener noreferrer">Подробнее ↗</a>
+            </div>
+        </article>
+    }
+</div>
+
+@code {
+    private sealed record Major(
+        string Name, string Series, string SeriesCls,
+        DateOnly Start, DateOnly End,
+        string City, string Country, string Flag, string Format, string Url);
+
+    // Данные на сезон 2026 (проверено по календарю FIDE/Grand Chess Tour/Wikipedia, июнь 2026).
+    private static readonly Major[] All =
+    [
+        new("SuperUnited Rapid & Blitz Croatia", "Grand Chess Tour", "gct",
+            new(2026, 6, 29), new(2026, 7, 6), "Загреб", "Хорватия", "🇭🇷", "Рапид и блиц", "https://grandchesstour.org"),
+        new("Biel Chess Festival", "Классика", "cls",
+            new(2026, 7, 11), new(2026, 7, 24), "Биль", "Швейцария", "🇨🇭", "Классика · 2700+", "https://www.bielchessfestival.ch"),
+        new("Chennai Grand Masters", "Классика", "cls",
+            new(2026, 7, 15), new(2026, 7, 23), "Ченнаи", "Индия", "🇮🇳", "Классика · круговой", "https://en.wikipedia.org/wiki/2026_in_chess"),
+        new("Saint Louis Rapid & Blitz", "Grand Chess Tour", "gct",
+            new(2026, 7, 31), new(2026, 8, 7), "Сент-Луис", "США", "🇺🇸", "Рапид и блиц", "https://grandchesstour.org"),
+        new("Sinquefield Cup", "Grand Chess Tour", "gct",
+            new(2026, 8, 8), new(2026, 8, 21), "Сент-Луис", "США", "🇺🇸", "Классика · элита", "https://grandchesstour.org"),
+        new("Cairns Cup", "Женский элит", "wom",
+            new(2026, 8, 8), new(2026, 8, 21), "Сент-Луис", "США", "🇺🇸", "Классика · круговой", "https://saintlouischessclub.org"),
+        new("GCT Finals", "Grand Chess Tour", "gct",
+            new(2026, 8, 21), new(2026, 8, 28), "Сент-Луис", "США", "🇺🇸", "Плей-офф · топ-4", "https://grandchesstour.org"),
+    ];
+
+    private static readonly string[] Months =
+        ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+    private static readonly string[] MonthsShort =
+        ["", "янв.", "фев.", "мар.", "апр.", "мая", "июня", "июля", "авг.", "сент.", "окт.", "нояб.", "дек."];
+
+    // Показываем то, что ещё не завершилось, в хронологическом порядке.
+    private static IEnumerable<Major> Upcoming()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return All.Where(t => t.End >= today).OrderBy(t => t.Start);
+    }
+
+    private static (string Label, string Cls) Status(Major t)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (today < t.Start)
+        {
+            var days = t.Start.DayNumber - today.DayNumber;
+            return days <= 1 ? ("Завтра", "soon")
+                : days <= 14 ? ($"Через {days} дн.", "soon")
+                : ("Скоро", "later");
+        }
+        if (today <= t.End) return ("Идёт сейчас", "live");
+        return ("Завершён", "done");
+    }
+
+    // «29 июня – 6 июля» / «11–24 июля» (один месяц).
+    private static string DateRange(DateOnly a, DateOnly b) =>
+        a.Month == b.Month
+            ? $"{a.Day}–{b.Day} {MonthsShort[b.Month]}"
+            : $"{a.Day} {MonthsShort[a.Month]} – {b.Day} {MonthsShort[b.Month]}";
+}
+
+<style>
+    .mj-head { margin-bottom: 1.4rem; }
+    .mj-title { font-size: 1.9rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: 0 0 .35rem; }
+    .mj-sub { color: var(--ink-2); margin: 0; }
+
+    .mj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+
+    .mj-card {
+        background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+        padding: 1.1rem 1.15rem; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: .55rem;
+        transition: box-shadow .15s ease, transform .15s ease;
+    }
+    .mj-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .mj-card.live { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+    .mj-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+
+    .mj-series { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .2rem .5rem; border-radius: var(--r-pill); }
+    .mj-series.gct { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+    .mj-series.cls { background: var(--surface-2); color: var(--ink-2); }
+    .mj-series.wom { background: #fbe6f1; color: #b5277e; }
+
+    .mj-status { font-size: .74rem; font-weight: 700; padding: .2rem .5rem; border-radius: var(--r-pill); }
+    .mj-status.live { background: #ffe3e0; color: #d23b2e; }
+    .mj-status.soon { background: #e7f4e9; color: #2e8b57; }
+    .mj-status.later, .mj-status.done { background: var(--surface-2); color: var(--muted); }
+
+    .mj-name { font-size: 1.12rem; font-weight: 720; color: var(--ink); margin: 0; line-height: 1.25; }
+    .mj-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; color: var(--ink-2); font-size: .92rem; }
+    .mj-date { font-weight: 640; color: var(--ink); }
+    .mj-dot { color: var(--muted); }
+
+    .mj-foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .25rem; padding-top: .7rem; border-top: 1px solid var(--line); }
+    .mj-format { font-size: .82rem; color: var(--muted); }
+    .mj-link { font-size: .88rem; font-weight: 640; color: var(--accent); }
+    .mj-link:hover { text-decoration: underline; }
+</style>

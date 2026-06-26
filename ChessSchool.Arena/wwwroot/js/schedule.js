@@ -46,20 +46,21 @@
         positionNow(grid);
     }
 
-    function scrollToNow(grid, area, center) {
+    function scrollToNow(grid, area, center, smooth = true) {
         const start = parseInt(grid.getAttribute('data-start'), 10);
         const now = Date.now() / 1000;
         if (isNaN(start)) return;
         const x = gutterWidth(grid) + ((now - start) / HALF) * colWidth(grid);
         const target = center ? x - area.clientWidth / 2 : x - gutterWidth(grid) - 20;
-        area.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+        area.scrollTo({ left: Math.max(0, target), behavior: smooth ? 'smooth' : 'auto' });
     }
 
     // Пересчёт ширины колонок, линии времени и прокрутки к «сейчас» (когда таймлайн виден).
-    function refresh(grid, area) {
+    // smooth=false — для первой отрисовки/возврата (без анимации, чтобы не было «прыжка»).
+    function refresh(grid, area, smooth = true) {
         applyZoom(grid, area, currentZoom);
         positionNow(grid);
-        scrollToNow(grid, area, true);
+        scrollToNow(grid, area, true, smooth);
     }
 
     function init() {
@@ -88,12 +89,12 @@
         // Возврат к виду «Таймлайн» (переключатель Список↔Таймлайн): таймлайн был скрыт
         // (нулевая ширина) → пересчитываем колонки и заново ставим линию времени.
         document.querySelectorAll('input[name="schedview"]').forEach(r => r.addEventListener('change', () => {
-            if (document.getElementById('sv-tl')?.checked) requestAnimationFrame(() => refresh(grid, area));
+            if (document.getElementById('sv-tl')?.checked) requestAnimationFrame(() => refresh(grid, area, false));
         }));
 
-        // Старт: масштаб 4ч, линия времени, прокрутка к «сейчас».
+        // Старт: масштаб 4ч, линия времени, прокрутка к «сейчас» — мгновенно (без анимации).
         currentZoom = 4;
-        refresh(grid, area);
+        refresh(grid, area, false);
 
         // Пересчёт ширины колонок при ресайзе окна.
         window.removeEventListener('resize', window.__tlResize || (() => { }));
@@ -101,16 +102,25 @@
         window.addEventListener('resize', window.__tlResize);
     }
 
-    // Сторож: переживает SSR/enhanced-навигацию. Если на странице появилась новая сетка
-    // (после перехода/возврата) — инициализируем её; иначе просто двигаем линию времени.
+    // Линия времени тикает раз в 5с (только сдвиг now-линии у готовой сетки).
     function startWatchdog() {
         clearInterval(window.__tlTimer);
         window.__tlTimer = setInterval(() => {
             const g = document.querySelector('[data-tl-grid]');
-            if (!g) return;
-            if (g.dataset.tlReady !== '1') init();
-            else positionNow(g);
+            if (g && g.dataset.tlReady === '1') positionNow(g);
         }, 5000);
+    }
+
+    // Мгновенная инициализация при появлении сетки в DOM (Blazor enhanced-навигация заново
+    // вставляет разметку, но не перезапускает скрипты и не всегда шлёт enhancedload —
+    // поэтому ждём именно появление узла, а не 5-секундный тик).
+    function watchForGrid() {
+        if (window.__tlObserver) return;
+        window.__tlObserver = new MutationObserver(() => {
+            const g = document.querySelector('[data-tl-grid]');
+            if (g && g.dataset.tlReady !== '1') boot();
+        });
+        window.__tlObserver.observe(document.documentElement, { childList: true, subtree: true });
     }
 
     // Запоминаем выбранный вид (Таймлайн/Список) в cookie — сервер восстанавливает его при
@@ -138,6 +148,8 @@
 
     function boot() { restoreView(); init(); startWatchdog(); }
 
+    watchForGrid(); // ловим появление сетки сразу, без задержки
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', boot);
     } else {
@@ -146,5 +158,5 @@
     // Blazor enhanced navigation: повторная инициализация после обновления DOM.
     document.addEventListener('enhancedload', boot);
     // Возврат по кнопке «Назад» (в т.ч. из bfcache).
-    window.addEventListener('pageshow', restoreView);
+    window.addEventListener('pageshow', boot);
 })();

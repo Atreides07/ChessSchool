@@ -99,7 +99,10 @@ in-proc + **PostgreSQL** (контейнер от Aspire). Прод: Orleans clu
    дашборда** (совпадает с seeded redirect_uri). Иначе OIDC строит redirect_uri с Kestrel-портом → `invalid_request`.
 7. **HTTP 431 на всех localhost-страницах = раздутая auth-cookie.** Фикс в
    [SsoExtensions](ChessSchool.WebAuth/SsoExtensions.cs): server-side ticket-store (в cookie только ключ) +
-   `Kestrel MaxRequestHeadersTotalSize=256KB`.
+   `Kestrel MaxRequestHeadersTotalSize=256KB`. Ticket-store **файловый** (`FileSystemTicketStore`,
+   тикет шифруется DataProtection, папка `keys/auth-tickets`) — переживает перезапуск сервиса, иначе
+   авторизованный пользователь после рестарта «выпадал» во «Вход» (in-memory терял тикеты). Прод —
+   распределённый стор (Redis), общий для всех нод.
 8. **Health-checks AppHost:** `WithHttpHealthCheck` по https с dev-сертификатом вешает `WaitFor`-каскад.
    Health маппится всегда (не только Development), интеграционный тест ждёт состояния `Running`, не `Healthy`.
 9. **Arena-турнир переживает деактивацию грейна.** Мета+таблица персистятся в grain storage `"arena"`

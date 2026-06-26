@@ -1,10 +1,11 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -80,8 +81,11 @@ public static class SsoExtensions
 
         // Серверное хранилище тикетов: в cookie остаётся только ключ, а большие OIDC-токены
         // (access/id/refresh) хранятся на сервере. Иначе cookie раздувается и Kestrel отвечает HTTP 431.
-        builder.Services.AddMemoryCache();
-        builder.Services.AddSingleton<ITicketStore, MemoryCacheTicketStore>();
+        // Хранилище файловое (тикет шифруется DataProtection) — переживает перезапуск сервиса, поэтому
+        // авторизованный пользователь остаётся авторизованным после рестарта (а не «выпадает» во «Вход»).
+        var ticketDir = Path.Combine(builder.Environment.ContentRootPath, "keys", "auth-tickets");
+        builder.Services.AddSingleton<ITicketStore>(sp =>
+            new FileSystemTicketStore(ticketDir, sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
             .Configure<ITicketStore>((o, store) => o.SessionStore = store);
     }
@@ -102,34 +106,70 @@ public static class SsoExtensions
 }
 
 /// <summary>
-/// Хранит тикет аутентификации на сервере (in-memory); в cookie кладётся только короткий ключ.
-/// Это держит cookie маленькой даже при больших OIDC-токенах. Для прод-многонодового сценария
-/// заменить на распределённый кэш (Redis). При перезапуске сервиса тикеты теряются — нужен повторный вход.
+/// Хранит тикет аутентификации на сервере в файле; в cookie кладётся только короткий ключ.
+/// Это держит cookie маленькой даже при больших OIDC-токенах И переживает перезапуск сервиса
+/// (in-memory-вариант терял тикеты при рестарте → пользователь «выпадал» в неавторизованного).
+/// Тикет на диске шифруется DataProtection. Для прод-многонодового сценария заменить на
+/// распределённый кэш (Redis) — общий стор для всех нод.
 /// </summary>
-public sealed class MemoryCacheTicketStore(IMemoryCache cache) : ITicketStore
+public sealed class FileSystemTicketStore : ITicketStore
 {
-    private const string Prefix = "auth-ticket:";
+    private static readonly Regex KeyPattern = new("^[0-9a-fA-F]{32}$", RegexOptions.Compiled);
+    private readonly string _dir;
+    private readonly IDataProtector _protector;
 
-    public Task<string> StoreAsync(AuthenticationTicket ticket)
+    public FileSystemTicketStore(string dir, IDataProtectionProvider dataProtection)
     {
-        var key = Prefix + Guid.NewGuid().ToString("N");
-        return RenewAsync(key, ticket).ContinueWith(_ => key);
+        _dir = dir;
+        Directory.CreateDirectory(_dir);
+        _protector = dataProtection.CreateProtector("ChessSchool.WebAuth.FileSystemTicketStore.v1");
     }
 
-    public Task RenewAsync(string key, AuthenticationTicket ticket)
+    public async Task<string> StoreAsync(AuthenticationTicket ticket)
     {
-        var options = new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(8) };
-        if (ticket.Properties.ExpiresUtc is { } exp) options.AbsoluteExpiration = exp.AddHours(8);
-        cache.Set(key, ticket, options);
-        return Task.CompletedTask;
+        var key = Guid.NewGuid().ToString("N");
+        await RenewAsync(key, ticket);
+        return key;
     }
 
-    public Task<AuthenticationTicket?> RetrieveAsync(string key) =>
-        Task.FromResult(cache.Get<AuthenticationTicket>(key));
+    public async Task RenewAsync(string key, AuthenticationTicket ticket)
+    {
+        if (!KeyPattern.IsMatch(key)) return;
+        var bytes = TicketSerializer.Default.Serialize(ticket);
+        await File.WriteAllBytesAsync(PathFor(key), _protector.Protect(bytes));
+    }
+
+    public async Task<AuthenticationTicket?> RetrieveAsync(string key)
+    {
+        if (!KeyPattern.IsMatch(key)) return null; // защита от path traversal
+        var path = PathFor(key);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var bytes = _protector.Unprotect(await File.ReadAllBytesAsync(path));
+            var ticket = TicketSerializer.Default.Deserialize(bytes);
+            if (ticket?.Properties.ExpiresUtc is { } exp && exp < DateTimeOffset.UtcNow)
+            {
+                await RemoveAsync(key);
+                return null;
+            }
+            return ticket;
+        }
+        catch
+        {
+            return null; // повреждённый/нерасшифровываемый тикет → как будто его нет
+        }
+    }
 
     public Task RemoveAsync(string key)
     {
-        cache.Remove(key);
+        if (KeyPattern.IsMatch(key))
+        {
+            var path = PathFor(key);
+            if (File.Exists(path)) File.Delete(path);
+        }
         return Task.CompletedTask;
     }
+
+    private string PathFor(string key) => Path.Combine(_dir, key + ".tkt");
 }

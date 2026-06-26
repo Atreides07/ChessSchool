@@ -33,57 +33,66 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
 
 public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDirectoryGrain
 {
-    private sealed record Slot(string Id, string Name, TimeControl Tc, DateTimeOffset StartsAt, int DurationSeconds);
-
-    // Описание повторяющихся серий: тип, тайм-контроль, шаг (часы), длительность (сек), смещение (мин).
-    private static readonly (string Type, TimeControl Tc, int StepHours, int DurationSec, int OffsetMin)[] Series =
-    [
-        ("Bullet", new TimeControl(60, 0), 3, 3600, 0),
-        ("Blitz", new TimeControl(180, 0), 1, 3600, 0),   // блиц каждый час — непрерывная лента
-        ("Rapid", new TimeControl(600, 0), 3, 5400, 30),
-    ];
-
-    private const int WindowBackHours = 3;
-    private const int WindowAheadHours = 6;
-
     public async Task<IReadOnlyList<TournamentSummaryDto>> ListAsync()
     {
         var now = DateTimeOffset.Now;
         var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset)
-            .AddHours(-WindowBackHours);
-        var windowEnd = windowStart.AddHours(WindowBackHours + WindowAheadHours);
+            .AddHours(-ArenaSchedule.WindowBackHours);
+        var windowEnd = windowStart.AddHours(ArenaSchedule.WindowBackHours + ArenaSchedule.WindowAheadHours);
 
-        var slots = new List<Slot>();
-        foreach (var (type, tc, stepHours, durationSec, offsetMin) in Series)
-        {
-            for (var t = windowStart.AddMinutes(offsetMin); t < windowEnd; t = t.AddHours(stepHours))
-            {
-                var id = $"{type.ToLowerInvariant()}-{t.ToUnixTimeSeconds()}";
-                var name = $"{type} {tc} {t:HH:mm}";
-                slots.Add(new Slot(id, name, tc, t, durationSec));
-            }
-        }
+        var ids = new List<string>();
+        foreach (var spec in ArenaSchedule.Series)
+            for (var t = windowStart.AddMinutes(spec.OffsetMin); t < windowEnd; t = t.AddHours(spec.StepHours))
+                ids.Add(ArenaSchedule.MakeId(spec.Type, t));
 
-        // Конфигурируем грейны параллельно и собираем карточки.
-        var tasks = slots.Select(async s =>
-        {
-            var g = grains.GetGrain<IArenaTournamentGrain>(s.Id);
-            bool finished = s.StartsAt.AddSeconds(s.DurationSeconds) <= now;
-            if (finished)
-                await g.ConfigureFinishedDemoAsync(s.Name, s.Tc, s.StartsAt, s.DurationSeconds);
-            else
-                await g.ConfigureAsync(s.Name, s.Tc, s.StartsAt, s.DurationSeconds);
-            return await g.GetSummaryAsync();
-        });
-
+        // Грейн сам конфигурируется из своего id (см. EnsureConfigured) — каталогу достаточно
+        // запросить карточку. Делаем это параллельно.
+        var tasks = ids.Select(id => grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync());
         var list = await Task.WhenAll(tasks);
         return list.OrderBy(t => t.StartsAt).ToList();
     }
 }
 
+// ----------------------- Персистентное состояние турнира -----------------------
+
+/// <summary>
+/// Долговечная часть турнира (мета + таблица). Сохраняется в grain storage, поэтому переживает
+/// деактивацию грейна: при повторной активации очки/серии/история партий восстанавливаются.
+/// Активные партии (доски) намеренно НЕ сохраняем — при реактивации простаивающие игроки
+/// мгновенно переспариваются, прерванная партия начинается заново (потеря одной партии терпима).
+/// </summary>
+[GenerateSerializer]
+public sealed class ArenaPersistedState
+{
+    [Id(0)] public bool Configured { get; set; }
+    [Id(1)] public bool FinishedDemo { get; set; }
+    [Id(2)] public string Name { get; set; } = "";
+    [Id(3)] public TimeControl Tc { get; set; } = new(180, 0);
+    [Id(4)] public int DurationSeconds { get; set; }
+    [Id(5)] public DateTimeOffset StartsAt { get; set; }
+    [Id(6)] public int BotCounter { get; set; }
+    [Id(7)] public List<PersistedPlayer> Players { get; set; } = [];
+}
+
+[GenerateSerializer]
+public sealed class PersistedPlayer
+{
+    [Id(0)] public string Key { get; set; } = "";
+    [Id(1)] public string Name { get; set; } = "";
+    [Id(2)] public bool IsBot { get; set; }
+    [Id(3)] public int Score { get; set; }
+    [Id(4)] public int Streak { get; set; }
+    [Id(5)] public int Games { get; set; }
+    [Id(6)] public int Wins { get; set; }
+    [Id(7)] public List<int> Results { get; set; } = [];
+}
+
 // ----------------------- Турнир -----------------------
 
-public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine engine) : Grain, IArenaTournamentGrain
+public sealed class ArenaTournamentGrain(
+    [PersistentState("tournament", "arena")] IPersistentState<ArenaPersistedState> store,
+    ArenaNotifier notifier,
+    IChessEngine engine) : Grain, IArenaTournamentGrain
 {
     private sealed class Player
     {
@@ -125,6 +134,8 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
     }
 
     private bool _configured;
+    private bool _finishedDemo;
+    private bool _dirty;
     private string _name = "";
     private TimeControl _tc = TimeControl.Blitz;
     private int _durationSeconds;
@@ -137,6 +148,88 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
 
     private string Id => this.GetPrimaryKeyString();
 
+    // ----------------------- Активация / персистентность -----------------------
+
+    public override Task OnActivateAsync(CancellationToken cancellationToken)
+    {
+        if (store.State.Configured) LoadFromStore();
+        return base.OnActivateAsync(cancellationToken);
+    }
+
+    /// <summary>Восстанавливает мету и таблицу из хранилища (после деактивации/реактивации грейна).</summary>
+    private void LoadFromStore()
+    {
+        var s = store.State;
+        _configured = true;
+        _finishedDemo = s.FinishedDemo;
+        _name = s.Name;
+        _tc = s.Tc;
+        _durationSeconds = s.DurationSeconds;
+        _startsAt = s.StartsAt;
+        _botCounter = s.BotCounter;
+        foreach (var p in s.Players)
+        {
+            var pl = new Player { Name = p.Name, IsBot = p.IsBot, Score = p.Score, Streak = p.Streak, Games = p.Games, Wins = p.Wins };
+            pl.Results.AddRange(p.Results);
+            _players[p.Key] = pl; // runtime-поля (Playing/GameId/WaitingSince) сбрасываются — игрок переспарится
+        }
+        EnsureTimer();
+    }
+
+    /// <summary>Грейн сам выводит мету из своего id (см. <see cref="ArenaSchedule"/>) при первом обращении.</summary>
+    private void EnsureConfigured()
+    {
+        if (_configured) return;
+        if (ArenaSchedule.Resolve(Id) is not { } meta) return; // id вне расписания (напр. тестовый) — ждём ConfigureAsync
+
+        _configured = true;
+        _name = meta.Name;
+        _tc = meta.Tc;
+        _startsAt = meta.StartsAt.ToUniversalTime();
+        _durationSeconds = meta.DurationSeconds;
+
+        // Слот, который уже закончился к моменту первого появления на сервере, — без реальной истории:
+        // показываем детерминированную симуляцию. Турнир, прошедший вживую, сохраняет настоящую таблицу.
+        if (_startsAt.AddSeconds(_durationSeconds) <= DateTimeOffset.UtcNow)
+        {
+            SimulateFinished();
+            _finishedDemo = true;
+        }
+        _dirty = true;
+        EnsureTimer();
+    }
+
+    private void Snapshot()
+    {
+        var s = store.State;
+        s.Configured = _configured;
+        s.FinishedDemo = _finishedDemo;
+        s.Name = _name;
+        s.Tc = _tc;
+        s.DurationSeconds = _durationSeconds;
+        s.StartsAt = _startsAt;
+        s.BotCounter = _botCounter;
+        s.Players = _players.Select(kv => new PersistedPlayer
+        {
+            Key = kv.Key,
+            Name = kv.Value.Name,
+            IsBot = kv.Value.IsBot,
+            Score = kv.Value.Score,
+            Streak = kv.Value.Streak,
+            Games = kv.Value.Games,
+            Wins = kv.Value.Wins,
+            Results = kv.Value.Results.ToList()
+        }).ToList();
+    }
+
+    private async Task FlushAsync()
+    {
+        if (!_dirty) return;
+        Snapshot();
+        await store.WriteStateAsync();
+        _dirty = false;
+    }
+
     private TournamentStatus Status()
     {
         var now = DateTimeOffset.UtcNow;
@@ -145,80 +238,135 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         return TournamentStatus.Finished;
     }
 
-    public Task ConfigureAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds)
+    public async Task ConfigureAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds)
     {
-        if (_configured) return Task.CompletedTask;
+        if (_configured) return;
         _configured = true;
         _name = name;
         _tc = tc;
         _startsAt = startsAt.ToUniversalTime();
         _durationSeconds = durationSeconds;
+        _dirty = true;
         EnsureTimer();
-        return Task.CompletedTask;
+        await FlushAsync();
     }
 
-    /// <summary>Сидирует завершённый турнир с готовой таблицей — для демонстрации страницы результатов.</summary>
-    public Task ConfigureFinishedDemoAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds)
+    // Состав завершённых турниров: имя + «сила» (влияет на вероятность победы) + признак бота.
+    private static readonly (string Name, double Strength, bool Bot)[] FinishedRoster =
+    [
+        ("ArenaHost_0", 1.35, false), ("Zugzwang_42", 1.30, false), ("Leela_Zero", 1.20, true),
+        ("French_Winawer", 1.10, false), ("DeepBlue_v2", 1.05, true), ("Morphy_Machine", 1.00, false),
+        ("Stockfish_15", 0.95, true), ("Komodo_X", 0.90, true), ("Tal_Tactics", 0.85, false),
+        ("Rook_Rampage", 0.80, false), ("Endgame_Esra", 0.75, false), ("Fritz_9", 0.70, true),
+    ];
+
+    /// <summary>
+    /// «Проигрывает» завершённый турнир детерминированно (сид от id): пейринг по очкам, исходы
+    /// взвешены силой игроков, начисление — строго по <see cref="ArenaScoring"/>. Таблица и история
+    /// партий получаются реальными (а не случайными числами) и согласованы с «Порядком начисления очков».
+    /// </summary>
+    public async Task ConfigureFinishedDemoAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds)
     {
-        if (_configured) return Task.CompletedTask;
+        if (_configured) return;
         _configured = true;
+        _finishedDemo = true;
         _name = name;
         _tc = tc;
         _startsAt = startsAt.ToUniversalTime();
         _durationSeconds = durationSeconds;
-
-        AddDemoPlayer("ArenaHost_0", 20, 0, 14, 8, [2, 2, 0, 0, 0, 2, 2, 4, 0, 2, 2, 4, 0, 2]);
-        AddDemoPlayer("French_Winawer", 15, 2, 15, 6, [2, 1, 0, 1, 2, 1, 2, 2, 0, 0, 2, 0, 0, 2, 2]);
-        AddDemoPlayer("DeepBlue_v2", 13, 0, 15, 5, [0, 1, 2, 1, 0, 1, 0, 0, 2, 2, 0, 2, 2, 0, 0]);
-        AddDemoPlayer("Stockfish_15", 12, 0, 14, 5, [0, 0, 2, 2, 4, 0, 0, 0, 2, 0, 0, 0, 2, 0]);
-        return Task.CompletedTask;
+        SimulateFinished();
+        _dirty = true;
+        await FlushAsync();
     }
 
-    private void AddDemoPlayer(string name, int score, int streak, int games, int wins, int[] results)
+    private void SimulateFinished()
     {
-        var p = new Player { Name = name, Score = score, Streak = streak, Games = games, Wins = wins };
-        p.Results.AddRange(results);
-        _players[name] = p;
+        // Детерминированный сид от id турнира → одинаковая история при каждом просмотре.
+        int seed = 17;
+        foreach (var ch in Id) seed = unchecked(seed * 31 + ch) & 0x7fffffff;
+        var rng = new Random(seed);
+
+        int count = 8 + rng.Next(0, 5); // 8..12 участников
+        var roster = FinishedRoster.OrderBy(_ => rng.Next()).Take(count).ToList();
+        var strength = new Dictionary<string, double>();
+        foreach (var (rname, str, bot) in roster)
+        {
+            _players[rname] = new Player { Name = rname, IsBot = bot };
+            strength[rname] = str * (0.85 + rng.NextDouble() * 0.3); // лёгкий разброс формы
+        }
+
+        // Число туров оцениваем по длительности и средней партии данного контроля.
+        int avgGameSec = Math.Max(45, _tc.InitialSeconds + _tc.IncrementSeconds * 20);
+        int rounds = Math.Clamp(_durationSeconds / Math.Max(30, avgGameSec / 4), 8, 22);
+
+        for (int r = 0; r < rounds; r++)
+        {
+            // Пейринг по очкам (как на lichess), внутри равных очков — случайно.
+            var order = _players.Values
+                .OrderByDescending(p => p.Score).ThenBy(_ => rng.Next())
+                .ToList();
+            for (int i = 0; i + 1 < order.Count; i += 2)
+            {
+                var a = order[i];
+                var b = order[i + 1];
+                double pa = strength[a.Name], pb = strength[b.Name];
+                if (rng.NextDouble() < 0.18) { Award(a, 0.5); Award(b, 0.5); } // ничья
+                else if (rng.NextDouble() * (pa + pb) < pa) { Award(a, 1.0); Award(b, 0.0); }
+                else { Award(a, 0.0); Award(b, 1.0); }
+            }
+        }
     }
 
     private void EnsureTimer()
     {
-        if (_timer is null && Status() == TournamentStatus.Running)
-            _timer = this.RegisterGrainTimer(OnTimerAsync, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        if (Status() != TournamentStatus.Running) return;
+        // Пока турнир идёт, держим грейн активным: иначе при простое он деактивируется,
+        // партии встанут, а боты перестанут ходить. Состояние всё равно персистится.
+        DelayDeactivation(TimeSpan.FromMinutes(10));
+        _timer ??= this.RegisterGrainTimer(OnTimerAsync, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
     private async Task OnTimerAsync()
     {
         Tick();
         await DriveBotsAsync(); // ходы ботов через Stockfish (серверная игра)
+        await FlushAsync();
         notifier.Notify(Id);
     }
 
-    public Task JoinAsync(string sub, string name)
+    public async Task JoinAsync(string sub, string name)
     {
+        EnsureConfigured();
         // Регистрация возможна и до старта (Created), и во время турнира (Running).
-        if (Status() == TournamentStatus.Finished) return Task.CompletedTask;
+        if (Status() == TournamentStatus.Finished) return;
         if (!_players.ContainsKey(sub))
+        {
             _players[sub] = new Player { Name = name, WaitingSince = DateTimeOffset.UtcNow };
+            _dirty = true;
+        }
         EnsureTimer();
         Tick();
+        await FlushAsync();
         notifier.Notify(Id);
-        return Task.CompletedTask;
     }
 
-    public Task<TournamentSummaryDto> GetSummaryAsync()
+    public async Task<TournamentSummaryDto> GetSummaryAsync()
     {
+        EnsureConfigured();
         Tick();
         EnsureTimer();
-        return Task.FromResult(new TournamentSummaryDto(
+        await FlushAsync();
+        return new TournamentSummaryDto(
             Id, _name, _tc, Status(), _players.Count, SecondsLeft(),
-            _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds));
+            _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds);
     }
 
-    public Task<ArenaStateDto> GetStateAsync(string sub)
+    public async Task<ArenaStateDto> GetStateAsync(string sub)
     {
+        EnsureConfigured();
         Tick();
         EnsureTimer();
+        await FlushAsync();
 
         var standings = _players
             .OrderByDescending(p => p.Value.Score)
@@ -231,26 +379,47 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         if (_players.TryGetValue(sub, out var me) && me.GameId is { } gid && _games.TryGetValue(gid, out var g))
             myGame = BuildGameDto(g, sub);
 
-        return Task.FromResult(new ArenaStateDto(
+        return new ArenaStateDto(
             Id, _name, Status(), SecondsLeft(), _players.ContainsKey(sub),
             _players.TryGetValue(sub, out var p2) ? p2.Score : 0, standings, myGame,
-            _tc, _startsAt, _durationSeconds, _players.Values.Count(p => p.IsBot)));
+            _tc, _startsAt, _durationSeconds, _players.Values.Count(p => p.IsBot),
+            BuildBoards());
     }
 
-    public Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move)
+    /// <summary>Трансляция «идёт сейчас»: активные + только что завершённые партии (с финальным счётом).</summary>
+    private IReadOnlyList<ArenaBoardDto> BuildBoards()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return _games.Values
+            .Where(g => g.Status == GameStatus.InProgress
+                || (g.FinishedAt is { } f && (now - f).TotalSeconds <= 6))
+            .OrderByDescending(g => g.Status == GameStatus.InProgress)
+            .ThenByDescending(g => ScoreOf(g.WhiteSub) + ScoreOf(g.BlackSub))
+            .Take(6)
+            .Select(g => new ArenaBoardDto(
+                g.Id, g.Board.Fen, g.WhiteName, g.BlackName,
+                ScoreOf(g.WhiteSub), ScoreOf(g.BlackSub),
+                g.WhiteMs, g.BlackMs, g.Board.Turn, g.Status, g.Result,
+                g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare))
+            .ToList();
+    }
+
+    private int ScoreOf(string sub) => _players.TryGetValue(sub, out var p) ? p.Score : 0;
+
+    public async Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move)
     {
         if (!_players.TryGetValue(sub, out var player) || player.GameId is null)
-            return Task.FromResult<ArenaGameDto?>(null);
+            return null;
         if (!_games.TryGetValue(player.GameId, out var game) || game.Status != GameStatus.InProgress)
-            return Task.FromResult<ArenaGameDto?>(null);
+            return null;
 
         var mover = sub == game.WhiteSub ? Color.White : Color.Black;
-        if (mover != game.Board.Turn) return Task.FromResult<ArenaGameDto?>(null);
+        if (mover != game.Board.Turn) return null;
 
-        if (DeductClock(game, mover)) { FinishGame(game); notifier.Notify(Id); return Task.FromResult<ArenaGameDto?>(BuildGameDto(game, sub)); }
+        if (DeductClock(game, mover)) { FinishGame(game); await FlushAsync(); notifier.Notify(Id); return BuildGameDto(game, sub); }
 
         if (!game.Board.TryMove(move.From, move.To, move.Promotion))
-            return Task.FromResult<ArenaGameDto?>(BuildGameDto(game, sub));
+            return BuildGameDto(game, sub);
 
         if (mover == Color.White) { game.WhiteMoved = true; if (!game.WhiteBerserk) game.WhiteMs += _tc.IncrementSeconds * 1000L; }
         else { game.BlackMoved = true; if (!game.BlackBerserk) game.BlackMs += _tc.IncrementSeconds * 1000L; }
@@ -262,8 +431,9 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
             FinishGame(game);
         }
 
+        await FlushAsync();
         notifier.Notify(Id);
-        return Task.FromResult<ArenaGameDto?>(BuildGameDto(game, sub));
+        return BuildGameDto(game, sub);
     }
 
     public Task BerserkAsync(string sub)
@@ -278,7 +448,7 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
         return Task.CompletedTask;
     }
 
-    public Task ResignAsync(string sub)
+    public async Task ResignAsync(string sub)
     {
         if (_players.TryGetValue(sub, out var player) && player.GameId is { } gid
             && _games.TryGetValue(gid, out var game) && game.Status == GameStatus.InProgress)
@@ -286,9 +456,9 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
             game.Result = sub == game.WhiteSub ? GameResult.BlackWins : GameResult.WhiteWins;
             game.Reason = GameEndReason.Resignation;
             FinishGame(game);
+            await FlushAsync();
             notifier.Notify(Id);
         }
-        return Task.CompletedTask;
     }
 
     // ----------------------- Внутренняя логика -----------------------
@@ -314,7 +484,7 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
 
         var now = DateTimeOffset.UtcNow;
         foreach (var g in _games.Values.Where(g => g.Status != GameStatus.InProgress
-            && g.FinishedAt is { } f && (now - f).TotalSeconds > 3).ToList())
+            && g.FinishedAt is { } f && (now - f).TotalSeconds > 6).ToList())
         {
             foreach (var s in new[] { g.WhiteSub, g.BlackSub }) FreePlayer(s);
             _games.Remove(g.Id);
@@ -343,6 +513,7 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
             var key = $"bot-{Id}-{_botCounter}";
             _players[key] = new Player { Name = BotName(_botCounter), IsBot = true, WaitingSince = DateTimeOffset.UtcNow };
             bots++;
+            _dirty = true;
         }
 
         if (bots > targetBots)
@@ -352,6 +523,7 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
                 if (bots <= targetBots) break;
                 _players.Remove(kv.Key);
                 bots--;
+                _dirty = true;
             }
         }
     }
@@ -464,6 +636,8 @@ public sealed class ArenaTournamentGrain(ArenaNotifier notifier, IChessEngine en
 
         if (g.Result == GameResult.WhiteWins && g.WhiteBerserk) white.Score += 1;
         if (g.Result == GameResult.BlackWins && g.BlackBerserk) black.Score += 1;
+
+        _dirty = true; // изменилась таблица — сохранить, чтобы пережить деактивацию грейна
     }
 
     private static void Award(Player p, double outcome)

@@ -102,6 +102,13 @@ in-proc + **PostgreSQL** (контейнер от Aspire). Прод: Orleans clu
    `Kestrel MaxRequestHeadersTotalSize=256KB`.
 8. **Health-checks AppHost:** `WithHttpHealthCheck` по https с dev-сертификатом вешает `WaitFor`-каскад.
    Health маппится всегда (не только Development), интеграционный тест ждёт состояния `Running`, не `Healthy`.
+9. **Arena-турнир переживает деактивацию грейна.** Мета+таблица персистятся в grain storage `"arena"`
+   ([Program.cs](ChessSchool.Arena/Program.cs) `AddMemoryGrainStorage("arena")`, dev), грейн сам выводит
+   мету из своего id через [ArenaSchedule](ChessSchool.Arena/Services/ArenaSchedule.cs) (`EnsureConfigured`),
+   а пока турнир идёт держит себя живым (`DelayDeactivation`). Активные доски НЕ персистятся (при реактивации
+   игроки переспариваются). Прод-долговечность через перезапуск силоса — заменить memory-storage на
+   AdoNet(Postgres)/Redis. **Тестовый силос обязан тоже звать `AddMemoryGrainStorage("arena")`**, иначе
+   `[PersistentState("tournament","arena")]` не резолвится.
 
 ## Безопасность и конфигурация
 
@@ -109,4 +116,12 @@ in-proc + **PostgreSQL** (контейнер от Aspire). Прод: Orleans clu
   держать актуальным. Не копировать секреты в коммиты/PR.
 - В репозиторий **не коммитятся**: `.env`, `*.db*`, `**/keys/*.pem` (см. [.gitignore](.gitignore)).
 - Локально секреты подставляет AppHost (`InternalApiKey=dev-internal-key`). В проде — KMS/Key Vault, PostgreSQL, Redis.
-- Коммитить/пушить только по явной просьбе пользователя.
+
+## Правило коммита
+
+- **Закончил задачу — коммить сам, если всё работает.** «Работает» = собирается (`dotnet build`),
+  зелёные тесты (`dotnet test`), чистый `dotnet format`. Изменения, не покрытые тестами, — добавить тесты.
+  Сообщение коммита по-русски, осмысленное.
+- **Если что-то не работает — НЕ коммить.** Вместо коммита показать пользователю, что именно сломано
+  (ошибка сборки / упавший тест / лог) и что нужно доделать, чтобы заработало.
+- **Push — по-прежнему только по явной просьбе.** Коммит ≠ push.

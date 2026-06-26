@@ -37,6 +37,24 @@ public sealed record ArenaStandingRow(
     [property: Id(7)] int Wins,
     [property: Id(8)] IReadOnlyList<int> Results);
 
+/// <summary>Партия для трансляции «идёт сейчас» (ориентация доски — белые снизу, очки турнира у имён).</summary>
+[GenerateSerializer]
+public sealed record ArenaBoardDto(
+    [property: Id(0)] string GameId,
+    [property: Id(1)] string Fen,
+    [property: Id(2)] string WhiteName,
+    [property: Id(3)] string BlackName,
+    [property: Id(4)] int WhiteScore,
+    [property: Id(5)] int BlackScore,
+    [property: Id(6)] long WhiteMs,
+    [property: Id(7)] long BlackMs,
+    [property: Id(8)] PieceColor Turn,
+    [property: Id(9)] GameStatus Status,
+    [property: Id(10)] GameResult Result,
+    [property: Id(11)] string? LastFrom = null,
+    [property: Id(12)] string? LastTo = null,
+    [property: Id(13)] string? CheckSquare = null);
+
 /// <summary>Текущая партия игрока внутри турнира.</summary>
 [GenerateSerializer]
 public sealed record ArenaGameDto(
@@ -72,4 +90,5 @@ public sealed record ArenaStateDto(
     [property: Id(8)] TimeControl TimeControl,
     [property: Id(9)] DateTimeOffset StartedAt,
     [property: Id(10)] int DurationSeconds,
-    [property: Id(11)] int BotCount);
+    [property: Id(11)] int BotCount,
+    [property: Id(12)] IReadOnlyList<ArenaBoardDto> Boards);

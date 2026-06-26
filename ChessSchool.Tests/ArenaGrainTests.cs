@@ -17,12 +17,15 @@ public class ArenaGrainTests
 
     private sealed class SiloConfigurator : ISiloConfigurator
     {
-        public void Configure(ISiloBuilder siloBuilder) =>
+        public void Configure(ISiloBuilder siloBuilder)
+        {
+            siloBuilder.AddMemoryGrainStorage("arena"); // хранилище состояния турниров
             siloBuilder.ConfigureServices(s =>
             {
                 s.AddSingleton<ArenaNotifier>();
                 s.AddSingleton<IChessEngine, FakeEngine>();
             });
+        }
     }
 
     [Fact]
@@ -103,7 +106,7 @@ public class ArenaGrainTests
     }
 
     [Fact]
-    public async Task FinishedDemo_ExposesStandingsWithPerGameResultsAndMeta()
+    public async Task FinishedTournament_ExposesRealSimulatedHistoryConsistentWithScoring()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
         await cluster.DeployAsync();
@@ -118,15 +121,86 @@ public class ArenaGrainTests
             Assert.Equal(TournamentStatus.Finished, state.Status);
             Assert.Equal(3600, state.DurationSeconds);
             Assert.Equal(180, state.TimeControl.InitialSeconds);
-            Assert.Equal(4, state.Standings.Count);
+            Assert.True(state.Standings.Count >= 8, "симулированный турнир имеет реальный состав");
+            Assert.Empty(state.Boards); // завершённый — живых партий нет
 
-            // Лидер первый, у него заполнена история партий и счёт совпадает.
+            // Таблица отсортирована по очкам по убыванию.
+            for (int i = 1; i < state.Standings.Count; i++)
+                Assert.True(state.Standings[i - 1].Score >= state.Standings[i].Score);
+
+            // У каждого игрока история партий = числу партий, а сумма очков сходится по правилам арены
+            // (победа +2/+4 на огне, ничья +1/+2, поражение 0) — числа реальные, не случайные.
+            foreach (var s in state.Standings)
+            {
+                Assert.Equal(s.Games, s.Results.Count);
+                Assert.Equal(s.Score, s.Results.Sum());
+                Assert.All(s.Results, r => Assert.Contains(r, new[] { 0, 1, 2, 4 }));
+            }
+
             var leader = state.Standings[0];
             Assert.Equal(1, leader.Rank);
-            Assert.Equal("ArenaHost_0", leader.Name);
-            Assert.Equal(20, leader.Score);
             Assert.NotEmpty(leader.Results);
-            Assert.Equal(14, leader.Games);
+
+            // Детерминизм: повторная конфигурация того же id даёт ту же таблицу.
+            var t2 = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("demo-finished");
+            var state2 = await t2.GetStateAsync("spectator");
+            Assert.Equal(leader.Name, state2.Standings[0].Name);
+            Assert.Equal(leader.Score, state2.Standings[0].Score);
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UnconfiguredGrain_SelfConfiguresFromScheduleId()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            // Прямой переход на /t/{id} без участия каталога: грейн обязан сам вывести мету из id.
+            long start = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds();
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>($"blitz-{start}");
+
+            var summary = await t.GetSummaryAsync(); // ConfigureAsync НЕ вызываем
+
+            Assert.Equal(TournamentStatus.Finished, summary.Status); // старт 2ч назад, длительность 1ч
+            Assert.Equal(180, summary.TimeControl.InitialSeconds);   // блиц 3+0 из расписания
+            Assert.True(summary.PlayerCount >= 8);                   // симулированный состав
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Standings_SurviveGrainDeactivation()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            const string id = "persist-test";
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>(id);
+            await t.ConfigureFinishedDemoAsync("Blitz 3+0 22:00", new TimeControl(180, 0),
+                DateTimeOffset.UtcNow.AddHours(-2), 3600);
+
+            var before = await t.GetStateAsync("x");
+            var leaderName = before.Standings[0].Name;
+            var leaderScore = before.Standings[0].Score;
+
+            // Принудительно собираем неактивные грейны — имитируем деактивацию по простою.
+            await cluster.GrainFactory.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+            // Новый доступ поднимает грейн заново; таблица должна прочитаться из хранилища, а не пропасть.
+            var after = await cluster.GrainFactory.GetGrain<IArenaTournamentGrain>(id).GetStateAsync("x");
+
+            Assert.Equal(before.Standings.Count, after.Standings.Count);
+            Assert.Equal(leaderName, after.Standings[0].Name);
+            Assert.Equal(leaderScore, after.Standings[0].Score);
         }
         finally
         {

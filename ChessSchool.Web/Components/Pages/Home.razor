@@ -1,8 +1,20 @@
 @page "/"
+@inject NavigationManager Nav
 
-<PageTitle>ChessSchool — прогресс юных шахматистов</PageTitle>
+<PageTitle>ChessSchool — платформа для шахматных школ</PageTitle>
 <HeadContent>
     <meta name="description" content="Платформа для шахматных школ: автоматический учёт партий, рейтинг ученика, прогресс для родителей и онлайн-игра." />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="@Nav.BaseUri" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="ChessSchool — прогресс юных шахматистов" />
+    <meta property="og:description" content="Платформа для шахматных школ: учёт партий, рейтинг ученика, прогресс для родителей и онлайн-игра." />
+    <meta property="og:url" content="@Nav.BaseUri" />
+    <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">
+        {"@@context":"https://schema.org","@@type":"Organization","name":"ChessSchool","url":"@Nav.BaseUri","logo":"@($"{Nav.BaseUri}og-image.png")"}
+    </script>
 </HeadContent>
 
 <section class="hero">

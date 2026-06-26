@@ -2,10 +2,22 @@
 @inject IGrainFactory Grains
 @inject AuthenticationStateProvider AuthState
 @inject IHttpContextAccessor Http
+@inject NavigationManager Nav
 
-<PageTitle>Расписание турниров — ChessArena</PageTitle>
+<PageTitle>Расписание арена-турниров — ChessArena</PageTitle>
 <HeadContent>
     <meta name="description" content="Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики." />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="@Nav.BaseUri" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="ChessArena — арена-турниры в реальном времени" />
+    <meta property="og:description" content="Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики." />
+    <meta property="og:url" content="@Nav.BaseUri" />
+    <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">
+        {"@@context":"https://schema.org","@@type":"WebSite","name":"ChessArena","url":"@Nav.BaseUri"}
+    </script>
 </HeadContent>
 
 @if (_tournaments is null)

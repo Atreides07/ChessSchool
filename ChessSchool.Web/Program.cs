@@ -50,6 +50,24 @@ app.MapStaticAssets();
 
 app.MapSsoEndpoints();
 
+// SEO: robots.txt и sitemap.xml. Хост — из запроса (за прокси корректен благодаря forwarded headers).
+// Приватный ЛК и страница прогресса родителю закрыты от индексации (последняя — через noindex на странице).
+app.MapGet("/robots.txt", (HttpRequest r) =>
+{
+    var b = $"{r.Scheme}://{r.Host}";
+    return Results.Text(
+        "User-agent: *\nAllow: /\nDisallow: /school\nDisallow: /students\nDisallow: /attribution\n" +
+        "Disallow: /p/\nDisallow: /signin\nDisallow: /signout\n" +
+        $"Sitemap: {b}/sitemap.xml\n", "text/plain");
+});
+app.MapGet("/sitemap.xml", (HttpRequest r) =>
+{
+    var b = $"{r.Scheme}://{r.Host}";
+    return Results.Text(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n" +
+        $"  <url><loc>{b}/</loc></url>\n</urlset>\n", "application/xml");
+});
+
 // Свежий access-токен для браузерного SignalR-клиента (тонкий фронт).
 // При истечении обновляется по refresh_token — клиент всегда получает валидный токен.
 app.MapGet("/api/game-token", async (HttpContext ctx, IHttpClientFactory hf) =>

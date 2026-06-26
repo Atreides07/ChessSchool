@@ -189,8 +189,11 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
 1. **Razor: строковый параметр компонента биндить ВСЕГДА через `@`.** `Fen="g.Fen"` передаёт литерал
    `"g.Fen"`, а не значение (для `bool` без `@` выражение вычисляется — отсюда коварство). Правильно:
    `Fen="@g.Fen"`.
-2. **БД — PostgreSQL для всех окружений** (SQLite убран). Схема версионируется EF-миграциями,
-   на старте `db.Database.Migrate()` (ветка `IsNpgsql()`; для InMemory в тестах — `EnsureCreated()`).
+2. **БД — PostgreSQL для всех окружений** (SQLite убран). Схема версионируется EF-миграциями.
+   Применение: режим `migrate` (`dotnet ChessSchool.Auth.dll migrate` — применил и вышел, для прод-Job)
+   или авто-миграция на старте при `Database:MigrateAtStartup` (по умолчанию = Development); для InMemory
+   в тестах — `EnsureCreated()`. Прод-сертификаты IdP (вне Development) грузятся из конфигурации
+   `OpenIddict:SigningCertificate`/`:EncryptionCertificate` ([Certificates.cs](ChessSchool.Auth/Certificates.cs)).
    Генерация миграций без Docker — через design-time фабрики (`AuthDbContextFactory`/`SchoolDbContextFactory`):
    `dotnet ef migrations add <Name> -p ChessSchool.Auth -s ChessSchool.Auth -o Migrations`.
    Фабрика Auth обязана звать `UseOpenIddict()`, иначе таблицы OpenIddict не попадут в миграцию.

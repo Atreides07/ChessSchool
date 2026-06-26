@@ -68,7 +68,17 @@ builder.Services.AddOpenIddict()
         o.RegisterScopes(Scopes.OpenId, Scopes.Profile, Scopes.Email, "chess.api");
 
         // Dev-сертификаты. Access-токен НЕ шифруем — чтобы ресурс-серверы валидировали JWT по JWKS.
-        o.AddDevelopmentEncryptionCertificate().AddDevelopmentSigningCertificate();
+        // Сертификаты подписи/шифрования токенов. Dev — эфемерные (удобно локально). Прод — постоянные
+        // X.509 из секретов (иначе ключи разъезжаются между нодами/рестартами → токены/JWKS невалидны).
+        if (builder.Environment.IsDevelopment())
+        {
+            o.AddDevelopmentEncryptionCertificate().AddDevelopmentSigningCertificate();
+        }
+        else
+        {
+            o.AddSigningCertificate(Certificates.LoadFromConfig(builder.Configuration, "OpenIddict:SigningCertificate"))
+             .AddEncryptionCertificate(Certificates.LoadFromConfig(builder.Configuration, "OpenIddict:EncryptionCertificate"));
+        }
         o.DisableAccessTokenEncryption();
 
         var aspnet = o.UseAspNetCore()

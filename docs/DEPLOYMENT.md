@@ -159,16 +159,21 @@ git или логи.
    ([ResolveInternalApiKey](../ChessSchool.ServiceDefaults/Extensions.cs)).
 2. **Пароли БД и Redis** — из секретов; у Postgres-пользователей минимум прав (отдельные роли на `authdb`
    и `schooldb`).
-3. **Сертификаты IdP (критично).** Сейчас OpenIddict использует **dev-сертификаты**
-   (`AddDevelopmentEncryptionCertificate().AddDevelopmentSigningCertificate()`,
-   [Auth/Program.cs](../ChessSchool.Auth/Program.cs)). Для прода замените на постоянные X.509:
-   ```csharp
-   o.AddSigningCertificate(signingCert)       // напр. из файла .pfx/секрета
-    .AddEncryptionCertificate(encryptionCert);
+3. **Сертификаты IdP.** В Development OpenIddict использует эфемерные dev-сертификаты автоматически.
+   **Вне Development** ([Auth/Program.cs](../ChessSchool.Auth/Program.cs)) грузятся постоянные X.509
+   (PKCS#12) из конфигурации ([Certificates.cs](../ChessSchool.Auth/Certificates.cs)) — иначе ключи
+   подписи разъезжаются между нодами/рестартами и токены/JWKS перестают валидироваться. Задайте путь
+   (смонтированный файл из секрета) и пароль:
    ```
-   Иначе при перезапуске/масштабировании ключи подписи разъезжаются → выданные токены/JWKS перестают
-   валидироваться. Сертификаты храните в секрете и монтируйте; ротация — по двум активным ключам.
-   `DisableAccessTokenEncryption()` оставлен сознательно (JWT читается resource-серверами).
+   OpenIddict__SigningCertificate__Path=/secrets/idp-signing.pfx
+   OpenIddict__SigningCertificate__Password=<secret>
+   OpenIddict__EncryptionCertificate__Path=/secrets/idp-encryption.pfx
+   OpenIddict__EncryptionCertificate__Password=<secret>
+   ```
+   Отсутствие пути роняет старт (fail-fast). Сгенерировать самоподписанный pfx, напр.:
+   `openssl req -x509 -newkey rsa:2048 -keyout k.pem -out c.pem -days 3650 -nodes -subj "/CN=ChessSchool IdP" && openssl pkcs12 -export -inkey k.pem -in c.pem -out idp-signing.pfx`.
+   Храните в секрете, ротация — по двум активным ключам. `DisableAccessTokenEncryption()` оставлен
+   сознательно (JWT читается resource-серверами).
 4. **CORS GameServer** — строгий список публичных origin'ов фронта (`Cors__Origins__*`); вне Development
    пустой список роняет старт. any-origin + credentials в проде = дыра.
 5. **HTTPS везде**, `RequireHttpsMetadata` вне Development = true (уже зашито). Внутренний эндпоинт
@@ -348,12 +353,19 @@ curl -s -o /dev/null -w '%{http_code}\n' https://arena.example.com/
 
 ---
 
-## 15. Что доработать для полной прод-зрелости (известный долг)
+## 15. Состояние прод-зрелости
 
-- Вынести **миграции** из старта в отдельный шаг (см. §7).
-- Заменить **dev-сертификаты IdP** на постоянные (см. §5) — без этого мультисервер-IdP некорректен.
-- Сделать выбор провайдеров **fail-fast** вне Development (см. §12).
-- Добавить **health-checks на Postgres/Redis** и (опц.) интеграционный тест на распределённые пути.
-- Параметризовать Orleans-порты конфигом, если потребуется нестандартная схема подов.
+Реализовано (было долгом):
+- ✅ **Миграции отдельным шагом** — режим `migrate` + флаг `Database:MigrateAtStartup` (§7).
+- ✅ **Постоянные сертификаты IdP** вне Development из конфигурации (§5).
+- ✅ **Fail-fast** вне Development: обязательны `redis`, `InternalApiKey`, `Cors:Origins` (§12).
+- ✅ **Health-checks на Postgres/Redis** (readiness, §11).
+- ✅ **Orleans-порты в конфиге** — `Orleans:SiloPort` / `Orleans:GatewayPort` (§9).
+
+Остаточные улучшения (по желанию):
+- Forwarded headers вынести в общий хелпер для Auth/Arena (Web уже настроен), чтобы issuer/redirect_uri
+  строились по внешнему хосту за прокси (§6).
+- Отключить демо-`SeedData` в боевой БД (сейчас идёт в не-migrate запуске; §7).
+- Интеграционный тест именно на распределённые пути (частично покрыто запуском AppHost в `WebTests`).
 
 См. также корневой `CLAUDE.md` (принципы и грабли) и [docs/TODO.md](TODO.md).

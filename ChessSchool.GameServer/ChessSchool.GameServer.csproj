@@ -8,6 +8,8 @@
   <ItemGroup>
     <PackageReference Include="Gera.Chess" Version="1.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Orleans.Clustering.Redis" Version="10.2.0" />
     <PackageReference Include="Microsoft.Orleans.Server" Version="10.2.0" />
   </ItemGroup>
 

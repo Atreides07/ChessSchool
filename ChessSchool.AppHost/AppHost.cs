@@ -12,11 +12,18 @@ var postgres = builder.AddPostgres("postgres").WithDataVolume();
 var authDb = postgres.AddDatabase("authdb");
 var schoolDb = postgres.AddDatabase("schooldb");
 
+// Redis — распределённый ярус для мультисервера: SignalR backplane, Orleans clustering/persist,
+// общий DataProtection-keyring и ticket-store. Сервисы переключаются на распределённые провайдеры
+// при наличии строки подключения "redis" (иначе — dev-путь in-memory/localhost).
+var redis = builder.AddRedis("redis").WithDataVolume();
+
 // Отдельный сервис авторизации (IdP) — переиспользуемый, как Google Auth.
 var auth = builder.AddProject<Projects.ChessSchool_Auth>("auth")
     .WithEnvironment("InternalApiKey", internalKey)
     .WithReference(authDb)
-    .WaitFor(authDb);
+    .WithReference(redis) // общий DataProtection-keyring (cookie IdP расшифровывается любой нодой)
+    .WaitFor(authDb)
+    .WaitFor(redis);
 
 // Доменный API: школы, ученики, рейтинг, архив партий, шаринг.
 var apiService = builder.AddProject<Projects.ChessSchool_ApiService>("apiservice")
@@ -32,8 +39,10 @@ var gameServer = builder.AddProject<Projects.ChessSchool_GameServer>("gameserver
     .WithEnvironment("InternalApiKey", internalKey)
     .WithReference(auth)
     .WithReference(apiService)
+    .WithReference(redis) // SignalR backplane + Orleans clustering между нодами
     .WaitFor(auth)
-    .WaitFor(apiService);
+    .WaitFor(apiService)
+    .WaitFor(redis);
 
 // Веб-фронт (Blazor SSR + интерактивная доска).
 var web = builder.AddProject<Projects.ChessSchool_Web>("webfrontend")
@@ -42,15 +51,19 @@ var web = builder.AddProject<Projects.ChessSchool_Web>("webfrontend")
     .WithReference(auth)
     .WithReference(apiService)
     .WithReference(gameServer)
+    .WithReference(redis) // общий DataProtection-keyring + распределённый ticket-store (SSO)
     .WaitFor(apiService)
-    .WaitFor(gameServer);
+    .WaitFor(gameServer)
+    .WaitFor(redis);
 
 // Сервис Arena (B2C): арена-турниры. Co-hosted Orleans + Blazor, общий аккаунт через SSO.
 var arena = builder.AddProject<Projects.ChessSchool_Arena>("arena")
     .WithExternalHttpEndpoints()
     .WithEnvironment("Sso__ClientId", "arena-web")
     .WithReference(auth)
-    .WaitFor(auth);
+    .WithReference(redis) // Orleans clustering+persist турниров, DataProtection, ticket-store
+    .WaitFor(auth)
+    .WaitFor(redis);
 
 // Регистрируем веб-клиентов в IdP: разрешённый redirect_uri = базовый адрес приложения.
 auth.WithEnvironment("Sso__Clients__chessschool-web", web.GetEndpoint("https"));

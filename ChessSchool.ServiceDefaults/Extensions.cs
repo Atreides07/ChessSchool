@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using StackExchange.Redis;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -135,6 +137,33 @@ public static class Extensions
 
         throw new InvalidOperationException(
             "InternalApiKey не задан вне Development. Задайте секрет для server-to-server вызовов (env/KMS).");
+    }
+
+    /// <summary>Строка подключения к общему Redis ("redis") или null, если он не сконфигурирован (dev без Redis).</summary>
+    public static string? GetRedisConnectionString(this IConfiguration config) =>
+        config.GetConnectionString("redis") is { Length: > 0 } c ? c : null;
+
+    /// <summary>
+    /// DataProtection с общим стабильным ApplicationName. При наличии Redis ключи шифрования живут в нём
+    /// (любая нода расшифрует cookie/тикеты любой другой) — обязательное условие мультисервера. Без Redis
+    /// (dev/одна нода) — стабильный keyring на диске, переживающий перезапуск. Идемпотентно по нодам.
+    /// </summary>
+    public static IHostApplicationBuilder AddChessSchoolDataProtection(this IHostApplicationBuilder builder)
+    {
+        var dp = builder.Services.AddDataProtection().SetApplicationName("ChessSchool");
+        var redis = builder.Configuration.GetRedisConnectionString();
+        if (redis is not null)
+        {
+            var mux = ConnectionMultiplexer.Connect(redis);
+            dp.PersistKeysToStackExchangeRedis(mux, "chessschool:dataprotection-keys");
+        }
+        else
+        {
+            var dir = Path.Combine(AppContext.BaseDirectory, "keys", "dataprotection");
+            Directory.CreateDirectory(dir);
+            dp.PersistKeysToFileSystem(new DirectoryInfo(dir));
+        }
+        return builder;
     }
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)

@@ -16,6 +16,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
+// Общий DataProtection-keyring (Redis при наличии): cookie-сессия IdP расшифровывается любой нодой —
+// без этого при нескольких нодах IdP вход «прыгал» бы и логин ломался.
+builder.AddChessSchoolDataProtection();
+
 // БД — PostgreSQL (connection string инжектит Aspire по ссылке на ресурс "auth").
 // Хранилище OpenIddict — в том же контексте.
 builder.Services.AddDbContext<AuthDbContext>(o =>

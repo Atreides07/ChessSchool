@@ -2,20 +2,36 @@ using ChessSchool.GameServer.Hubs;
 using ChessSchool.GameServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Orleans.Configuration;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// --- Ярус состояния: co-hosted Orleans silo. Локально — localhost-кластер без внешних зависимостей.
-// В проде кластеризация переключается на Redis/ADO без изменения кода грейнов.
-// Отдельный кластер силоса игрового сервера (изолирован от Arena по портам и clusterId).
-builder.UseOrleans(silo => silo.UseLocalhostClustering(
-    siloPort: 11111, gatewayPort: 30000,
-    serviceId: "chessschool-game", clusterId: "chessschool-game"));
+// --- Ярус состояния: co-hosted Orleans silo. Изолированный кластер игрового сервера (порты/clusterId).
+// Есть Redis → кластеризация через Redis (несколько нод видят общий кластер: грейн партии — единственная
+// активация во всём кластере, оба игрока всегда попадают в неё). Нет → localhost-кластер (dev, одна нода).
+var redisConn = builder.Configuration.GetRedisConnectionString();
+builder.UseOrleans(silo =>
+{
+    if (redisConn is not null)
+    {
+        silo.UseRedisClustering(o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
+        silo.Configure<ClusterOptions>(o => { o.ClusterId = "chessschool-game"; o.ServiceId = "chessschool-game"; });
+        silo.ConfigureEndpoints(siloPort: 11111, gatewayPort: 30000);
+    }
+    else
+    {
+        silo.UseLocalhostClustering(siloPort: 11111, gatewayPort: 30000,
+            serviceId: "chessschool-game", clusterId: "chessschool-game");
+    }
+});
 
-// --- Транспортный ярус: SignalR (WebSocket). В проде — Redis backplane между нодами.
-builder.Services.AddSignalR();
+// --- Транспортный ярус: SignalR (WebSocket). Есть Redis → backplane между нодами (сообщение игроку
+// долетит, даже если его соединение на другой ноде). Нет → in-proc (dev, одна нода).
+var signalr = builder.Services.AddSignalR();
+if (redisConn is not null) signalr.AddStackExchangeRedis(redisConn);
 
 // Архивация завершённых партий в доменный API.
 builder.Services.AddHttpClient<IGameArchiveClient, GameArchiveClient>(c =>

@@ -1,5 +1,7 @@
 using ChessSchool.Arena.Components;
 using ChessSchool.WebAuth;
+using Orleans.Configuration;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,16 +13,26 @@ builder.AddChessSchoolSso();
 // Co-hosted Orleans silo: турнирные грейны живут прямо в этом процессе.
 // Компоненты Blazor вызывают грейны напрямую через IGrainFactory.
 // Отдельный кластер силоса арены (изолирован от GameServer по портам и clusterId).
+// Есть Redis → кластеризация и хранилище турниров в Redis: состояние (таблица/история/мета)
+// переживает перезапуск и масштабирование силосов, грейн турнира — единственная активация в кластере.
+// Нет → localhost-кластер + in-memory storage (dev, одна нода).
+var redisConn = builder.Configuration.GetRedisConnectionString();
 builder.UseOrleans(silo =>
 {
-    silo.UseLocalhostClustering(
-        siloPort: 11112, gatewayPort: 30001,
-        serviceId: "chessschool-arena", clusterId: "chessschool-arena");
-
-    // Хранилище состояния турниров ("arena"): таблица/история переживают деактивацию грейна.
-    // Dev — in-memory (на время жизни силоса). Прод: заменить на AddAdoNetGrainStorage(Npgsql)
-    // или Redis — состояние переживёт и перезапуск/масштабирование силосов.
-    silo.AddMemoryGrainStorage("arena");
+    if (redisConn is not null)
+    {
+        silo.UseRedisClustering(o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
+        silo.Configure<ClusterOptions>(o => { o.ClusterId = "chessschool-arena"; o.ServiceId = "chessschool-arena"; });
+        silo.ConfigureEndpoints(siloPort: 11112, gatewayPort: 30001);
+        silo.AddRedisGrainStorage("arena", o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
+    }
+    else
+    {
+        silo.UseLocalhostClustering(
+            siloPort: 11112, gatewayPort: 30001,
+            serviceId: "chessschool-arena", clusterId: "chessschool-arena");
+        silo.AddMemoryGrainStorage("arena");
+    }
 });
 
 // Внутрипроцессный pub/sub для push-обновлений турниров (грейн → компоненты).

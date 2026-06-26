@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,6 +28,9 @@ public static class SsoExtensions
         var clientId = builder.Configuration["Sso:ClientId"] ?? "app";
         var authority = builder.Configuration["services:auth:https:0"]
             ?? builder.Configuration["services:auth:http:0"];
+
+        // Общий DataProtection-keyring (Redis при наличии): cookie/тикеты одной ноды читает любая другая.
+        builder.AddChessSchoolDataProtection();
 
         builder.Services.AddAuthentication(o =>
         {
@@ -83,12 +87,26 @@ public static class SsoExtensions
 
         // Серверное хранилище тикетов: в cookie остаётся только ключ, а большие OIDC-токены
         // (access/id/refresh) хранятся на сервере. Иначе cookie раздувается и Kestrel отвечает HTTP 431.
-        // Хранилище файловое (тикет шифруется DataProtection) — переживает перезапуск сервиса, поэтому
-        // авторизованный пользователь остаётся авторизованным после рестарта (а не «выпадает» во «Вход»).
-        var ticketDir = Path.Combine(builder.Environment.ContentRootPath, "keys", "auth-tickets");
-        builder.Services.AddSingleton<ITicketStore>(sp =>
-            new FileSystemTicketStore(ticketDir, sp.GetRequiredService<IDataProtectionProvider>(),
-                sp.GetRequiredService<ILoggerFactory>().CreateLogger<FileSystemTicketStore>()));
+        // Есть Redis → общий распределённый стор (тикет, выданный одной нодой, читает любая другая —
+        // обязательно для мультисервера за балансировщиком). Нет → файловый стор (dev/одна нода):
+        // переживает перезапуск сервиса, пользователь остаётся авторизованным.
+        var redis = builder.Configuration.GetRedisConnectionString();
+        if (redis is not null)
+        {
+            builder.Services.AddStackExchangeRedisCache(o =>
+            {
+                o.Configuration = redis;
+                o.InstanceName = $"chessschool:tickets:{clientId}:";
+            });
+            builder.Services.AddSingleton<ITicketStore, DistributedCacheTicketStore>();
+        }
+        else
+        {
+            var ticketDir = Path.Combine(builder.Environment.ContentRootPath, "keys", "auth-tickets");
+            builder.Services.AddSingleton<ITicketStore>(sp =>
+                new FileSystemTicketStore(ticketDir, sp.GetRequiredService<IDataProtectionProvider>(),
+                    sp.GetRequiredService<ILoggerFactory>().CreateLogger<FileSystemTicketStore>()));
+        }
         builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
             .Configure<ITicketStore>((o, store) => o.SessionStore = store);
     }
@@ -180,4 +198,50 @@ public sealed class FileSystemTicketStore : ITicketStore
     }
 
     private string PathFor(string key) => Path.Combine(_dir, key + ".tkt");
+}
+
+/// <summary>
+/// Распределённое хранилище тикетов поверх IDistributedCache (Redis). Тикет, выданный одной нодой,
+/// доступен всем нодам кластера — обязательно для мультисервера за балансировщиком. Значение шифруется
+/// DataProtection (общий keyring). TTL синхронизируется со сроком жизни сессии.
+/// </summary>
+public sealed class DistributedCacheTicketStore(IDistributedCache cache, IDataProtectionProvider dataProtection)
+    : ITicketStore
+{
+    private const string Prefix = "ticket:";
+    private readonly IDataProtector _protector =
+        dataProtection.CreateProtector("ChessSchool.WebAuth.DistributedCacheTicketStore.v1");
+
+    public async Task<string> StoreAsync(AuthenticationTicket ticket)
+    {
+        var key = Guid.NewGuid().ToString("N");
+        await RenewAsync(key, ticket);
+        return key;
+    }
+
+    public async Task RenewAsync(string key, AuthenticationTicket ticket)
+    {
+        var options = new DistributedCacheEntryOptions
+        {
+            AbsoluteExpiration = ticket.Properties.ExpiresUtc ?? DateTimeOffset.UtcNow.AddHours(8)
+        };
+        var bytes = _protector.Protect(TicketSerializer.Default.Serialize(ticket));
+        await cache.SetAsync(Prefix + key, bytes, options);
+    }
+
+    public async Task<AuthenticationTicket?> RetrieveAsync(string key)
+    {
+        var bytes = await cache.GetAsync(Prefix + key);
+        if (bytes is null) return null;
+        try
+        {
+            return TicketSerializer.Default.Deserialize(_protector.Unprotect(bytes));
+        }
+        catch
+        {
+            return null; // повреждённый/нерасшифровываемый тикет → как будто его нет
+        }
+    }
+
+    public Task RemoveAsync(string key) => cache.RemoveAsync(Prefix + key);
 }

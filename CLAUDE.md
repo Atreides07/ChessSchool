@@ -156,10 +156,13 @@ dotnet build                               # сборка решения
 ### Масштабирование онлайн-игры
 Каждая партия — Orleans-**грейн** (однопоточный доступ к состоянию → нет гонок без локов).
 Завершённые партии деактивируются (в RAM только активные). Транспорт (SignalR) и состояние
-(Orleans-силосы) масштабируются независимо. Локально: Orleans `localhost`-кластер + SignalR
-in-proc + **PostgreSQL** (контейнер от Aspire). Прод: Orleans clustering и SignalR backplane →
-**Redis**, персист → тот же **PostgreSQL** (managed). dev и прод на одном провайдере БД —
-схема через EF-миграции.
+(Orleans-силосы) масштабируются независимо. Распределённые провайдеры **переключаются по наличию строки подключения `redis`** (см.
+[GetRedisConnectionString](ChessSchool.ServiceDefaults/Extensions.cs)): есть Redis → Orleans
+Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий DataProtection-keyring,
+распределённый ticket-store; нет → dev-путь (localhost-кластер, in-memory storage, SignalR in-proc,
+файловый keyring/ticket-store). AppHost локально поднимает контейнер Redis ([AppHost.cs](ChessSchool.AppHost/AppHost.cs)),
+поэтому распределённые пути работают и проверяются и локально. Персист доменных данных → **PostgreSQL**
+(managed в проде). dev и прод на одном провайдере БД — схема через EF-миграции.
 
 ## Архитектурные решения
 
@@ -200,19 +203,24 @@ in-proc + **PostgreSQL** (контейнер от Aspire). Прод: Orleans clu
    дашборда** (совпадает с seeded redirect_uri). Иначе OIDC строит redirect_uri с Kestrel-портом → `invalid_request`.
 7. **HTTP 431 на всех localhost-страницах = раздутая auth-cookie.** Фикс в
    [SsoExtensions](ChessSchool.WebAuth/SsoExtensions.cs): server-side ticket-store (в cookie только ключ) +
-   `Kestrel MaxRequestHeadersTotalSize=256KB`. Ticket-store **файловый** (`FileSystemTicketStore`,
-   тикет шифруется DataProtection, папка `keys/auth-tickets`) — переживает перезапуск сервиса, иначе
-   авторизованный пользователь после рестарта «выпадал» во «Вход» (in-memory терял тикеты). Прод —
-   распределённый стор (Redis), общий для всех нод.
+   `Kestrel MaxRequestHeadersTotalSize=256KB`. Ticket-store переключаемый по Redis: есть →
+   `DistributedCacheTicketStore` (общий для всех нод, обязателен за балансировщиком); нет →
+   `FileSystemTicketStore` (тикет шифруется DataProtection, `keys/auth-tickets`, переживает рестарт
+   одной ноды). DataProtection-ключи тоже общие при Redis ([AddChessSchoolDataProtection](ChessSchool.ServiceDefaults/Extensions.cs)) —
+   иначе нода не расшифрует cookie/тикет, выданный другой.
 8. **Health-checks AppHost:** `WithHttpHealthCheck` по https с dev-сертификатом вешает `WaitFor`-каскад.
    Health маппится всегда (не только Development), интеграционный тест ждёт состояния `Running`, не `Healthy`.
 9. **Arena-турнир переживает деактивацию грейна.** Мета+таблица персистятся в grain storage `"arena"`
-   ([Program.cs](ChessSchool.Arena/Program.cs) `AddMemoryGrainStorage("arena")`, dev), грейн сам выводит
-   мету из своего id через [ArenaSchedule](ChessSchool.Arena/Services/ArenaSchedule.cs) (`EnsureConfigured`),
-   а пока турнир идёт держит себя живым (`DelayDeactivation`). Активные доски НЕ персистятся (при реактивации
-   игроки переспариваются). Прод-долговечность через перезапуск силоса — заменить memory-storage на
-   AdoNet(Postgres)/Redis. **Тестовый силос обязан тоже звать `AddMemoryGrainStorage("arena")`**, иначе
-   `[PersistentState("tournament","arena")]` не резолвится.
+   ([Program.cs](ChessSchool.Arena/Program.cs)): есть Redis → `AddRedisGrainStorage("arena")` (состояние
+   переживает рестарт/масштабирование силосов), нет → `AddMemoryGrainStorage("arena")` (dev). Грейн сам
+   выводит мету из своего id через [ArenaSchedule](ChessSchool.Arena/Services/ArenaSchedule.cs)
+   (`EnsureConfigured`), а пока турнир идёт держит себя живым (`DelayDeactivation`). Активные доски НЕ
+   персистятся (при реактивации игроки переспариваются). **Тестовый силос обязан звать
+   `AddMemoryGrainStorage("arena")`**, иначе `[PersistentState("tournament","arena")]` не резолвится.
+10. **Orleans-кластеризация переключается по Redis** ([Arena](ChessSchool.Arena/Program.cs)/[GameServer](ChessSchool.GameServer/Program.cs)/Program.cs):
+    есть `redis` → `UseRedisClustering` + `ConfigureEndpoints` (несколько нод в одном кластере, грейн —
+    единственная активация); нет → `UseLocalhostClustering` (dev). Два силоса по-прежнему разведены по
+    портам/clusterId (грабля #3). SignalR — `AddStackExchangeRedis` при наличии Redis, иначе in-proc.
 
 ## Безопасность и конфигурация
 

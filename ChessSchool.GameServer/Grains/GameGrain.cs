@@ -142,6 +142,7 @@ public sealed class GameGrain(IGameArchiveClient archive, ILogger<GameGrain> log
         {
             ["result"] = _result.ToString(),
             ["reason"] = _reason.ToString(),
+            ["move_count"] = _board.MoveIndex,
         });
         // Завершённую партию выгружаем из памяти — в RAM живут только активные (масштаб 1M).
         DeactivateOnIdle();

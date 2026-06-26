@@ -172,7 +172,7 @@ app.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest r
 
 // ---------- Привязка ученика к онлайн-аккаунту (по email из IdP) ----------
 app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req, SchoolDbContext db,
-    IHttpClientFactory httpFactory, CancellationToken ct) =>
+    IHttpClientFactory httpFactory, IAnalytics analytics, CancellationToken ct) =>
 {
     var student = await db.Students.FindAsync([id], ct);
     if (student is null) return Results.NotFound();
@@ -190,6 +190,7 @@ app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req, 
     var found = await resp.Content.ReadFromJsonAsync<ResolvedUser>(ct);
     student.LinkedUserSub = found!.Sub;
     await db.SaveChangesAsync(ct);
+    analytics.Capture("student_account_linked", found.Sub, new Dictionary<string, object?> { ["student_id"] = id });
     return Results.Ok(ToDto(student));
 });
 
@@ -204,11 +205,13 @@ app.MapPost("/students/{id:guid}/share", async (Guid id, SchoolDbContext db, IAn
     return Results.Ok(new ShareLinkDto(token, $"/p/{token}", DateTimeOffset.UtcNow.AddDays(90)));
 });
 
-app.MapGet("/share/{token}", async (string token, SchoolDbContext db, CancellationToken ct) =>
+app.MapGet("/share/{token}", async (string token, SchoolDbContext db, IAnalytics analytics, CancellationToken ct) =>
 {
     var link = await db.ShareLinks.FirstOrDefaultAsync(s => s.Token == token && !s.Revoked, ct);
     if (link is null || (link.ExpiresAt is { } e && e < DateTimeOffset.UtcNow)) return Results.NotFound();
-    return await BuildProfileAsync(db, link.StudentId, ct) is { } p ? Results.Ok(p) : Results.NotFound();
+    if (await BuildProfileAsync(db, link.StudentId, ct) is not { } p) return Results.NotFound();
+    analytics.Capture("parent_profile_viewed", link.StudentId.ToString(), new Dictionary<string, object?> { ["source"] = "share_link" });
+    return Results.Ok(p);
 });
 
 // ---------- Внутренний приём онлайн-партий от GameServer ----------

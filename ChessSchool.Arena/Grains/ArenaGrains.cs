@@ -133,6 +133,7 @@ public sealed class ArenaTournamentGrain(
         public bool WhiteMoved, BlackMoved;
         public bool WhiteBerserk, BlackBerserk;
         public DateTimeOffset LastMoveAt;
+        public DateTimeOffset StartedAt;
         public GameStatus Status = GameStatus.InProgress;
         public GameResult Result;
         public GameEndReason Reason;
@@ -733,13 +734,27 @@ public sealed class ArenaTournamentGrain(
             BlackName = _players[aWhite ? b : a].Name,
             WhiteMs = _tc.InitialSeconds * 1000L,
             BlackMs = _tc.InitialSeconds * 1000L,
-            LastMoveAt = DateTimeOffset.UtcNow
+            LastMoveAt = DateTimeOffset.UtcNow,
+            StartedAt = DateTimeOffset.UtcNow
         };
         foreach (var s in new[] { a, b })
         {
-            _players[s].Playing = true;
-            _players[s].GameId = gid;
-            _players[s].WaitingSince = null;
+            var p = _players[s];
+            // Метрика ликвидности матчмейкинга: сколько человек ждал и достался ли ему бот.
+            if (!p.IsBot)
+            {
+                var opp = _players[s == a ? b : a];
+                analytics.Capture("arena_paired", s, new Dictionary<string, object?>
+                {
+                    ["tournament_id"] = Id,
+                    ["time_control"] = _tc.ToString(),
+                    ["opponent_is_bot"] = opp.IsBot,
+                    ["wait_seconds"] = p.WaitingSince is { } w ? (int)(DateTimeOffset.UtcNow - w).TotalSeconds : 0,
+                });
+            }
+            p.Playing = true;
+            p.GameId = gid;
+            p.WaitingSince = null;
         }
     }
 
@@ -773,6 +788,26 @@ public sealed class ArenaTournamentGrain(
 
         if (g.Result == GameResult.WhiteWins && g.WhiteBerserk) white.Score += 1;
         if (g.Result == GameResult.BlackWins && g.BlackBerserk) black.Score += 1;
+
+        // Событие по каждому игроку-человеку (ядро вовлечённости: сыгранные партии, исход, берсерк, бот-ли соперник).
+        var durationSec = g.StartedAt == default ? null : (int?)(g.FinishedAt!.Value - g.StartedAt).TotalSeconds;
+        foreach (var (sub, isWhite) in new[] { (g.WhiteSub, true), (g.BlackSub, false) })
+        {
+            var p = _players[sub];
+            if (p.IsBot) continue;
+            var outcome = g.Result == GameResult.Draw ? "draw"
+                : (g.Result == GameResult.WhiteWins) == isWhite ? "win" : "loss";
+            analytics.Capture("arena_game_finished", sub, new Dictionary<string, object?>
+            {
+                ["tournament_id"] = Id,
+                ["time_control"] = _tc.ToString(),
+                ["result"] = outcome,
+                ["reason"] = g.Reason.ToString(),
+                ["opponent_is_bot"] = _players[isWhite ? g.BlackSub : g.WhiteSub].IsBot,
+                ["was_berserk"] = isWhite ? g.WhiteBerserk : g.BlackBerserk,
+                ["duration_seconds"] = durationSec,
+            });
+        }
 
         _dirty = true; // изменилась таблица — сохранить, чтобы пережить деактивацию грейна
     }

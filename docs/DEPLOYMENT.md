@@ -304,8 +304,8 @@ DataProtection-ключи общие → **rolling-рестарты не раз�
   Analytics__PostHog__ApiKey=phc_xxx
   Analytics__PostHog__Host=https://eu.i.posthog.com   # по умолчанию EU
   ```
-  Текущие события: `student_created`, `game_attributed`, `share_link_created`, `online_game_finished`,
-  `tournament_joined`. На горячих путях (ходы) события не эмитятся — только доменные вехи.
+  Состав событий и продуктовый смысл (что и зачем меряем) — [docs/PRODUCT_METRICS.md](PRODUCT_METRICS.md).
+  События — доменные вехи (на горячих путях/ходах ничего не эмитится).
 
 ---
 

@@ -12,18 +12,20 @@ builder.AddServiceDefaults();
 // --- Ярус состояния: co-hosted Orleans silo. Изолированный кластер игрового сервера (порты/clusterId).
 // Есть Redis → кластеризация через Redis (несколько нод видят общий кластер: грейн партии — единственная
 // активация во всём кластере, оба игрока всегда попадают в неё). Нет → localhost-кластер (dev, одна нода).
-var redisConn = builder.Configuration.GetRedisConnectionString();
+var redisConn = builder.Configuration.GetRedisConnectionString(builder.Environment);
+var siloPort = builder.Configuration.GetValue("Orleans:SiloPort", 11111);
+var gatewayPort = builder.Configuration.GetValue("Orleans:GatewayPort", 30000);
 builder.UseOrleans(silo =>
 {
     if (redisConn is not null)
     {
         silo.UseRedisClustering(o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
         silo.Configure<ClusterOptions>(o => { o.ClusterId = "chessschool-game"; o.ServiceId = "chessschool-game"; });
-        silo.ConfigureEndpoints(siloPort: 11111, gatewayPort: 30000);
+        silo.ConfigureEndpoints(siloPort: siloPort, gatewayPort: gatewayPort);
     }
     else
     {
-        silo.UseLocalhostClustering(siloPort: 11111, gatewayPort: 30000,
+        silo.UseLocalhostClustering(siloPort: siloPort, gatewayPort: gatewayPort,
             serviceId: "chessschool-game", clusterId: "chessschool-game");
     }
 });

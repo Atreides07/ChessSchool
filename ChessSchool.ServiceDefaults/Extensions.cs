@@ -144,6 +144,21 @@ public static class Extensions
         config.GetConnectionString("redis") is { Length: > 0 } c ? c : null;
 
     /// <summary>
+    /// То же, но с fail-fast: вне Development Redis обязателен (распределённые провайдеры — условие
+    /// мультисервера), и отсутствие строки подключения роняет старт, а не уводит тихо в single-node
+    /// in-memory. В Development допускается null (dev-фолбэк).
+    /// </summary>
+    public static string? GetRedisConnectionString(this IConfiguration config, IHostEnvironment env)
+    {
+        var conn = config.GetRedisConnectionString();
+        if (conn is null && !env.IsDevelopment())
+            throw new InvalidOperationException(
+                "ConnectionStrings:redis не задан вне Development. Redis обязателен для мультисервера " +
+                "(Orleans clustering/persist/reminders, SignalR backplane, DataProtection, ticket-store).");
+        return conn;
+    }
+
+    /// <summary>
     /// DataProtection с общим стабильным ApplicationName. При наличии Redis ключи шифрования живут в нём
     /// (любая нода расшифрует cookie/тикеты любой другой) — обязательное условие мультисервера. Без Redis
     /// (dev/одна нода) — стабильный keyring на диске, переживающий перезапуск. Идемпотентно по нодам.
@@ -151,7 +166,7 @@ public static class Extensions
     public static IHostApplicationBuilder AddChessSchoolDataProtection(this IHostApplicationBuilder builder)
     {
         var dp = builder.Services.AddDataProtection().SetApplicationName("ChessSchool");
-        var redis = builder.Configuration.GetRedisConnectionString();
+        var redis = builder.Configuration.GetRedisConnectionString(builder.Environment);
         if (redis is not null)
         {
             var mux = ConnectionMultiplexer.Connect(redis);

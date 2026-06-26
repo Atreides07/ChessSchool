@@ -16,14 +16,16 @@ builder.AddChessSchoolSso();
 // Есть Redis → кластеризация и хранилище турниров в Redis: состояние (таблица/история/мета)
 // переживает перезапуск и масштабирование силосов, грейн турнира — единственная активация в кластере.
 // Нет → localhost-кластер + in-memory storage (dev, одна нода).
-var redisConn = builder.Configuration.GetRedisConnectionString();
+var redisConn = builder.Configuration.GetRedisConnectionString(builder.Environment);
+var siloPort = builder.Configuration.GetValue("Orleans:SiloPort", 11112);
+var gatewayPort = builder.Configuration.GetValue("Orleans:GatewayPort", 30001);
 builder.UseOrleans(silo =>
 {
     if (redisConn is not null)
     {
         silo.UseRedisClustering(o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
         silo.Configure<ClusterOptions>(o => { o.ClusterId = "chessschool-arena"; o.ServiceId = "chessschool-arena"; });
-        silo.ConfigureEndpoints(siloPort: 11112, gatewayPort: 30001);
+        silo.ConfigureEndpoints(siloPort: siloPort, gatewayPort: gatewayPort);
         silo.AddRedisGrainStorage("arena", o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
         // Reminders в Redis: грейн турнира «воскресает» на любой ноде даже при потере текущей.
         silo.UseRedisReminderService(o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
@@ -31,7 +33,7 @@ builder.UseOrleans(silo =>
     else
     {
         silo.UseLocalhostClustering(
-            siloPort: 11112, gatewayPort: 30001,
+            siloPort: siloPort, gatewayPort: gatewayPort,
             serviceId: "chessschool-arena", clusterId: "chessschool-arena");
         silo.AddMemoryGrainStorage("arena");
     }

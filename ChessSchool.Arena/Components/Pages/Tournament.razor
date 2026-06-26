@@ -39,7 +39,11 @@ else
                 <span class="t-ava">@Avatar(s.Name)</span>
             }
         </span>
-        @_state.Standings.Count @Plural(_state.Standings.Count, "участник", "участника", "участников")
+        <span>@HumanCount 👤 @Plural(HumanCount, "игрок", "игрока", "игроков")</span>
+        @if (_state.BotCount > 0)
+        {
+            <span class="text-muted">· @_state.BotCount 🤖 @Plural(_state.BotCount, "бот", "бота", "ботов")</span>
+        }
     </div>
 
     @* ----- Игровая зона (только идущий турнир) ----- *@
@@ -93,6 +97,29 @@ else
                     <button class="btn btn-primary" @onclick="Join">Участвовать</button>
                 </div>
             }
+        </div>
+    }
+    else if (_state.Status == TournamentStatus.Created)
+    {
+        <div class="play-area">
+            <div class="card join-card">
+                <div>
+                    <strong>Регистрация открыта</strong>
+                    <div class="text-secondary">Старт @_state.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm") · играть можно будет после старта</div>
+                </div>
+                @if (!_authenticated)
+                {
+                    <a class="btn btn-primary" href="/signin?returnUrl=/t/@Id">Войти и записаться</a>
+                }
+                else if (_state.Joined)
+                {
+                    <span class="badge badge-success">Вы записаны ✓</span>
+                }
+                else
+                {
+                    <button class="btn btn-primary" @onclick="Join">Записаться</button>
+                }
+            </div>
         </div>
     }
 
@@ -166,6 +193,8 @@ else
     private IDisposable? _subscription;
 
     private IArenaTournamentGrain T => Grains.GetGrain<IArenaTournamentGrain>(Id);
+
+    private int HumanCount => _state is null ? 0 : Math.Max(0, _state.Standings.Count - _state.BotCount);
 
     protected override async Task OnInitializedAsync()
     {
@@ -241,7 +270,7 @@ else
     {
         TournamentStatus.Running => "Идёт сейчас",
         TournamentStatus.Finished => "Завершённый",
-        _ => "Скоро"
+        _ => "Регистрация"
     };
 
     private static string Trophy(int rank) => rank switch { 1 => "🥇", 2 => "🥈", 3 => "🥉", _ => rank.ToString() };

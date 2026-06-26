@@ -15,7 +15,14 @@ public sealed record TournamentSummaryDto(
     [property: Id(2)] TimeControl TimeControl,
     [property: Id(3)] TournamentStatus Status,
     [property: Id(4)] int PlayerCount,
-    [property: Id(5)] int SecondsLeft);
+    [property: Id(5)] int SecondsLeft,
+    [property: Id(6)] int BotCount,
+    [property: Id(7)] DateTimeOffset StartsAt,
+    [property: Id(8)] int DurationSeconds)
+{
+    /// <summary>Участники-люди = все минус боты.</summary>
+    public int HumanCount => Math.Max(0, PlayerCount - BotCount);
+}
 
 /// <summary>Строка таблицы лидеров арены.</summary>
 [GenerateSerializer]
@@ -64,4 +71,5 @@ public sealed record ArenaStateDto(
     [property: Id(7)] ArenaGameDto? MyGame,
     [property: Id(8)] TimeControl TimeControl,
     [property: Id(9)] DateTimeOffset StartedAt,
-    [property: Id(10)] int DurationSeconds);
+    [property: Id(10)] int DurationSeconds,
+    [property: Id(11)] int BotCount);

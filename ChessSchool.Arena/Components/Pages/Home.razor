@@ -6,37 +6,6 @@
     <meta name="description" content="Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики." />
 </HeadContent>
 
-@* Локальный шаблон отрисовки содержимого блока (live/past/future) *@
-@{
-    RenderFragment BlockInner(Block b) =>@<text>
-        @if (b.Mini)
-        {
-            <div class="tlb-head">
-                <span class="tlb-ico">@Icon(b.Type)</span>
-                <span class="tlb-tc">@b.Tc</span>
-            </div>
-            @if (b.State == "live")
-            {
-                <span class="tlb-live"><span class="live"></span></span>
-            }
-        }
-        else
-        {
-            <div class="tlb-head">
-                <span class="tlb-title">
-                    @if (b.State == "live")
-                    {
-                        <span class="live"></span>
-                    }
-                    <span class="tlb-ico">@Icon(b.Type)</span>@b.Title
-                </span>
-                <span class="tlb-tc">@b.Tc</span>
-            </div>
-            <div class="tlb-sub">@(b.State == "live" ? $"{b.Time} · {b.Players} игр." : b.Time)</div>
-        }
-    </text>;
-}
-
 @if (_tournaments is null)
 {
     <p class="text-muted"><em>Загрузка…</em></p>
@@ -97,21 +66,24 @@ else
 
                         @foreach (var b in _blocks)
                         {
-                            @if (b.State == "future")
-                            {
-                                <div class="tlb @b.Type @(b.Mini ? "mini" : "") is-future"
-                                     style="grid-column:@(b.Col) / span @(b.Span); grid-row:@(b.Row)"
-                                     title="Турнир ещё не начался">
-                                    @BlockInner(b)
+                            <a class="tlb @b.Type tlb-@b.State" href="/t/@b.Id"
+                               style="grid-column:@(b.Col) / span @(b.Span); grid-row:@(b.Row)"
+                               title="@StateHint(b.State)">
+                                <div class="tlb-head">
+                                    <span class="tlb-title">
+                                        @if (b.State == "live")
+                                        {
+                                            <span class="live"></span>
+                                        }
+                                        <span class="tlb-ico">@Icon(b.Type)</span>@b.Title
+                                    </span>
+                                    <span class="tlb-tc">@b.Tc</span>
                                 </div>
-                            }
-                            else
-                            {
-                                <a class="tlb @b.Type @(b.Mini ? "mini" : "") @(b.State == "past" ? "is-past" : "")"
-                                   href="/t/@b.Href" style="grid-column:@(b.Col) / span @(b.Span); grid-row:@(b.Row)">
-                                    @BlockInner(b)
-                                </a>
-                            }
+                                <div class="tlb-sub">
+                                    <span>@b.Time</span>
+                                    <span class="tlb-pop">@b.Humans 👤 @b.Bots 🤖</span>
+                                </div>
+                            </a>
                         }
 
                         <div class="tl-now" data-tl-nowline><span class="tl-now-label" data-tl-nowlabel></span></div>
@@ -122,19 +94,20 @@ else
 
         @* ---------------- Список (десктоп) ---------------- *@
         <div class="view view-list">
-            <div class="lcat"><span>Регулярные</span></div>
+            <div class="lcat"><span>Все турниры</span></div>
             <div class="lgrid">
                 @foreach (var t in _tournaments)
                 {
-                    <a class="lcard @TypeOf(t.TimeControl)" href="/t/@t.Id">
+                    <a class="lcard @TypeOf(t.TimeControl) lcard-@StateOf(t.Status)" href="/t/@t.Id">
                         <div class="lcard-head">
                             <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
                             <span class="lcard-title">@t.Name</span>
                             <span class="badge @StatusBadge(t.Status)">@StatusText(t.Status)</span>
                         </div>
                         <div class="lcard-meta">
-                            <span>@t.TimeControl</span>
-                            <span>@t.PlayerCount участников</span>
+                            <span>@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
+                            <span>@t.HumanCount 👤 игроков</span>
+                            <span>@t.BotCount 🤖 ботов</span>
                             @if (t.Status == TournamentStatus.Running)
                             {
                                 <span>осталось ~@(t.SecondsLeft / 60) мин</span>
@@ -155,15 +128,15 @@ else
             else
             {
                 <div class="up-list">
-                    @foreach (var b in _upcoming)
+                    @foreach (var t in _upcoming)
                     {
-                        <div class="up-item @b.Type">
-                            <span class="up-time">@b.Time</span>
-                            <span class="tlb-ico">@Icon(b.Type)</span>
-                            <span class="up-title">@b.Title</span>
-                            <span class="up-tc">@b.Tc</span>
-                            <span class="badge badge-warn">скоро</span>
-                        </div>
+                        <a class="up-item @TypeOf(t.TimeControl)" href="/t/@t.Id">
+                            <span class="up-time">@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
+                            <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
+                            <span class="up-title">@t.Name</span>
+                            <span class="up-pop">@t.HumanCount 👤 @t.BotCount 🤖</span>
+                            <span class="badge badge-warn">запись</span>
+                        </a>
                     }
                 </div>
             }
@@ -175,19 +148,20 @@ else
 <script src="js/schedule.js"></script>
 
 @code {
-    private const int Hours = 12;
+    private const int WindowBackHours = 3;
+    private const int Hours = 9; // 3 назад + 6 вперёд (совпадает с расписанием в ArenaDirectoryGrain)
 
     private IReadOnlyList<TournamentSummaryDto>? _tournaments;
     private readonly List<Block> _blocks = new();
-    private readonly List<Block> _upcoming = new();
-    private int _lanes;
+    private readonly List<TournamentSummaryDto> _upcoming = new();
+    private int _lanes = 3;
     private int _startHour;
     private long _windowStartUnix;
     private int _liveCount;
     private string _dateLabel = "";
 
-    private sealed record Block(int Col, int Span, int Row, int StartHalf, string Type, string Title,
-        string Time, int Players, string Tc, string State, bool Mini, string Href);
+    private sealed record Block(string Id, int Col, int Span, int Row, string Type, string Title,
+        string Time, int Humans, int Bots, string Tc, string State);
 
     protected override async Task OnInitializedAsync()
     {
@@ -197,56 +171,51 @@ else
         var now = DateTimeOffset.Now;
         _dateLabel = $"{Weekday[(int)now.DayOfWeek]} {now.Day} {Months[now.Month - 1]}";
 
-        // Окно начинается за 2 часа до текущего часа (видны и прошедшие, и будущие слоты).
-        var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset).AddHours(-2);
+        var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset)
+            .AddHours(-WindowBackHours);
         _startHour = windowStart.Hour;
         _windowStartUnix = windowStart.ToUnixTimeSeconds();
 
-        BuildTimeline(windowStart, now);
+        BuildTimeline(windowStart);
+
+        _upcoming.AddRange(_tournaments
+            .Where(t => t.Status == TournamentStatus.Created)
+            .OrderBy(t => t.StartsAt));
     }
 
-    private void BuildTimeline(DateTimeOffset windowStart, DateTimeOffset now)
+    private void BuildTimeline(DateTimeOffset windowStart)
     {
-        // По одному «живому» турниру каждого типа для таймлайна (берём идущие в приоритете).
-        var byType = _tournaments!
-            .OrderByDescending(t => t.Status == TournamentStatus.Running)
-            .GroupBy(t => TypeOf(t.TimeControl))
-            .ToDictionary(g => g.Key, g => g.First());
         int cols = Hours * 2;
-
-        var lanes = new (string Type, int Step, int Offset, int Span, bool Mini)[]
+        foreach (var t in _tournaments!)
         {
-            ("bullet", 2, 0, 2, true),
-            ("blitz",  2, 0, 2, false),
-            ("blitz",  2, 1, 2, false),
-            ("rapid",  4, 0, 4, false),
-        };
+            var type = TypeOf(t.TimeControl);
+            int startHalf = (int)Math.Round((t.StartsAt.ToLocalTime() - windowStart).TotalMinutes / 30.0);
+            if (startHalf < 0 || startHalf >= cols) continue;
+            int span = Math.Max(1, (int)Math.Round(t.DurationSeconds / 1800.0));
+            span = Math.Min(span, cols - startHalf);
 
-        _lanes = lanes.Length;
-        int row = 2;
-        foreach (var lane in lanes)
-        {
-            if (!byType.TryGetValue(lane.Type, out var t)) { row++; continue; }
-            for (int start = lane.Offset; start < cols; start += lane.Step)
-            {
-                int span = Math.Min(lane.Span, cols - start);
-                if (span <= 0) break;
-
-                var slotStart = windowStart.AddMinutes(start * 30);
-                var slotEnd = windowStart.AddMinutes((start + span) * 30);
-                string state = slotEnd <= now ? "past" : slotStart > now ? "future" : "live";
-
-                var block = new Block(
-                    Col: start + 2, Span: span, Row: row, StartHalf: start, Type: lane.Type, Title: ShortName(lane.Type),
-                    Time: $"{slotStart.Hour:00}:{slotStart.Minute:00}", Players: t.PlayerCount,
-                    Tc: t.TimeControl.ToString(), State: state, Mini: lane.Mini, Href: t.Id);
-                _blocks.Add(block);
-            }
-            row++;
+            _blocks.Add(new Block(
+                Id: t.Id, Col: startHalf + 2, Span: span, Row: LaneRow(type), Type: type,
+                Title: ShortName(type), Time: t.StartsAt.ToLocalTime().ToString("HH:mm"),
+                Humans: t.HumanCount, Bots: t.BotCount, Tc: t.TimeControl.ToString(), State: StateOf(t.Status)));
         }
-
-        _upcoming.AddRange(_blocks.Where(b => b.State == "future").OrderBy(b => b.StartHalf).Take(12));
     }
+
+    private static int LaneRow(string type) => type switch { "bullet" => 2, "blitz" => 3, _ => 4 };
+
+    private static string StateOf(TournamentStatus s) => s switch
+    {
+        TournamentStatus.Running => "live",
+        TournamentStatus.Finished => "past",
+        _ => "future"
+    };
+
+    private static string StateHint(string state) => state switch
+    {
+        "live" => "Идёт сейчас — можно играть",
+        "past" => "Завершён — результаты",
+        _ => "Регистрация открыта"
+    };
 
     private static string TypeOf(TimeControl tc) => tc.InitialSeconds switch
     {
@@ -277,7 +246,7 @@ else
     {
         TournamentStatus.Running => "идёт",
         TournamentStatus.Finished => "завершён",
-        _ => "скоро"
+        _ => "регистрация"
     };
 
     private static string StatusBadge(TournamentStatus s) => s switch
@@ -310,7 +279,6 @@ else
     .now-pill .now-btn { border: 0; background: transparent; color: var(--ink-2); font-weight: 600; font-size: .85rem; padding: .25rem .4rem; cursor: pointer; }
     .now-pill .now-btn:hover { color: var(--ink); }
 
-    /* Активные состояния переключателя вида (CSS) */
     #sv-tl:checked ~ .sched-top .seg-view label[for="sv-tl"],
     #sv-list:checked ~ .sched-top .seg-view label[for="sv-list"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 
@@ -321,7 +289,7 @@ else
     /* ---------------- Таймлайн ---------------- */
     .tl-wrap { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
     .tl-scroll { overflow-x: auto; }
-    .tl-grid { display: grid; grid-template-columns: 132px repeat(var(--cols), var(--colw, 92px)); grid-auto-rows: 72px; position: relative; width: max-content; }
+    .tl-grid { display: grid; grid-template-columns: 132px repeat(var(--cols), var(--colw, 92px)); grid-auto-rows: 76px; position: relative; width: max-content; }
 
     .tl-gutter { grid-column: 1; grid-row: 1; position: sticky; left: 0; background: var(--surface); z-index: 3; border-bottom: 1px solid var(--line); }
     .tl-h { grid-row: 1; display: flex; align-items: center; padding: 0 12px; font-weight: 600; font-size: .85rem; color: var(--ink-2); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -332,21 +300,23 @@ else
     .tl-now::before { content: ""; position: absolute; top: -1px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(196, 125, 9, .18); }
     .tl-now-label { position: absolute; top: 8px; left: 8px; font-size: .7rem; font-weight: 700; color: var(--warn); background: var(--warn-weak); padding: 1px 6px; border-radius: var(--r-pill); white-space: nowrap; }
 
-    .tlb { margin: 6px; border-radius: 12px; padding: 7px 11px; display: flex; flex-direction: column; justify-content: center; gap: 2px; line-height: 1.25; text-decoration: none; border: 1px solid; box-shadow: var(--shadow-sm); overflow: hidden; transition: transform .1s, box-shadow .1s; }
+    .tlb { margin: 6px; border-radius: 12px; padding: 7px 11px; display: flex; flex-direction: column; justify-content: center; gap: 3px; line-height: 1.2; text-decoration: none; border: 1px solid; box-shadow: var(--shadow-sm); overflow: hidden; transition: transform .1s, box-shadow .1s; }
     a.tlb:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
     .tlb.bullet { background: #f8ead9; border-color: #ecc39b; color: #6b4a2a; }
     .tlb.blitz { background: #f6ecca; border-color: #e6cf86; color: #695717; }
     .tlb.rapid { background: #dcecd6; border-color: #a9cf9a; color: #2f5a36; }
-    .tlb.mini { justify-content: center; }
-    .tlb.is-future { opacity: .55; filter: saturate(.7); cursor: not-allowed; }
-    .tlb.is-past { opacity: .78; }
+    /* Завершённые — «выключенный» вид, но кликабельны (результаты) */
+    .tlb.tlb-past { opacity: .55; filter: grayscale(.4); }
+    .tlb.tlb-past:hover { opacity: .85; }
+    /* Идущие — акцент */
+    .tlb.tlb-live { box-shadow: 0 0 0 2px var(--danger-weak), var(--shadow-sm); }
     .tlb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .tlb-title { display: flex; align-items: center; gap: .4rem; font-weight: 680; font-size: .92rem; min-width: 0; }
     .tlb-ico { font-size: .9rem; line-height: 1; }
     .tlb-tc { font-weight: 700; font-size: .8rem; opacity: .7; white-space: nowrap; }
-    .tlb-sub { font-size: .78rem; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tlb-sub { display: flex; justify-content: space-between; gap: 6px; font-size: .76rem; opacity: .78; white-space: nowrap; }
+    .tlb-pop { font-variant-numeric: tabular-nums; }
     .tlb .live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
-    .tlb-live { margin-top: 2px; }
 
     /* ---------------- Список ---------------- */
     .view-list { margin-top: 20px; }
@@ -358,6 +328,8 @@ else
     .lcard.bullet { border-left-color: #ecc39b; }
     .lcard.blitz { border-left-color: #e6cf86; }
     .lcard.rapid { border-left-color: #a9cf9a; }
+    .lcard.lcard-past { opacity: .6; }
+    .lcard.lcard-past:hover { opacity: 1; }
     .lcard-head { display: flex; align-items: center; gap: .5rem; }
     .lcard-title { font-weight: 660; font-size: 1.05rem; flex: 1; min-width: 0; }
     .lcard-meta { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem; color: var(--muted); font-size: .88rem; }
@@ -365,16 +337,15 @@ else
     /* ---------------- Мобайл: список предстоящих ---------------- */
     .sched-mobile { display: none; margin-top: 18px; }
     .up-list { display: flex; flex-direction: column; gap: 8px; }
-    .up-item { display: flex; align-items: center; gap: .6rem; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line-strong); box-shadow: var(--shadow-sm); }
+    .up-item { display: flex; align-items: center; gap: .6rem; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line-strong); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); }
     .up-item.bullet { border-left-color: #ecc39b; }
     .up-item.blitz { border-left-color: #e6cf86; }
     .up-item.rapid { border-left-color: #a9cf9a; }
     .up-time { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 46px; }
-    .up-title { font-weight: 620; flex: 1; }
-    .up-tc { color: var(--muted); font-weight: 600; font-size: .85rem; }
+    .up-title { font-weight: 620; flex: 1; min-width: 0; }
+    .up-pop { color: var(--muted); font-weight: 600; font-size: .82rem; font-variant-numeric: tabular-nums; }
 
     @@media (max-width: 900px) {
-        /* На мобиле — только список предстоящих */
         .sched-top .sched-controls, .view { display: none !important; }
         .sched-mobile { display: block; }
     }

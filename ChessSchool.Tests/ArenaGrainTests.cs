@@ -20,10 +20,12 @@ public class ArenaGrainTests
         public void Configure(ISiloBuilder siloBuilder)
         {
             siloBuilder.AddMemoryGrainStorage("arena"); // хранилище состояния турниров
+            siloBuilder.UseInMemoryReminderService();   // грейн реализует IRemindable (reminders отключены ниже)
             siloBuilder.ConfigureServices(s =>
             {
                 s.AddSingleton<ArenaNotifier>();
                 s.AddSingleton<IChessEngine, FakeEngine>();
+                s.AddSingleton(new ArenaRuntimeOptions(RemindersEnabled: false));
             });
         }
     }

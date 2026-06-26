@@ -25,6 +25,8 @@ builder.UseOrleans(silo =>
         silo.Configure<ClusterOptions>(o => { o.ClusterId = "chessschool-arena"; o.ServiceId = "chessschool-arena"; });
         silo.ConfigureEndpoints(siloPort: 11112, gatewayPort: 30001);
         silo.AddRedisGrainStorage("arena", o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
+        // Reminders в Redis: грейн турнира «воскресает» на любой ноде даже при потере текущей.
+        silo.UseRedisReminderService(o => o.ConfigurationOptions = ConfigurationOptions.Parse(redisConn));
     }
     else
     {
@@ -34,6 +36,9 @@ builder.UseOrleans(silo =>
         silo.AddMemoryGrainStorage("arena");
     }
 });
+
+// Рантайм-переключатели грейна (reminders доступны только при настроенном Redis-сервисе).
+builder.Services.AddSingleton(new ChessSchool.Arena.Services.ArenaRuntimeOptions(RemindersEnabled: redisConn is not null));
 
 // Внутрипроцессный pub/sub для push-обновлений турниров (грейн → компоненты).
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();

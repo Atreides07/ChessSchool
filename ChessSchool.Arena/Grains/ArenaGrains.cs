@@ -1,5 +1,6 @@
 using ChessSchool.Arena.Services;
 using ChessSchool.Contracts;
+using Microsoft.Extensions.Logging;
 using Color = ChessSchool.Contracts.PieceColor;
 
 namespace ChessSchool.Arena.Grains;
@@ -93,7 +94,9 @@ public sealed class PersistedPlayer
 public sealed class ArenaTournamentGrain(
     [PersistentState("tournament", "arena")] IPersistentState<ArenaPersistedState> store,
     ArenaNotifier notifier,
-    IChessEngine engine) : Grain, IArenaTournamentGrain
+    IChessEngine engine,
+    ArenaRuntimeOptions runtime,
+    ILogger<ArenaTournamentGrain> logger) : Grain, IArenaTournamentGrain, IRemindable
 {
     private sealed class Player
     {
@@ -146,6 +149,8 @@ public sealed class ArenaTournamentGrain(
     private DateTimeOffset _startsAt;
     private int _gameCounter;
     private IDisposable? _timer;
+    private bool _reminderRegistered;
+    private const string TickReminder = "arena-tick";
 
     private readonly Dictionary<string, Player> _players = new();
     private readonly Dictionary<string, Game> _games = new();
@@ -329,6 +334,57 @@ public sealed class ArenaTournamentGrain(
         DelayDeactivation(TimeSpan.FromMinutes(10));
         // 500 мс: достаточно мелкий шаг, чтобы тайминг ходов ботов был неравномерным, а не «по метроному».
         _timer ??= this.RegisterGrainTimer(OnTimerAsync, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+
+        // Reminder (есть Redis) воскрешает грейн на ЛЮБОЙ ноде даже при внезапной потере текущей ноды
+        // (таймер живёт только в активном грейне). Гранулярность reminder'а — 1 мин (минимум Orleans):
+        // он лишь возвращает грейн к жизни, после чего мелкий таймер снова ведёт турнир посекундно.
+        if (runtime.RemindersEnabled && !_reminderRegistered)
+        {
+            _reminderRegistered = true;
+            _ = RegisterTickReminderSafe();
+        }
+    }
+
+    private async Task RegisterTickReminderSafe()
+    {
+        try
+        {
+            await this.RegisterOrUpdateReminder(TickReminder, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Не удалось зарегистрировать reminder тика турнира {Id}.", Id);
+            _reminderRegistered = false;
+        }
+    }
+
+    private async Task UnregisterTickReminderSafe()
+    {
+        try
+        {
+            if (await this.GetReminder(TickReminder) is { } r) await this.UnregisterReminder(r);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Снятие reminder турнира {Id}.", Id);
+        }
+        _reminderRegistered = false;
+    }
+
+    /// <summary>Reminder-«воскрешение»: вернувшись к жизни, грейн возобновляет тик (или снимает reminder, если турнир уже завершён).</summary>
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (reminderName != TickReminder) return;
+        EnsureConfigured();
+        if (Status() == TournamentStatus.Running)
+        {
+            EnsureTimer();
+            await OnTimerAsync();
+        }
+        else if (Status() == TournamentStatus.Finished)
+        {
+            await UnregisterTickReminderSafe();
+        }
     }
 
     private async Task OnTimerAsync()
@@ -489,6 +545,7 @@ public sealed class ArenaTournamentGrain(
         {
             _timer?.Dispose();
             _timer = null;
+            if (_reminderRegistered) _ = UnregisterTickReminderSafe();
             return;
         }
         if (status != TournamentStatus.Running) return; // Created — только регистрация

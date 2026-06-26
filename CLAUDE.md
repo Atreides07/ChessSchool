@@ -221,6 +221,14 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
     есть `redis` → `UseRedisClustering` + `ConfigureEndpoints` (несколько нод в одном кластере, грейн —
     единственная активация); нет → `UseLocalhostClustering` (dev). Два силоса по-прежнему разведены по
     портам/clusterId (грабля #3). SignalR — `AddStackExchangeRedis` при наличии Redis, иначе in-proc.
+11. **Тик турнира Arena: таймер + reminder-«воскрешение».** Партии ведёт мелкий `RegisterGrainTimer`
+    (500 мс), но он живёт только в активном грейне на одной ноде. При Redis включается `UseRedisReminderService`,
+    и грейн (`IRemindable`, [ArenaGrains.cs](ChessSchool.Arena/Grains/ArenaGrains.cs)) регистрирует reminder
+    `arena-tick` (период 1 мин — минимум Orleans): при внезапной потере ноды он воскрешает грейн на другой,
+    тот восстанавливает состояние из grain storage и возобновляет тик. Reminder регистрируется ТОЛЬКО при
+    `ArenaRuntimeOptions.RemindersEnabled` (есть Redis-сервис); тестовый силос — `UseInMemoryReminderService`.
+    Push-обновления (`ArenaNotifier`) при Redis идут через pub/sub-канал `arena:notify` (зритель на любой
+    ноде получает обновление турнира, чей грейн на другой ноде), иначе внутрипроцессно.
 
 ## Безопасность и конфигурация
 

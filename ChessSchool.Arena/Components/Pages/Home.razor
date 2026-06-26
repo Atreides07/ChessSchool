@@ -92,13 +92,11 @@ else
             </div>
         </div>
 
-        @* ---------------- Список (десктоп) ---------------- *@
+        @* ---------------- Список (десктоп): разделы по статусу, последовательно ---------------- *@
         <div class="view view-list">
-            <div class="lcat"><span>Все турниры</span></div>
-            <div class="lgrid">
-                @foreach (var t in _tournaments)
-                {
-                    <a class="lcard @TypeOf(t.TimeControl) lcard-@StateOf(t.Status)" href="/t/@t.Id">
+            @{
+                RenderFragment<TournamentSummaryDto> card = t =>
+                    @<a class="lcard @TypeOf(t.TimeControl) lcard-@StateOf(t.Status)" href="/t/@t.Id">
                         <div class="lcard-head">
                             <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
                             <span class="lcard-title">@t.Name</span>
@@ -113,9 +111,24 @@ else
                                 <span>осталось ~@(t.SecondsLeft / 60) мин</span>
                             }
                         </div>
-                    </a>
-                }
-            </div>
+                    </a>;
+            }
+
+            @if (_running.Count > 0)
+            {
+                <div class="lcat"><span>Текущие</span></div>
+                <div class="lgrid">@foreach (var t in _running) { @card(t) }</div>
+            }
+            @if (_next.Count > 0)
+            {
+                <div class="lcat lcat-gap"><span>Следующие</span></div>
+                <div class="lgrid">@foreach (var t in _next) { @card(t) }</div>
+            }
+            @if (_finished.Count > 0)
+            {
+                <div class="lcat lcat-gap"><span>Завершённые</span></div>
+                <div class="lgrid">@foreach (var t in _finished) { @card(t) }</div>
+            }
         </div>
 
         @* ---------------- Мобайл: только список предстоящих ---------------- *@
@@ -154,6 +167,9 @@ else
     private IReadOnlyList<TournamentSummaryDto>? _tournaments;
     private readonly List<Block> _blocks = new();
     private readonly List<TournamentSummaryDto> _upcoming = new();
+    private readonly List<TournamentSummaryDto> _running = new();   // текущие
+    private readonly List<TournamentSummaryDto> _next = new();      // следующие
+    private readonly List<TournamentSummaryDto> _finished = new();  // завершённые
     private int _lanes = 3;
     private int _startHour;
     private long _windowStartUnix;
@@ -181,6 +197,12 @@ else
         _upcoming.AddRange(_tournaments
             .Where(t => t.Status == TournamentStatus.Created)
             .OrderBy(t => t.StartsAt));
+
+        // Разделы списка идут последовательно: сначала текущие, затем ближайшие будущие,
+        // затем завершённые (свежие сверху).
+        _running.AddRange(_tournaments.Where(t => t.Status == TournamentStatus.Running).OrderBy(t => t.StartsAt));
+        _next.AddRange(_tournaments.Where(t => t.Status == TournamentStatus.Created).OrderBy(t => t.StartsAt));
+        _finished.AddRange(_tournaments.Where(t => t.Status == TournamentStatus.Finished).OrderByDescending(t => t.StartsAt));
     }
 
     private void BuildTimeline(DateTimeOffset windowStart)
@@ -321,6 +343,7 @@ else
     /* ---------------- Список ---------------- */
     .view-list { margin-top: 20px; }
     .lcat { margin-bottom: 12px; }
+    .lcat.lcat-gap { margin-top: 26px; }
     .lcat span { font-size: .64rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; background: var(--surface-2); padding: 4px 9px; border-radius: var(--r-pill); }
     .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
     .lcard { display: block; padding: 16px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); border-left: 4px solid var(--line-strong); transition: box-shadow .12s, transform .12s; }

@@ -15,7 +15,8 @@ Docker). Онлайн-игра — **Microsoft Orleans** (грейн на пар
 
 Известный технический долг и отложенные задачи — [docs/TODO.md](docs/TODO.md).
 Развёртывание в проде (инфраструктура, конфиг, миграции, Orleans/Redis, чек-листы) —
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Нагрузочная модель и железо под 100k/1M онлайн —
+[docs/CAPACITY_PLANNING.md](docs/CAPACITY_PLANNING.md). Продуктовые метрики — [docs/PRODUCT_METRICS.md](docs/PRODUCT_METRICS.md).
 
 ## Главный принцип: всё рассчитано на несколько серверов
 

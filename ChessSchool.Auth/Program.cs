@@ -20,6 +20,12 @@ builder.AddServiceDefaults();
 // без этого при нескольких нодах IdP вход «прыгал» бы и логин ломался.
 builder.AddChessSchoolDataProtection();
 
+// Readiness-проверки зависимостей (в /health, не в /alive). Без строк подключения — пропускаем.
+if (builder.Configuration.GetConnectionString("authdb") is { Length: > 0 } authConn)
+    builder.Services.AddHealthChecks().AddNpgSql(authConn, name: "postgres");
+if (builder.Configuration.GetRedisConnectionString() is { } authRedis)
+    builder.Services.AddHealthChecks().AddRedis(authRedis, name: "redis");
+
 // БД — PostgreSQL (connection string инжектит Aspire по ссылке на ресурс "auth").
 // Хранилище OpenIddict — в том же контексте.
 builder.Services.AddDbContext<AuthDbContext>(o =>

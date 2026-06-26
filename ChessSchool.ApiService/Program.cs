@@ -17,6 +17,11 @@ builder.Services.AddDbContext<SchoolDbContext>(o =>
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
 
+// Readiness-проверка доступности БД (попадает в /health, не в /alive). Без строки подключения
+// (InMemory в тестах) — пропускаем.
+if (builder.Configuration.GetConnectionString("schooldb") is { Length: > 0 } schoolConn)
+    builder.Services.AddHealthChecks().AddNpgSql(schoolConn, name: "postgres");
+
 // Клиент к сервису авторизации (для резолва email → sub при привязке аккаунта).
 builder.Services.AddHttpClient("auth", c => c.BaseAddress = new("https+http://auth"));
 

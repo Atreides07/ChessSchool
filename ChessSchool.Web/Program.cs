@@ -21,6 +21,10 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 // Единый вход (SSO) через общий IdP — тот же аккаунт, что и в Arena.
 builder.AddChessSchoolSso();
 
+// Readiness-проверка Redis (в /health, не в /alive).
+if (builder.Configuration.GetRedisConnectionString() is { } webRedis)
+    builder.Services.AddHealthChecks().AddRedis(webRedis, name: "redis");
+
 // HTTP-клиент к IdP для обновления access-токена по refresh_token (эндпоинт /api/game-token).
 builder.Services.AddHttpClient("idp", c => c.BaseAddress = new("https+http://auth"));
 

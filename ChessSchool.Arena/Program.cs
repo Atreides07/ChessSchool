@@ -42,6 +42,9 @@ builder.UseOrleans(silo =>
 // Рантайм-переключатели грейна (reminders доступны только при настроенном Redis-сервисе).
 builder.Services.AddSingleton(new ChessSchool.Arena.Services.ArenaRuntimeOptions(RemindersEnabled: redisConn is not null));
 
+// Readiness-проверка Redis (в /health, не в /alive).
+if (redisConn is not null) builder.Services.AddHealthChecks().AddRedis(redisConn, name: "redis");
+
 // Внутрипроцессный pub/sub для push-обновлений турниров (грейн → компоненты).
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();
 

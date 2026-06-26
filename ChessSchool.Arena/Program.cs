@@ -95,7 +95,9 @@ app.MapGet("/robots.txt", (HttpRequest r) =>
 app.MapGet("/sitemap.xml", (HttpRequest r) =>
 {
     var b = $"{r.Scheme}://{r.Host}";
-    var locs = string.Join("\n", new[] { "", "majors" }.Select(u => $"  <url><loc>{b}/{u}</loc></url>"));
+    var paths = new List<string> { "", "majors" };
+    paths.AddRange(ChessSchool.Arena.ArenaMajors.All.Select(m => $"majors/{m.Slug}"));
+    var locs = string.Join("\n", paths.Select(u => $"  <url><loc>{b}/{u}</loc></url>"));
     return Results.Text(
         $"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n{locs}\n</urlset>\n",
         "application/xml");

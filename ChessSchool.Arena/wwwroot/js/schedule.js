@@ -55,6 +55,13 @@
         area.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
     }
 
+    // Пересчёт ширины колонок, линии времени и прокрутки к «сейчас» (когда таймлайн виден).
+    function refresh(grid, area) {
+        applyZoom(grid, area, currentZoom);
+        positionNow(grid);
+        scrollToNow(grid, area, true);
+    }
+
     function init() {
         const grid = document.querySelector('[data-tl-grid]');
         const area = document.querySelector('[data-tl-scrollarea]');
@@ -78,19 +85,32 @@
             area.scrollBy({ left: dir * colWidth(grid) * 2, behavior: 'smooth' }); // на 1 час
         }));
 
-        // Старт: масштаб 4ч, линия времени, прокрутка к «сейчас».
-        applyZoom(grid, area, 4);
-        positionNow(grid);
-        scrollToNow(grid, area, true);
+        // Возврат к виду «Таймлайн» (переключатель Список↔Таймлайн): таймлайн был скрыт
+        // (нулевая ширина) → пересчитываем колонки и заново ставим линию времени.
+        document.querySelectorAll('input[name="schedview"]').forEach(r => r.addEventListener('change', () => {
+            if (document.getElementById('sv-tl')?.checked) requestAnimationFrame(() => refresh(grid, area));
+        }));
 
-        // Линия времени тикает.
-        clearInterval(window.__tlTimer);
-        window.__tlTimer = setInterval(() => positionNow(grid), 30000);
+        // Старт: масштаб 4ч, линия времени, прокрутка к «сейчас».
+        currentZoom = 4;
+        refresh(grid, area);
 
         // Пересчёт ширины колонок при ресайзе окна.
         window.removeEventListener('resize', window.__tlResize || (() => { }));
         window.__tlResize = () => applyZoom(grid, area, currentZoom);
         window.addEventListener('resize', window.__tlResize);
+    }
+
+    // Сторож: переживает SSR/enhanced-навигацию. Если на странице появилась новая сетка
+    // (после перехода/возврата) — инициализируем её; иначе просто двигаем линию времени.
+    function startWatchdog() {
+        clearInterval(window.__tlTimer);
+        window.__tlTimer = setInterval(() => {
+            const g = document.querySelector('[data-tl-grid]');
+            if (!g) return;
+            if (g.dataset.tlReady !== '1') init();
+            else positionNow(g);
+        }, 5000);
     }
 
     // Запоминаем выбранный вид (Таймлайн/Список) в cookie — сервер восстанавливает его при
@@ -116,7 +136,7 @@
         else if (m && m[1] === 'tl') tl.checked = true;
     }
 
-    function boot() { restoreView(); init(); }
+    function boot() { restoreView(); init(); startWatchdog(); }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', boot);

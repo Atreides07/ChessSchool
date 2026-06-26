@@ -65,8 +65,6 @@ else
                             <div class="tl-h" style="grid-column:@(h * 2 + 2) / span 2">@hour.ToString("00"):00</div>
                         }
 
-                        <div class="tl-cat" style="grid-row:2 / span @_lanes"><span>Регулярные</span></div>
-
                         @foreach (var b in _blocks)
                         {
                             <a class='tlb @b.Type tlb-@b.State @(b.Mine ? "tlb-mine" : "")' href="/t/@b.Id"
@@ -181,7 +179,6 @@ else
     private readonly List<TournamentSummaryDto> _running = new();   // текущие
     private readonly List<TournamentSummaryDto> _next = new();      // следующие
     private readonly List<TournamentSummaryDto> _finished = new();  // завершённые
-    private int _lanes = 3;
     private int _startHour;
     private long _windowStartUnix;
     private int _liveCount;
@@ -335,12 +332,10 @@ else
     /* ---------------- Таймлайн ---------------- */
     .tl-wrap { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
     .tl-scroll { overflow-x: auto; }
-    .tl-grid { display: grid; grid-template-columns: 132px repeat(var(--cols), var(--colw, 92px)); grid-auto-rows: 76px; position: relative; width: max-content; }
+    .tl-grid { display: grid; grid-template-columns: 16px repeat(var(--cols), var(--colw, 92px)); grid-auto-rows: 76px; position: relative; width: max-content; }
 
     .tl-gutter { grid-column: 1; grid-row: 1; position: sticky; left: 0; background: var(--surface); z-index: 3; border-bottom: 1px solid var(--line); }
     .tl-h { grid-row: 1; display: flex; align-items: center; padding: 0 12px; font-weight: 600; font-size: .85rem; color: var(--ink-2); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-    .tl-cat { grid-column: 1; position: sticky; left: 0; background: var(--surface); z-index: 2; display: flex; align-items: flex-start; padding: 12px; border-right: 1px solid var(--line); }
-    .tl-cat span { font-size: .64rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; background: var(--surface-2); padding: 4px 9px; border-radius: var(--r-pill); }
 
     .tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: linear-gradient(var(--warn), rgba(196, 125, 9, .15)); z-index: 4; display: none; pointer-events: none; }
     .tl-now::before { content: ""; position: absolute; top: -1px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(196, 125, 9, .18); }

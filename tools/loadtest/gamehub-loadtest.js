@@ -101,6 +101,14 @@ const TC_MIX = [
   { initial: 600, increment: 5, weight: 0.20, thinkMs: 8000 }, // rapid
 ];
 
+// Принудительно один контроль времени: -e FORCE_TC="180,2,4000" (initial,increment,thinkMs).
+// Удобно для детерминированного матчмейкинга (все в одном пуле) и точечных прогонов.
+const TC_POOL = (() => {
+  if (!__ENV.FORCE_TC) return TC_MIX;
+  const [i, inc, t] = __ENV.FORCE_TC.split(',').map(Number);
+  return [{ initial: i, increment: inc, weight: 1, thinkMs: t || 4000 }];
+})();
+
 const TOKENS = new SharedArray('tokens', () => JSON.parse(open(__ENV.TOKENS || './tokens.json')));
 
 const HUB = __ENV.HUB || 'wss://localhost:7000';            // ws(s)://host (без /gamehub)
@@ -130,8 +138,10 @@ export const options = {
 const frame = (obj) => JSON.stringify(obj) + REC;
 function pickTc() {
   let r = Math.random(), acc = 0;
-  for (const tc of TC_MIX) { acc += tc.weight; if (r <= acc) return tc; }
-  return TC_MIX[TC_MIX.length - 1];
+  let total = 0; for (const tc of TC_POOL) total += tc.weight;
+  r *= total;
+  for (const tc of TC_POOL) { acc += tc.weight; if (r <= acc) return tc; }
+  return TC_POOL[TC_POOL.length - 1];
 }
 function openingFor(gameId) {            // детерминированно по gameId → оба игрока играют одну линию
   let h = 0;

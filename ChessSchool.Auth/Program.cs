@@ -82,6 +82,9 @@ builder.Services.AddHostedService<ClientSeeder>();
 
 var app = builder.Build();
 
+// Секрет server-to-server вызовов — резолвим на старте (вне Development падаем, если не задан).
+var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -224,10 +227,9 @@ app.MapMethods("/connect/logout", ["GET", "POST"], async (HttpContext ctx) =>
 
 // ---------------- Внутренний резолв email → sub (привязка ученика в ApiService) ----------------
 app.MapPost("/internal/users/by-email", async (ByEmailRequest req, HttpRequest http, AuthDbContext db,
-    IConfiguration config, CancellationToken ct) =>
+    CancellationToken ct) =>
 {
-    var key = config["InternalApiKey"] ?? "dev-internal-key";
-    if (http.Headers["X-Internal-Key"] != key) return Results.Unauthorized();
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
 
     var email = req.Email.Trim().ToLowerInvariant();
     var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);

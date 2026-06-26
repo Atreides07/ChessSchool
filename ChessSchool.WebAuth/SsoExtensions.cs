@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace ChessSchool.WebAuth;
 
@@ -41,7 +43,7 @@ public static class SsoExtensions
         {
             o.Authority = authority;
             o.ClientId = clientId;
-            o.RequireHttpsMetadata = false;   // dev: self-signed
+            o.RequireHttpsMetadata = !builder.Environment.IsDevelopment();   // dev: self-signed
             o.ResponseType = "code";
             o.UsePkce = true;
             o.SaveTokens = true;
@@ -85,7 +87,8 @@ public static class SsoExtensions
         // авторизованный пользователь остаётся авторизованным после рестарта (а не «выпадает» во «Вход»).
         var ticketDir = Path.Combine(builder.Environment.ContentRootPath, "keys", "auth-tickets");
         builder.Services.AddSingleton<ITicketStore>(sp =>
-            new FileSystemTicketStore(ticketDir, sp.GetRequiredService<IDataProtectionProvider>()));
+            new FileSystemTicketStore(ticketDir, sp.GetRequiredService<IDataProtectionProvider>(),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<FileSystemTicketStore>()));
         builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
             .Configure<ITicketStore>((o, store) => o.SessionStore = store);
     }
@@ -117,10 +120,12 @@ public sealed class FileSystemTicketStore : ITicketStore
     private static readonly Regex KeyPattern = new("^[0-9a-fA-F]{32}$", RegexOptions.Compiled);
     private readonly string _dir;
     private readonly IDataProtector _protector;
+    private readonly ILogger _log;
 
-    public FileSystemTicketStore(string dir, IDataProtectionProvider dataProtection)
+    public FileSystemTicketStore(string dir, IDataProtectionProvider dataProtection, ILogger log)
     {
         _dir = dir;
+        _log = log;
         Directory.CreateDirectory(_dir);
         _protector = dataProtection.CreateProtector("ChessSchool.WebAuth.FileSystemTicketStore.v1");
     }
@@ -155,9 +160,12 @@ public sealed class FileSystemTicketStore : ITicketStore
             }
             return ticket;
         }
-        catch
+        catch (Exception ex)
         {
-            return null; // повреждённый/нерасшифровываемый тикет → как будто его нет
+            // Повреждённый/нерасшифровываемый тикет (например, сменились DataProtection-ключи) →
+            // ведём себя как при отсутствии, но логируем для диагностики.
+            _log.LogWarning(ex, "Не удалось прочитать тикет аутентификации (ключ {Key}).", key);
+            return null;
         }
     }
 

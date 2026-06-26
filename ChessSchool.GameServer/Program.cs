@@ -29,7 +29,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = authority;
-        options.RequireHttpsMetadata = false; // dev: self-signed
+        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment(); // dev: self-signed
         options.MapInboundClaims = false;     // сохраняем claim "sub" как есть
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -57,6 +57,11 @@ builder.Services.AddAuthorization();
 // Прод: строго список доменов фронта из конфига Cors:Origins — any-origin + credentials небезопасно
 // (любой сайт мог бы дёргать хаб от имени залогиненного пользователя).
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+// Вне Development список origin'ов обязателен: пустой список тихо заблокирует браузерный клиент,
+// а any-origin + credentials = дыра. Падаем на старте, если конфиг не задан.
+if (!builder.Environment.IsDevelopment() && corsOrigins.Length == 0)
+    throw new InvalidOperationException(
+        "Cors:Origins не задан вне Development. Укажите домены фронта для браузерного SignalR-клиента.");
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 {
     if (builder.Environment.IsDevelopment())

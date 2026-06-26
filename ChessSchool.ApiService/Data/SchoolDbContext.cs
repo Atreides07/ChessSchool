@@ -16,7 +16,11 @@ public class SchoolDbContext(DbContextOptions<SchoolDbContext> options) : DbCont
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<Student>().HasIndex(s => s.LinkedUserSub);
+        b.Entity<Student>().HasIndex(s => s.GroupId);                 // листинг учеников школы по группам
         b.Entity<Game>().HasIndex(g => g.ExternalGameId).IsUnique();
+        b.Entity<Game>().HasIndex(g => g.WhiteStudentId);            // история партий ученика
+        b.Entity<Game>().HasIndex(g => g.BlackStudentId);
+        b.Entity<Game>().HasIndex(g => new { g.Source, g.PlayedAt }); // очередь атрибуции (необатрибутир.)
         b.Entity<ShareLink>().HasIndex(s => s.Token).IsUnique();
         b.Entity<RatingPoint>().HasIndex(r => r.StudentId);
         // DateTimeOffset хранится нативно в PostgreSQL (timestamptz) — конвертеры не нужны.

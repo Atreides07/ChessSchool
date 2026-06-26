@@ -43,6 +43,15 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task Students_Pagination_LimitsResults()
+    {
+        var page = await _client.GetFromJsonAsync<List<StudentDto>>(
+            $"/schools/{Demo.SchoolId}/students?take=2");
+        Assert.NotNull(page);
+        Assert.True(page!.Count <= 2);
+    }
+
+    [Fact]
     public async Task StudentProfile_HasRatingHistory()
     {
         var students = await _client.GetFromJsonAsync<List<StudentDto>>($"/schools/{Demo.SchoolId}/students");

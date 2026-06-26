@@ -21,7 +21,8 @@ builder.Services.AddScoped<GameArchiver>();
 builder.Services.AddHttpClient("auth", c => c.BaseAddress = new("https+http://auth"));
 
 // Ключ для server-to-server вызовов от GameServer (архивация онлайн-партий).
-var internalKey = builder.Configuration["InternalApiKey"] ?? "dev-internal-key";
+// Вне Development обязателен реальный секрет — иначе старт падает (см. ResolveInternalApiKey).
+var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
 
 var app = builder.Build();
 
@@ -46,16 +47,37 @@ async Task<StudentProfileDto?> BuildProfileAsync(SchoolDbContext db, Guid studen
     var student = await db.Students.FindAsync([studentId], ct);
     if (student is null) return null;
 
-    var history = await db.RatingPoints.Where(r => r.StudentId == studentId)
+    var history = await db.RatingPoints.AsNoTracking()
+        .Where(r => r.StudentId == studentId)
         .OrderBy(r => r.Date)
         .Select(r => new RatingPointDto(r.Date, r.Rating))
         .ToListAsync(ct);
 
-    var games = await db.Games
+    // Берём только нужные колонки последних 10 партий (без трекинга и лишних полей).
+    var games = await db.Games.AsNoTracking()
         .Where(g => g.WhiteStudentId == studentId || g.BlackStudentId == studentId)
-        .OrderByDescending(g => g.PlayedAt).Take(10).ToListAsync(ct);
+        .OrderByDescending(g => g.PlayedAt).Take(10)
+        .Select(g => new
+        {
+            g.Id,
+            g.PlayedAt,
+            g.WhiteStudentId,
+            g.BlackStudentId,
+            g.Result,
+            g.WhiteRatingChange,
+            g.BlackRatingChange,
+            g.Pgn
+        })
+        .ToListAsync(ct);
 
-    var names = await db.Students.ToDictionaryAsync(s => s.Id, s => s.DisplayName, ct);
+    // Имена соперников — только по фактически встретившимся id (а не вся таблица учеников).
+    var oppIds = games
+        .Select(g => g.WhiteStudentId == studentId ? g.BlackStudentId : g.WhiteStudentId)
+        .OfType<Guid>().Distinct().ToList();
+    var names = await db.Students.AsNoTracking()
+        .Where(s => oppIds.Contains(s.Id))
+        .Select(s => new { s.Id, s.DisplayName })
+        .ToDictionaryAsync(s => s.Id, s => s.DisplayName, ct);
 
     var summaries = games.Select(g =>
     {
@@ -70,23 +92,38 @@ async Task<StudentProfileDto?> BuildProfileAsync(SchoolDbContext db, Guid studen
     return new StudentProfileDto(ToDto(student), history, summaries);
 }
 
+// Пагинация: единый разбор и ограничение страницы (защита от выборки «всё» на больших таблицах).
+static (int Skip, int Take) Page(int? skip, int? take, int maxTake = 200, int defaultTake = 100) =>
+    (Math.Max(0, skip ?? 0), Math.Clamp(take ?? defaultTake, 1, maxTake));
+
 // ---------- ЛК школы (чтение) ----------
-app.MapGet("/schools/{schoolId:guid}/students", async (Guid schoolId, SchoolDbContext db, CancellationToken ct) =>
+app.MapGet("/schools/{schoolId:guid}/students",
+    async (Guid schoolId, int? skip, int? take, SchoolDbContext db, CancellationToken ct) =>
 {
-    var groupIds = await db.Groups.Where(g => g.SchoolId == schoolId).Select(g => g.Id).ToListAsync(ct);
-    var students = await db.Students.Where(s => groupIds.Contains(s.GroupId))
-        .OrderByDescending(s => s.Rating).ToListAsync(ct);
-    return Results.Ok(students.Select(ToDto));
+    var (s, t) = Page(skip, take);
+    // Один запрос с join, проекцией в DTO и пагинацией — без трекинга и без выборки всей таблицы.
+    var students = await (
+        from st in db.Students.AsNoTracking()
+        join g in db.Groups on st.GroupId equals g.Id
+        where g.SchoolId == schoolId
+        orderby st.Rating descending
+        select new StudentDto(st.Id, st.GroupId, st.DisplayName, st.Rating, st.RatingDeviation,
+            st.GamesPlayed, st.Wins, st.Draws, st.Losses, st.LinkedUserSub))
+        .Skip(s).Take(t).ToListAsync(ct);
+    return Results.Ok(students);
 });
 
 app.MapGet("/students/{id:guid}", async (Guid id, SchoolDbContext db, CancellationToken ct) =>
     await BuildProfileAsync(db, id, ct) is { } p ? Results.Ok(p) : Results.NotFound());
 
-app.MapGet("/schools/{schoolId:guid}/pending-games", async (Guid schoolId, SchoolDbContext db, CancellationToken ct) =>
+app.MapGet("/schools/{schoolId:guid}/pending-games",
+    async (Guid schoolId, int? skip, int? take, SchoolDbContext db, CancellationToken ct) =>
 {
-    var pending = await db.Games
+    var (s, t) = Page(skip, take);
+    var pending = await db.Games.AsNoTracking()
         .Where(g => g.Source == AttributionSource.None && g.WhiteStudentId == null)
         .OrderByDescending(g => g.PlayedAt)
+        .Skip(s).Take(t)
         .Select(g => new PendingGameDto(g.Id, g.PlayedAt, g.DeviceRef ?? "—", g.Pgn))
         .ToListAsync(ct);
     return Results.Ok(pending);

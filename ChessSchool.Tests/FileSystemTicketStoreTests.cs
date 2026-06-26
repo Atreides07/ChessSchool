@@ -3,6 +3,7 @@ using ChessSchool.WebAuth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ChessSchool.Tests;
 
@@ -15,7 +16,7 @@ public sealed class FileSystemTicketStoreTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "csts-" + Guid.NewGuid().ToString("N"));
     private readonly IDataProtectionProvider _dp = new PassthroughDataProtection();
 
-    private FileSystemTicketStore NewStore() => new(_dir, _dp);
+    private FileSystemTicketStore NewStore() => new(_dir, _dp, NullLogger<FileSystemTicketStore>.Instance);
 
     private static AuthenticationTicket MakeTicket(string name, DateTimeOffset? expires = null)
     {

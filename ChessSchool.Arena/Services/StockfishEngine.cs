@@ -87,9 +87,9 @@ public sealed class StockfishEngine(IConfiguration config, ILogger<StockfishEngi
                 log.LogInformation("Stockfish запущен ({Path}).", path);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
-                // пробуем следующий путь
+                log.LogDebug(ex, "Stockfish не запустился по пути {Path} — пробую следующий.", path);
             }
         }
 

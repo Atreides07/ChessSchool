@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
@@ -109,6 +110,31 @@ public static class Extensions
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Секрет для server-to-server вызовов (X-Internal-Key). Дефолт-заглушка допустима ТОЛЬКО в
+    /// Development: вне его пустой или дефолтный ключ — ошибка старта (иначе любой смог бы подделать
+    /// внутренний запрос известным dev-ключом). В проде ключ приходит из env/KMS.
+    /// </summary>
+    public static string ResolveInternalApiKey(this IConfiguration config, IHostEnvironment env)
+    {
+        const string devKey = "dev-internal-key";
+        var key = config["InternalApiKey"];
+
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            if (!env.IsDevelopment() && key == devKey)
+                throw new InvalidOperationException(
+                    "InternalApiKey равен дефолтному 'dev-internal-key' вне Development. " +
+                    "Задайте реальный секрет (env/KMS).");
+            return key;
+        }
+
+        if (env.IsDevelopment()) return devKey;
+
+        throw new InvalidOperationException(
+            "InternalApiKey не задан вне Development. Задайте секрет для server-to-server вызовов (env/KMS).");
     }
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)

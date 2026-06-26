@@ -45,6 +45,8 @@
     [Parameter, EditorRequired] public string Fen { get; set; } = "";
     [Parameter] public bool FlipForBlack { get; set; }
     [Parameter] public bool Disabled { get; set; }
+    /// <summary>Сейчас ход игрока. Если false (ход соперника) — доска принимает «предход».</summary>
+    [Parameter] public bool MyTurn { get; set; } = true;
     [Parameter] public string? LastFrom { get; set; }
     [Parameter] public string? LastTo { get; set; }
     [Parameter] public string? CheckSquare { get; set; }
@@ -52,6 +54,7 @@
 
     private string Highlight(string sq) =>
         sq == CheckSquare ? "check"
+        : sq == _premoveFrom || sq == _premoveTo ? "premove"
         : sq == LastFrom || sq == LastTo ? "lastmove"
         : "";
 
@@ -60,7 +63,28 @@
     private string? _promotionFrom;
     private string? _promotionTo;
 
-    protected override void OnParametersSet() => ParseFen(Fen);
+    // Предход (premove): заданный заранее ход, который исполнится, когда наступит ход игрока.
+    private string? _premoveFrom;
+    private string? _premoveTo;
+    private string? _premovePromo;
+
+    protected override void OnParametersSet()
+    {
+        ParseFen(Fen);
+
+        if (Disabled) { ClearPremove(); _selected = null; return; }
+
+        // Наступил наш ход и есть отложенный предход — пробуем выполнить (грейн проверит легальность).
+        if (MyTurn && _premoveFrom is { } pf && _premoveTo is { } pt)
+        {
+            var promo = _premovePromo;
+            ClearPremove();
+            _selected = null;
+            _ = OnMove.InvokeAsync((pf, pt, promo));
+        }
+    }
+
+    private void ClearPremove() => _premoveFrom = _premoveTo = _premovePromo = null;
 
     private IEnumerable<int> Rows() => FlipForBlack ? Enumerable.Range(0, 8).Reverse() : Enumerable.Range(0, 8);
     private IEnumerable<int> Cols() => FlipForBlack ? Enumerable.Range(0, 8).Reverse() : Enumerable.Range(0, 8);
@@ -89,6 +113,12 @@
     {
         if (Disabled || _promotionFrom is not null) return;
 
+        // Ход соперника → копим предход (premove), сам ход не отправляем.
+        if (!MyTurn) { PremoveClick(sq); return; }
+
+        // Свой ход — снимаем возможный предход и ходим обычным образом.
+        ClearPremove();
+
         if (_selected is null)
         {
             var (r, c) = Index(sq);
@@ -115,6 +145,30 @@
         await OnMove.InvokeAsync((from, sq, null));
     }
 
+    // Клик во время хода соперника: выбираем свою фигуру и клетку назначения для предхода.
+    private void PremoveClick(string sq)
+    {
+        var (r, c) = Index(sq);
+        bool myIsWhite = !FlipForBlack;
+
+        if (_selected is { } from)
+        {
+            if (from == sq) { _selected = null; return; } // повторный клик — отмена выбора
+            var (fr, fc) = Index(from);
+            var moving = _grid[fr, fc];
+            _premoveFrom = from;
+            _premoveTo = sq;
+            // Предход-превращение — по умолчанию ферзь (без всплывающего выбора на чужом ходу).
+            _premovePromo = (moving == 'P' && sq[1] == '8') || (moving == 'p' && sq[1] == '1') ? "q" : null;
+            _selected = null;
+            return;
+        }
+
+        // Нет активного выбора: клик по своей фигуре — выбрать; иначе снять предход.
+        ClearPremove();
+        if (_grid[r, c] != '\0' && char.IsUpper(_grid[r, c]) == myIsWhite) _selected = sq;
+    }
+
     private async Task ChoosePromotion(string piece)
     {
         var from = _promotionFrom!;
@@ -134,6 +188,8 @@
     .sq.dark { background: #b58863; }
     .sq.lastmove.light { background: #cdd279; }
     .sq.lastmove.dark { background: #aaa23a; }
+    .sq.premove.light { background: #9bbcf0; }
+    .sq.premove.dark { background: #6f97da; }
     .sq.check { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
     .coord { position: absolute; font-size: clamp(8px, 2.2vw, 11px); font-weight: 700; line-height: 1; user-select: none; pointer-events: none; }
     .coord.rank { top: 3px; left: 4px; }

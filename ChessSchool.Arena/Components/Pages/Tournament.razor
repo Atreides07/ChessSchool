@@ -84,7 +84,8 @@ else
                         </div>
                         <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
                                     LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
-                                    Disabled="@(g.Status != GameStatus.InProgress || g.Turn != g.MyColor)" OnMove="DoMove" />
+                                    Disabled="@(g.Status != GameStatus.InProgress)"
+                                    MyTurn="@(g.Turn == g.MyColor)" OnMove="DoMove" />
                         <div class="gstatus">
                             @if (g.Status == GameStatus.Finished)
                             {
@@ -92,7 +93,7 @@ else
                             }
                             else
                             {
-                                <span class="text-secondary">@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника")</span>
+                                <span class="text-secondary">@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника — можно сделать предход")</span>
                                 <span class="ds-spacer"></span>
                                 @if (g.MyBerserkAvailable)
                                 {

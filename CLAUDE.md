@@ -14,6 +14,8 @@ Docker). Онлайн-игра — **Microsoft Orleans** (грейн на пар
 переиспользуемый **IdP на OpenIddict 7.5** (OIDC/JWT/JWKS), как Google Auth (явное требование заказчика).
 
 Известный технический долг и отложенные задачи — [docs/TODO.md](docs/TODO.md).
+Развёртывание в проде (инфраструктура, конфиг, миграции, Orleans/Redis, чек-листы) —
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Главный принцип: всё рассчитано на несколько серверов
 

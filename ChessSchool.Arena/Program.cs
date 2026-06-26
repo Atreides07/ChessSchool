@@ -7,6 +7,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
+// За обратным прокси (Aspire/ingress) доверяем forwarded-заголовкам — иначе OIDC redirect_uri
+// строился бы по внутреннему порту Kestrel, а не по внешнему хосту.
+builder.AddChessSchoolForwardedHeaders();
+
 // Единый вход (SSO) — тот же аккаунт, что и в ChessSchool.
 builder.AddChessSchoolSso();
 
@@ -58,6 +62,8 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
+
+app.UseForwardedHeaders(); // как можно раньше: схема/хост из X-Forwarded-* до построения redirect_uri
 
 if (!app.Environment.IsDevelopment())
 {

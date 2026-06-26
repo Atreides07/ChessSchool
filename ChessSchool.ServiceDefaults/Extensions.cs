@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -178,6 +179,24 @@ public static class Extensions
             Directory.CreateDirectory(dir);
             dp.PersistKeysToFileSystem(new DirectoryInfo(dir));
         }
+        return builder;
+    }
+
+    /// <summary>
+    /// Доверие forwarded-заголовкам за обратным прокси/ingress (Aspire локально, ingress в проде):
+    /// схема/хост берутся из X-Forwarded-*, чтобы OIDC-issuer и redirect_uri строились по внешнему адресу,
+    /// а не по внутреннему порту Kestrel. Нужно всем, кто строит абсолютные URL из запроса (Auth, Web, Arena).
+    /// В пайплайне затем вызвать <c>app.UseForwardedHeaders()</c> как можно раньше.
+    /// </summary>
+    public static IHostApplicationBuilder AddChessSchoolForwardedHeaders(this IHostApplicationBuilder builder)
+    {
+        builder.Services.Configure<ForwardedHeadersOptions>(o =>
+        {
+            o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+            // Доверяем инфраструктуре (Aspire/ingress) — иначе пришлось бы перечислять её сети/прокси.
+            o.KnownNetworks.Clear();
+            o.KnownProxies.Clear();
+        });
         return builder;
     }
 

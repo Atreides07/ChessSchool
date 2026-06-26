@@ -16,6 +16,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
+// За обратным прокси (Aspire/ingress) доверяем forwarded-заголовкам, чтобы issuer/эндпоинты OIDC
+// строились по внешнему https-хосту (иначе токены/discovery будут с внутренним адресом).
+builder.AddChessSchoolForwardedHeaders();
+
 // Общий DataProtection-keyring (Redis при наличии): cookie-сессия IdP расшифровывается любой нодой —
 // без этого при нескольких нодах IdP вход «прыгал» бы и логин ломался.
 builder.AddChessSchoolDataProtection();
@@ -118,6 +122,7 @@ using (var scope = app.Services.CreateScope())
 }
 if (migrateRequested) return; // режим миграции: схему применили — выходим (job завершён)
 
+app.UseForwardedHeaders(); // схема/хост из X-Forwarded-* до построения issuer/redirect
 app.UseAuthentication();
 app.UseAuthorization();
 

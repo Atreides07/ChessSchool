@@ -3,20 +3,14 @@ using ChessSchool.Web.Clients;
 using ChessSchool.Web.Components;
 using ChessSchool.WebAuth;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// За обратным прокси Aspire (динамические порты) — доверяем forwarded-заголовкам,
-// чтобы OIDC строил redirect_uri по внешнему хосту, а не по внутреннему порту Kestrel.
-builder.Services.Configure<ForwardedHeadersOptions>(o =>
-{
-    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
-    o.KnownNetworks.Clear();
-    o.KnownProxies.Clear();
-});
+// За обратным прокси (Aspire/ingress) доверяем forwarded-заголовкам, чтобы OIDC строил redirect_uri
+// по внешнему хосту, а не по внутреннему порту Kestrel.
+builder.AddChessSchoolForwardedHeaders();
 
 // Единый вход (SSO) через общий IdP — тот же аккаунт, что и в Arena.
 builder.AddChessSchoolSso();

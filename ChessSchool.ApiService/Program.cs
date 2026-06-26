@@ -41,7 +41,8 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
     if (!db.Database.IsNpgsql()) db.Database.EnsureCreated();          // InMemory (тесты)
     else if (migrateRequested || migrateAtStartup) db.Database.Migrate();
-    if (!migrateRequested) SeedData.Ensure(db); // в чистом режиме миграции сид не трогаем
+    // Демо-данные (школа/ученики) — только вне прод-БД и не в чистом режиме миграции.
+    if (!migrateRequested && app.Environment.IsDevelopment()) SeedData.Ensure(db);
 }
 if (migrateRequested) return; // режим миграции: схему применили — выходим (job завершён)
 

@@ -93,11 +93,38 @@
         window.addEventListener('resize', window.__tlResize);
     }
 
+    // Запоминаем выбранный вид (Таймлайн/Список) в cookie — сервер восстанавливает его при
+    // навигации на турнир и обратно (radio рендерится уже с нужным checked). Здесь же — мгновенно
+    // применяем сохранённое значение на случай, если страница пришла без серверного восстановления.
+    function restoreView() {
+        const tl = document.getElementById('sv-tl');
+        const list = document.getElementById('sv-list');
+        if (!tl || !list) return;
+
+        if (!list.dataset.persistBound) {
+            list.dataset.persistBound = '1';
+            const save = () => {
+                const v = list.checked ? 'list' : 'tl';
+                document.cookie = 'schedview=' + v + ';path=/;max-age=31536000;samesite=lax';
+            };
+            tl.addEventListener('change', save);
+            list.addEventListener('change', save);
+        }
+
+        const m = document.cookie.match(/(?:^|;\s*)schedview=(list|tl)/);
+        if (m && m[1] === 'list') list.checked = true;
+        else if (m && m[1] === 'tl') tl.checked = true;
+    }
+
+    function boot() { restoreView(); init(); }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
+        document.addEventListener('DOMContentLoaded', boot);
     } else {
-        init();
+        boot();
     }
     // Blazor enhanced navigation: повторная инициализация после обновления DOM.
-    document.addEventListener('enhancedload', init);
+    document.addEventListener('enhancedload', boot);
+    // Возврат по кнопке «Назад» (в т.ч. из bfcache).
+    window.addEventListener('pageshow', restoreView);
 })();

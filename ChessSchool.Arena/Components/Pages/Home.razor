@@ -1,6 +1,7 @@
 @page "/"
 @inject IGrainFactory Grains
 @inject AuthenticationStateProvider AuthState
+@inject IHttpContextAccessor Http
 
 <PageTitle>Расписание турниров — ChessArena</PageTitle>
 <HeadContent>
@@ -14,9 +15,10 @@
 else
 {
     <div class="sched">
-        @* Состояние переключателя вида (статический SSR → интерактив на CSS/JS) *@
-        <input type="radio" name="schedview" id="sv-tl" class="sv-state" checked />
-        <input type="radio" name="schedview" id="sv-list" class="sv-state" />
+        @* Состояние переключателя вида: выбор запоминается в cookie (schedview) и восстанавливается
+           сервером при навигации; мгновенное переключение — на CSS, запись cookie — в schedule.js. *@
+        <input type="radio" name="schedview" id="sv-tl" class="sv-state" checked="@(!_listView)" />
+        <input type="radio" name="schedview" id="sv-list" class="sv-state" checked="@_listView" />
 
         <div class="sched-top">
             <div>
@@ -184,12 +186,16 @@ else
     private long _windowStartUnix;
     private int _liveCount;
     private string _dateLabel = "";
+    private bool _listView; // выбранный вид (из cookie) — список вместо таймлайна
 
     private sealed record Block(string Id, int Col, int Span, int Row, string Type, string Title,
         string Time, int Humans, int Bots, string Tc, string State, bool Mine);
 
     protected override async Task OnInitializedAsync()
     {
+        // Выбранный вид расписания из cookie (переживает навигацию на турнир и обратно).
+        _listView = Http.HttpContext?.Request.Cookies["schedview"] == "list";
+
         // sub текущего пользователя (тот же, с которым он присоединяется к турниру).
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         var sub = user.Identity?.IsAuthenticated == true

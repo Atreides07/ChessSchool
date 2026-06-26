@@ -20,11 +20,6 @@ else
         <span class="crumbs-cur">@_state.Name</span>
     </nav>
 
-    <div class="hero @TypeOf(_state.TimeControl)">
-        <span class="hero-badge">@HeroStatus(_state.Status)</span>
-        <span class="hero-piece">♞</span>
-    </div>
-
     <div class="t-meta">
         <span>@_state.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
         <span>@(_state.DurationSeconds / 60) минут</span><span class="sep">•</span>
@@ -299,20 +294,6 @@ else
         return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
     }
 
-    private static string TypeOf(TimeControl tc) => tc.InitialSeconds switch
-    {
-        <= 120 => "bullet",
-        <= 480 => "blitz",
-        _ => "rapid"
-    };
-
-    private static string HeroStatus(TournamentStatus s) => s switch
-    {
-        TournamentStatus.Running => "Идёт сейчас",
-        TournamentStatus.Finished => "Завершённый",
-        _ => "Регистрация"
-    };
-
     private static string Trophy(int rank) => rank switch { 1 => "🥇", 2 => "🥈", 3 => "🥉", _ => rank.ToString() };
     private static string PodClass(int rank) => rank switch { 1 => "gold", 2 => "silver", 3 => "bronze", _ => "" };
 
@@ -365,14 +346,7 @@ else
     .crumbs span { color: var(--muted); }
     .crumbs .crumbs-cur { color: var(--ink); font-weight: 600; }
 
-    .hero { position: relative; height: clamp(200px, 34vw, 420px); border-radius: var(--r-lg); overflow: hidden; background: linear-gradient(135deg, #2a2118, #161310 60%, #0c0a08); box-shadow: var(--shadow-md); }
-    .hero.blitz { background: linear-gradient(135deg, #2c2410, #1a1408 60%, #0c0a06); }
-    .hero.rapid { background: linear-gradient(135deg, #16241a, #0e1810 60%, #080c08); }
-    .hero.bullet { background: linear-gradient(135deg, #2c1f14, #1a130c 60%, #0c0806); }
-    .hero-badge { position: absolute; top: 16px; left: 16px; background: rgba(20, 22, 26, .7); color: #fff; font-weight: 700; font-size: .85rem; padding: .4rem .8rem; border-radius: var(--r-pill); backdrop-filter: blur(4px); }
-    .hero-piece { position: absolute; right: 4%; bottom: -6%; font-size: clamp(180px, 36vw, 360px); line-height: 1; color: rgba(255, 255, 255, .06); user-select: none; }
-
-    .t-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; color: var(--ink-2); font-size: .98rem; margin-top: 1.1rem; }
+    .t-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; color: var(--ink-2); font-size: .98rem; margin-top: .4rem; }
     .t-meta .sep { color: var(--muted); }
     .t-title { margin: .35rem 0 1rem; }
 

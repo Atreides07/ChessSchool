@@ -111,8 +111,7 @@ public sealed class ArenaTournamentGrain(
 
     // Минимум участников в идущем турнире — добираем ботами; при достатке людей боты убираются.
     private const int MinParticipants = 6;
-    private const int BotSkill = 5;        // уровень Stockfish (0..20)
-    private const int BotMoveTimeMs = 300; // лимит на ход бота
+    private const int BotSkill = 5; // уровень Stockfish (0..20)
     private int _botCounter;
 
     private static readonly string[] BotNames =
@@ -131,6 +130,8 @@ public sealed class ArenaTournamentGrain(
         public GameResult Result;
         public GameEndReason Reason;
         public DateTimeOffset? FinishedAt;
+        public DateTimeOffset? BotThinkUntil; // до этого момента бот «думает» над ходом (неравномерно)
+        public int BotPlannedMs;              // запланированное время обдумывания текущего хода
     }
 
     private bool _configured;
@@ -323,7 +324,8 @@ public sealed class ArenaTournamentGrain(
         // Пока турнир идёт, держим грейн активным: иначе при простое он деактивируется,
         // партии встанут, а боты перестанут ходить. Состояние всё равно персистится.
         DelayDeactivation(TimeSpan.FromMinutes(10));
-        _timer ??= this.RegisterGrainTimer(OnTimerAsync, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        // 500 мс: достаточно мелкий шаг, чтобы тайминг ходов ботов был неравномерным, а не «по метроному».
+        _timer ??= this.RegisterGrainTimer(OnTimerAsync, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
     }
 
     private async Task OnTimerAsync()
@@ -532,15 +534,33 @@ public sealed class ArenaTournamentGrain(
 
     private async Task DriveBotsAsync()
     {
+        var now = DateTimeOffset.UtcNow;
         foreach (var g in _games.Values.Where(g => g.Status == GameStatus.InProgress).ToList())
         {
             var botColor = g.Board.Turn;
             var moverSub = botColor == Color.White ? g.WhiteSub : g.BlackSub;
-            if (!_players.TryGetValue(moverSub, out var mp) || !mp.IsBot) continue;
+            if (!_players.TryGetValue(moverSub, out var mp) || !mp.IsBot)
+            {
+                g.BotThinkUntil = null; // ход не за ботом — сбрасываем таймер обдумывания
+                continue;
+            }
 
-            var uci = await engine.GetBestMoveAsync(g.Board.Fen, BotSkill, BotMoveTimeMs);
+            // Неравномерный тайминг: бот «думает» дольше над сложным выбором и быстро ходит,
+            // когда вариант один/вынужденный. Часы при этом тикают, как у человека.
+            if (g.BotThinkUntil is null)
+            {
+                g.BotPlannedMs = BotThinkMs(g);
+                g.BotThinkUntil = now.AddMilliseconds(g.BotPlannedMs);
+                continue;
+            }
+            if (now < g.BotThinkUntil.Value) continue; // ещё думает
+
+            // Движку даём время, пропорциональное сложности (но без блокировки грейна надолго).
+            int engineMs = Math.Clamp(g.BotPlannedMs, 120, 500);
+            var uci = await engine.GetBestMoveAsync(g.Board.Fen, BotSkill, engineMs);
             bool moved = uci is not null && ApplyUci(g, uci);
             if (!moved) moved = g.Board.TryMakeRandomMove();
+            g.BotThinkUntil = null; // следующий ход — обдумываем заново
             if (!moved) continue;
 
             if (botColor == Color.White) { g.WhiteMoved = true; g.WhiteMs += _tc.IncrementSeconds * 1000L; }
@@ -553,6 +573,21 @@ public sealed class ArenaTournamentGrain(
                 FinishGame(g);
             }
         }
+    }
+
+    /// <summary>
+    /// Время обдумывания хода бота, зависящее от сложности позиции: единственный/вынужденный ход —
+    /// мгновенно, много вариантов — дольше. Плюс «человеческий» джиттер, чтобы ходы не были ритмичными.
+    /// </summary>
+    private static int BotThinkMs(Game g)
+    {
+        int options = g.Board.LegalMoveCount;
+        if (options <= 1) return 150; // ходить нечем кроме одного — не думаем
+
+        int baseMs = g.Board.InCheck ? 300 : 220 + options * 55; // больше выбора — дольше
+        baseMs = Math.Min(baseMs, 2400);
+        int jitter = Random.Shared.Next(-120, 350);
+        return Math.Clamp(baseMs + jitter, 150, 2800);
     }
 
     private static bool ApplyUci(Game g, string uci)

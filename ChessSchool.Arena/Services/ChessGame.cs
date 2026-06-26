@@ -25,6 +25,11 @@ public sealed class ChessGame
     public bool IsEndGame => _board.IsEndGame;
     public Color Turn => _board.Turn.AsChar == 'w' ? Color.White : Color.Black;
 
+    /// <summary>Число легальных ходов в текущей позиции (оценка «сложности выбора» для тайминга бота).</summary>
+    public int LegalMoveCount => _board.Moves().Length;
+    /// <summary>Король стороны, чей ход, под шахом — выбор обычно вынужденный.</summary>
+    public bool InCheck => _board.WhiteKingChecked || _board.BlackKingChecked;
+
     public bool TryMove(string from, string to, string? promotion)
     {
         _pendingPromotion = promotion;

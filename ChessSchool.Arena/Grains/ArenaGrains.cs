@@ -9,7 +9,7 @@ namespace ChessSchool.Arena.Grains;
 /// <summary>Каталог турниров (синглтон, ключ 0). Генерирует расписание и отдаёт список.</summary>
 public interface IArenaDirectoryGrain : IGrainWithIntegerKey
 {
-    Task<IReadOnlyList<TournamentSummaryDto>> ListAsync();
+    Task<IReadOnlyList<TournamentSummaryDto>> ListAsync(string? sub = null);
 }
 
 /// <summary>
@@ -23,7 +23,7 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
     Task ConfigureFinishedDemoAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds);
     Task JoinAsync(string sub, string name);
     Task<ArenaStateDto> GetStateAsync(string sub);
-    Task<TournamentSummaryDto> GetSummaryAsync();
+    Task<TournamentSummaryDto> GetSummaryAsync(string? sub = null);
     Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync();
     Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move);
     Task BerserkAsync(string sub);
@@ -34,7 +34,7 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
 
 public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDirectoryGrain
 {
-    public async Task<IReadOnlyList<TournamentSummaryDto>> ListAsync()
+    public async Task<IReadOnlyList<TournamentSummaryDto>> ListAsync(string? sub = null)
     {
         var now = DateTimeOffset.Now;
         var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset)
@@ -47,8 +47,8 @@ public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDir
                 ids.Add(ArenaSchedule.MakeId(spec.Type, t));
 
         // Грейн сам конфигурируется из своего id (см. EnsureConfigured) — каталогу достаточно
-        // запросить карточку. Делаем это параллельно.
-        var tasks = ids.Select(id => grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync());
+        // запросить карточку. Передаём sub, чтобы отметить турниры, где участвует пользователь.
+        var tasks = ids.Select(id => grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync(sub));
         var list = await Task.WhenAll(tasks);
         return list.OrderBy(t => t.StartsAt).ToList();
     }
@@ -353,7 +353,7 @@ public sealed class ArenaTournamentGrain(
         notifier.Notify(Id);
     }
 
-    public async Task<TournamentSummaryDto> GetSummaryAsync()
+    public async Task<TournamentSummaryDto> GetSummaryAsync(string? sub = null)
     {
         EnsureConfigured();
         Tick();
@@ -361,7 +361,8 @@ public sealed class ArenaTournamentGrain(
         await FlushAsync();
         return new TournamentSummaryDto(
             Id, _name, _tc, Status(), _players.Count, SecondsLeft(),
-            _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds);
+            _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds,
+            Joined: sub is not null && _players.ContainsKey(sub));
     }
 
     public async Task<ArenaStateDto> GetStateAsync(string sub)

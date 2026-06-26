@@ -106,6 +106,31 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task Summary_MarksJoined_ForParticipantOnly()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("joined-arena");
+            await t.ConfigureAsync("Мой", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+            await t.JoinAsync("me", "Я");
+
+            var mine = await t.GetSummaryAsync("me");
+            var other = await t.GetSummaryAsync("stranger");
+            var anon = await t.GetSummaryAsync();
+
+            Assert.True(mine.Joined);     // участник — подсвечиваем
+            Assert.False(other.Joined);   // чужой sub — нет
+            Assert.False(anon.Joined);    // аноним — нет
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
+
+    [Fact]
     public async Task GetBoards_OnRunningArena_ReturnsActiveGames()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

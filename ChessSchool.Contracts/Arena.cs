@@ -18,7 +18,8 @@ public sealed record TournamentSummaryDto(
     [property: Id(5)] int SecondsLeft,
     [property: Id(6)] int BotCount,
     [property: Id(7)] DateTimeOffset StartsAt,
-    [property: Id(8)] int DurationSeconds)
+    [property: Id(8)] int DurationSeconds,
+    [property: Id(9)] bool Joined = false)
 {
     /// <summary>Участники-люди = все минус боты.</summary>
     public int HumanCount => Math.Max(0, PlayerCount - BotCount);

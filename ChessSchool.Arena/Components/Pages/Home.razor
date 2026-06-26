@@ -1,5 +1,6 @@
 @page "/"
 @inject IGrainFactory Grains
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Расписание турниров — ChessArena</PageTitle>
 <HeadContent>
@@ -66,9 +67,9 @@ else
 
                         @foreach (var b in _blocks)
                         {
-                            <a class="tlb @b.Type tlb-@b.State" href="/t/@b.Id"
+                            <a class='tlb @b.Type tlb-@b.State @(b.Mine ? "tlb-mine" : "")' href="/t/@b.Id"
                                style="grid-column:@(b.Col) / span @(b.Span); grid-row:@(b.Row)"
-                               title="@StateHint(b.State)">
+                               title="@BlockTitle(b)">
                                 <div class="tlb-head">
                                     <span class="tlb-title">
                                         @if (b.State == "live")
@@ -76,6 +77,10 @@ else
                                             <span class="live"></span>
                                         }
                                         <span class="tlb-ico">@Icon(b.Type)</span>@b.Title
+                                        @if (b.Mine)
+                                        {
+                                            <span class="mine-badge" title="Вы участвуете">★</span>
+                                        }
                                     </span>
                                     <span class="tlb-tc">@b.Tc</span>
                                 </div>
@@ -96,10 +101,14 @@ else
         <div class="view view-list">
             @{
                 RenderFragment<TournamentSummaryDto> card = t =>
-                    @<a class="lcard @TypeOf(t.TimeControl) lcard-@StateOf(t.Status)" href="/t/@t.Id">
+                    @<a class='lcard @TypeOf(t.TimeControl) lcard-@StateOf(t.Status) @(t.Joined ? "lcard-mine" : "")' href="/t/@t.Id">
                         <div class="lcard-head">
                             <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
                             <span class="lcard-title">@t.Name</span>
+                            @if (t.Joined)
+                            {
+                                <span class="badge badge-mine">★ вы участвуете</span>
+                            }
                             <span class="badge @StatusBadge(t.Status)">@StatusText(t.Status)</span>
                         </div>
                         <div class="lcard-meta">
@@ -143,12 +152,12 @@ else
                 <div class="up-list">
                     @foreach (var t in _upcoming)
                     {
-                        <a class="up-item @TypeOf(t.TimeControl)" href="/t/@t.Id">
+                        <a class='up-item @TypeOf(t.TimeControl) @(t.Joined ? "up-mine" : "")' href="/t/@t.Id">
                             <span class="up-time">@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
                             <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
                             <span class="up-title">@t.Name</span>
                             <span class="up-pop">@t.HumanCount 👤 @t.BotCount 🤖</span>
-                            <span class="badge badge-warn">запись</span>
+                            <span class='badge @(t.Joined ? "badge-mine" : "badge-warn")'>@(t.Joined ? "★ вы" : "запись")</span>
                         </a>
                     }
                 </div>
@@ -177,11 +186,17 @@ else
     private string _dateLabel = "";
 
     private sealed record Block(string Id, int Col, int Span, int Row, string Type, string Title,
-        string Time, int Humans, int Bots, string Tc, string State);
+        string Time, int Humans, int Bots, string Tc, string State, bool Mine);
 
     protected override async Task OnInitializedAsync()
     {
-        _tournaments = await Grains.GetGrain<IArenaDirectoryGrain>(0).ListAsync();
+        // sub текущего пользователя (тот же, с которым он присоединяется к турниру).
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var sub = user.Identity?.IsAuthenticated == true
+            ? user.FindFirst("sub")?.Value ?? user.Identity.Name
+            : null;
+
+        _tournaments = await Grains.GetGrain<IArenaDirectoryGrain>(0).ListAsync(sub);
         _liveCount = _tournaments.Count(t => t.Status == TournamentStatus.Running);
 
         var now = DateTimeOffset.Now;
@@ -219,9 +234,12 @@ else
             _blocks.Add(new Block(
                 Id: t.Id, Col: startHalf + 2, Span: span, Row: LaneRow(type), Type: type,
                 Title: ShortName(type), Time: t.StartsAt.ToLocalTime().ToString("HH:mm"),
-                Humans: t.HumanCount, Bots: t.BotCount, Tc: t.TimeControl.ToString(), State: StateOf(t.Status)));
+                Humans: t.HumanCount, Bots: t.BotCount, Tc: t.TimeControl.ToString(), State: StateOf(t.Status),
+                Mine: t.Joined));
         }
     }
+
+    private static string BlockTitle(Block b) => (b.Mine ? "Вы участвуете · " : "") + StateHint(b.State);
 
     private static int LaneRow(string type) => type switch { "bullet" => 2, "blitz" => 3, _ => 4 };
 
@@ -339,6 +357,10 @@ else
     .tlb-sub { display: flex; justify-content: space-between; gap: 6px; font-size: .76rem; opacity: .78; white-space: nowrap; }
     .tlb-pop { font-variant-numeric: tabular-nums; }
     .tlb .live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
+    /* Турниры, где участвует пользователь — акцентная рамка и убираем «гашение» прошедших */
+    .tlb.tlb-mine { box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); border-color: var(--accent); opacity: 1; filter: none; }
+    .tlb.tlb-mine:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow-md); }
+    .mine-badge { color: var(--accent); font-size: .8rem; line-height: 1; }
 
     /* ---------------- Список ---------------- */
     .view-list { margin-top: 20px; }
@@ -353,6 +375,10 @@ else
     .lcard.rapid { border-left-color: #a9cf9a; }
     .lcard.lcard-past { opacity: .6; }
     .lcard.lcard-past:hover { opacity: 1; }
+    /* Участие пользователя — акцентная рамка слева и кольцо, без «гашения» */
+    .lcard.lcard-mine { border-left-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak, #dbe7ff), var(--shadow-sm); opacity: 1; }
+    .badge-mine { background: var(--accent); color: #fff; }
+    .up-item.up-mine { border-left-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak, #dbe7ff), var(--shadow-sm); }
     .lcard-head { display: flex; align-items: center; gap: .5rem; }
     .lcard-title { font-weight: 660; font-size: 1.05rem; flex: 1; min-width: 0; }
     .lcard-meta { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem; color: var(--muted); font-size: .88rem; }

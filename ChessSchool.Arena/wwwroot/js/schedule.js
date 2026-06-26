@@ -57,17 +57,24 @@
 
     // Пересчёт ширины колонок, линии времени и прокрутки к «сейчас» (когда таймлайн виден).
     // smooth=false — для первой отрисовки/возврата (без анимации, чтобы не было «прыжка»).
-    function refresh(grid, area, smooth = true) {
+    // Если область ещё не получила ширину (layout не готов) — повторяем на следующем кадре,
+    // иначе now-линия спозиционируется по нулевой геометрии и останется скрытой.
+    function refresh(grid, area, smooth = true, attempt = 0) {
+        if (area.clientWidth === 0 && attempt < 20) {
+            requestAnimationFrame(() => refresh(grid, area, smooth, attempt + 1));
+            return;
+        }
         applyZoom(grid, area, currentZoom);
         positionNow(grid);
         scrollToNow(grid, area, true, smooth);
     }
 
-    function init() {
-        const grid = document.querySelector('[data-tl-grid]');
-        const area = document.querySelector('[data-tl-scrollarea]');
-        if (!grid || !area || grid.dataset.tlReady === '1') return;
-        grid.dataset.tlReady = '1';
+    // Однократная привязка интерактива к конкретному узлу сетки. Флаг живёт на самом узле:
+    // если enhanced-навигация заменит сетку — флаг исчезнет вместе с ней и обработчики
+    // навесятся заново; если узел сохранён (морфинг) — повторно не навешиваем.
+    function bindHandlers(grid, area) {
+        if (grid.dataset.tlBound === '1') return;
+        grid.dataset.tlBound = '1';
 
         // Зум-кнопки 1ч/4ч/12ч
         const zoomBtns = Array.from(document.querySelectorAll('[data-tl-zoom]'));
@@ -92,14 +99,24 @@
             if (document.getElementById('sv-tl')?.checked) requestAnimationFrame(() => refresh(grid, area, false));
         }));
 
-        // Старт: масштаб 4ч, линия времени, прокрутка к «сейчас» — мгновенно (без анимации).
-        currentZoom = 4;
-        refresh(grid, area, false);
-
         // Пересчёт ширины колонок при ресайзе окна.
         window.removeEventListener('resize', window.__tlResize || (() => { }));
         window.__tlResize = () => applyZoom(grid, area, currentZoom);
         window.addEventListener('resize', window.__tlResize);
+    }
+
+    function init() {
+        const grid = document.querySelector('[data-tl-grid]');
+        const area = document.querySelector('[data-tl-scrollarea]');
+        if (!grid || !area) return;
+
+        bindHandlers(grid, area);
+
+        // Позиционирование линии времени и скролл к «сейчас» делаем ВСЕГДА (а не один раз):
+        // при возврате из турнира enhanced-навигация морфит сетку, оставляя старый флаг,
+        // но разметка now-линии вставляется заново и без повторного refresh остаётся скрытой.
+        currentZoom = 4;
+        refresh(grid, area, false);
     }
 
     // Линия времени тикает раз в 5с (только сдвиг now-линии у готовой сетки).
@@ -107,18 +124,24 @@
         clearInterval(window.__tlTimer);
         window.__tlTimer = setInterval(() => {
             const g = document.querySelector('[data-tl-grid]');
-            if (g && g.dataset.tlReady === '1') positionNow(g);
+            if (g) positionNow(g);
         }, 5000);
     }
 
     // Мгновенная инициализация при появлении сетки в DOM (Blazor enhanced-навигация заново
     // вставляет разметку, но не перезапускает скрипты и не всегда шлёт enhancedload —
-    // поэтому ждём именно появление узла, а не 5-секундный тик).
+    // поэтому ждём именно появление узла, а не 5-секундный тик). Реагируем ТОЛЬКО на повторную
+    // вставку сетки/now-линии (а не на любую мутацию — иначе сдвиг линии раз в 5с зациклит boot).
     function watchForGrid() {
         if (window.__tlObserver) return;
-        window.__tlObserver = new MutationObserver(() => {
-            const g = document.querySelector('[data-tl-grid]');
-            if (g && g.dataset.tlReady !== '1') boot();
+        const isRelevant = (node) => node.nodeType === 1 &&
+            (node.matches?.('[data-tl-grid],[data-tl-nowline]') ||
+                node.querySelector?.('[data-tl-grid],[data-tl-nowline]'));
+        window.__tlObserver = new MutationObserver((records) => {
+            const reinserted = records.some(r => Array.from(r.addedNodes).some(isRelevant));
+            if (!reinserted) return;
+            if (window.__tlBootRaf) return; // дебаунс: один boot на пачку мутаций
+            window.__tlBootRaf = requestAnimationFrame(() => { window.__tlBootRaf = 0; boot(); });
         });
         window.__tlObserver.observe(document.documentElement, { childList: true, subtree: true });
     }

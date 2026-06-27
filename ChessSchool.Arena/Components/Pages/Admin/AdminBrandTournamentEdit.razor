@@ -37,18 +37,18 @@ else
 
             <label class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.f.name")</span>
-                <InputText class="adm-in" @bind-Value="_model.Name" />
+                <input class="adm-in" value="@_model.Name" @oninput="OnNameInput" />
             </label>
 
             <label class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.f.slug")</span>
-                <InputText class="adm-in" @bind-Value="_model.Slug" disabled="@(!IsNew)" />
-                <span class="adm-hint">@Loc.T("admin.f.slug.hint")</span>
+                <input class="adm-in" value="@_model.Slug" @oninput="OnSlugInput" disabled="@(!IsNew)" />
+                <span class="adm-hint">@Loc.T("admin.btf.slug.hint")</span>
             </label>
 
             <label class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.btf.desc")</span>
-                <InputText class="adm-in" @bind-Value="_model.Description" />
+                <InputTextArea class="adm-in adm-area" @bind-Value="_model.Description" rows="4" />
             </label>
 
             <label class="adm-field">
@@ -136,7 +136,23 @@ else
     private string? _error;
     private bool _uploading;
     private string? _uploadError;
+    private bool _slugTouched;
     private bool IsNew => Slug is null;
+
+    // Живая генерация SEO-slug из названия, пока админ не правил slug вручную (только при создании).
+    private void OnNameInput(ChangeEventArgs e)
+    {
+        if (_model is null) return;
+        _model.Name = e.Value?.ToString() ?? "";
+        if (IsNew && !_slugTouched) _model.Slug = BroadcastFormat.Slugify(_model.Name);
+    }
+
+    private void OnSlugInput(ChangeEventArgs e)
+    {
+        if (_model is null) return;
+        _model.Slug = e.Value?.ToString() ?? "";
+        _slugTouched = true; // дальше не перетираем авто-генерацией
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -223,6 +239,7 @@ else
     .adm-in { width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font-size: .92rem; }
     .adm-in:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
     .adm-in:disabled { background: var(--surface-2); color: var(--muted); }
+    .adm-area { min-height: 90px; resize: vertical; font: inherit; line-height: 1.5; }
     .adm-hint { font-size: .78rem; color: var(--muted); }
     .adm-check { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink); font-weight: 560; }
     .adm-form-actions { display: flex; align-items: center; gap: .8rem; margin-top: .4rem; }

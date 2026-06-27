@@ -1,6 +1,9 @@
 @page "/t/{Id}"
 @using ChessSchool.Arena
+@using ChessSchool.Arena.Grains
+@using ChessSchool.Contracts
 @inject IHttpContextAccessor Http
+@inject IGrainFactory Grains
 
 @* Страница турнира на «тонком» клиенте: статический SSR-каркас без серверной Blazor-цепи и без
    ре-рендеров по таймеру. Шапку/таблицу/доски/свою партию рендерит браузерный JS (tournament.js),
@@ -21,7 +24,84 @@
 </nav>
 
 <div class="t-grid">
-    <div class="t-main" id="t-main"><p class="text-muted"><em>@Loc.T("loading")</em></p></div>
+    @* Начальный снимок состояния рендерится на сервере (один stateless-запрос к грейну): страница
+       показывает контент сразу и без JS (SEO/первый кадр). JS при подключении заменяет на живую версию. *@
+    <div class="t-main" id="t-main">
+        @if (_initial is null)
+        {
+            <p class="text-muted"><em>@Loc.T("loading")</em></p>
+        }
+        else
+        {
+            var s = _initial;
+            var running = s.Status == TournamentStatus.Running;
+            <div class="t-hero card">
+                <div class="t-thumb @(running ? "" : "dim")">
+                    @if (running)
+                    {
+                        <span class="t-live"><span class="t-dot"></span>Live</span>
+                    }
+                    else
+                    {
+                        <span class="t-live past">@(s.Status == TournamentStatus.Finished ? Loc.T("t.finished") : Loc.T("t.soon"))</span>
+                    }
+                </div>
+                <div class="t-hero-mid">
+                    <div class="t-meta">
+                        <span>@s.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
+                        <span>@(s.DurationSeconds / 60) @Loc.T("t.minutes")</span><span class="sep">•</span>
+                        <span>@Loc.T("t.control") @(s.TimeControl.InitialSeconds / 60) + @s.TimeControl.IncrementSeconds</span>
+                    </div>
+                    <h1 class="t-title">@s.Name</h1>
+                </div>
+                <div class="t-hero-side">
+                    @if (running)
+                    {
+                        <div class="t-countdown">@Loc.T("t.endin") <strong>@Hms(s.SecondsLeft)</strong></div>
+                    }
+                    else if (s.Status == TournamentStatus.Created)
+                    {
+                        <div class="t-countdown">@Loc.T("t.start") <strong>@s.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm")</strong></div>
+                    }
+                    <div class="t-parts">
+                        <span class="t-ava-row">@foreach (var st in s.Standings.Take(3)) { <span class="t-ava">@Avatar(st.Name)</span> }</span>
+                        <span>@s.Standings.Count @Loc.Participants(s.Standings.Count)</span>
+                    </div>
+                    @if (!authed && s.Status != TournamentStatus.Finished)
+                    {
+                        <a class="btn btn-join" href="/signin?returnUrl=/t/@Id">@(s.Status == TournamentStatus.Created ? Loc.T("act.loginreg") : Loc.T("act.login"))</a>
+                    }
+                </div>
+            </div>
+
+            @if (s.Standings.Count > 0)
+            {
+                <div class="podium">
+                    @foreach (var p in s.Standings.Take(3))
+                    {
+                        <div class="pod @PodClass(p.Rank)">
+                            <div class="pod-cup">@Trophy(p.Rank)</div>
+                            <div class="pod-name">@p.Name</div>
+                            <div class="pod-stat">@p.Games @Loc.T("pod.games") • @p.Wins @Loc.T("pod.wins") • @p.Score @Loc.T("pod.pts")</div>
+                        </div>
+                    }
+                </div>
+                <div class="st-list">
+                    @foreach (var st in s.Standings)
+                    {
+                        <div class="st-card">
+                            <div class="st-head">
+                                <span class="st-ava">@Avatar(st.Name)</span>
+                                <span class="st-name">@st.Name @if (st.OnFire) { <span class="fire">🔥 @st.Streak</span> }</span>
+                                <span class="st-place">@st.Rank @Loc.T("st.place")</span>
+                                <span class="st-score">@st.Score</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
 
     <aside class="t-side">
         <div class="card score-rules">
@@ -41,6 +121,40 @@
 
 @code {
     [Parameter] public string Id { get; set; } = "";
+
+    private ArenaStateDto? _initial;
+
+    // Начальное состояние для SSR — один stateless-запрос к грейну (контент сразу и без JS, для SEO).
+    // Грейн недоступен/неизвестный id → каркас «Загрузка…», дальше JS дорисует по SignalR.
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var sub = Http.HttpContext?.User?.FindFirst("sub")?.Value ?? "";
+            _initial = await Grains.GetGrain<IArenaTournamentGrain>(Id).GetStateAsync(sub);
+        }
+        catch
+        {
+            _initial = null;
+        }
+    }
+
+    private static string Hms(int seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(int)t.TotalHours:D2}:{t.Minutes:D2}:{t.Seconds:D2}";
+    }
+
+    private static string Trophy(int rank) => rank switch { 1 => "🥇", 2 => "🥈", 3 => "🥉", _ => rank.ToString() };
+    private static string PodClass(int rank) => rank switch { 1 => "gold", 2 => "silver", 3 => "bronze", _ => "" };
+
+    private static readonly string[] Avatars = ["👶", "🧑", "🧔", "🧓", "👩", "🧒", "👨", "👧"];
+    private static string Avatar(string name)
+    {
+        int h = 0;
+        foreach (var ch in name) h = (h * 31 + ch) & 0x7fffffff;
+        return Avatars[h % Avatars.Length];
+    }
 
     // Локализованные строки + формы множественного числа для клиентского JS (на язык запроса).
     private static string LocJson()

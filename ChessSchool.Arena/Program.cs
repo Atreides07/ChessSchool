@@ -60,9 +60,11 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaBroadcaster>();
 
-// Решение индексации турниров: бренд-турниры индексируются, регулярные (расписание) — нет.
-// Пока брендов нет (NoBrandTournaments) → все /t/{id} остаются noindex. Точка расширения под каталог.
-builder.Services.AddSingleton<ChessSchool.Arena.Services.IBrandTournaments, ChessSchool.Arena.Services.NoBrandTournaments>();
+// Каталог бренд-турниров (грейн + пер-нодовый кэш). Он же решает индексацию (IBrandTournaments):
+// бренд-турниры индексируются и попадают в «Главные»/sitemap, регулярные (расписание) — нет.
+builder.Services.AddSingleton<ChessSchool.Arena.Services.BrandTournamentCatalog>();
+builder.Services.AddSingleton<ChessSchool.Arena.Services.IBrandTournaments>(
+    sp => sp.GetRequiredService<ChessSchool.Arena.Services.BrandTournamentCatalog>());
 
 // Каталог трансляций: источник истины — грейн (Redis grain storage), на ноде — кэш с TTL поверх него.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();

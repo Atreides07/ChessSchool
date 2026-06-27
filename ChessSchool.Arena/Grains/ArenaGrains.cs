@@ -22,6 +22,8 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
 {
     Task ConfigureAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds);
     Task ConfigureFinishedDemoAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds);
+    /// <summary>Конфигурация бренд-турнира из каталога админки (можно переконфигурировать до старта).</summary>
+    Task ConfigureBrandAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds);
     Task JoinAsync(string sub, string name);
     Task<ArenaStateDto> GetStateAsync(string sub);
     Task<TournamentSummaryDto> GetSummaryAsync(string? sub = null);
@@ -287,6 +289,28 @@ public sealed class ArenaTournamentGrain(
         _durationSeconds = durationSeconds;
         SimulateFinished();
         _dirty = true;
+        await FlushAsync();
+    }
+
+    /// <summary>
+    /// Конфигурация бренд-турнира из каталога админки. Первый вызов — полная настройка; правки до старта
+    /// (Created) обновляют расписание; идущий турнир обновляет только имя; завершённый не трогаем.
+    /// Грейн персистится → переживает деактивацию (на другой ноде восстановится из storage).
+    /// </summary>
+    public async Task ConfigureBrandAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds)
+    {
+        if (_configured && Status() == TournamentStatus.Finished) return;
+        bool beforeStart = !_configured || Status() == TournamentStatus.Created;
+        _name = name;
+        if (beforeStart)
+        {
+            _tc = tc;
+            _startsAt = startsAt.ToUniversalTime();
+            _durationSeconds = durationSeconds;
+        }
+        _configured = true;
+        _dirty = true;
+        EnsureTimer();
         await FlushAsync();
     }
 

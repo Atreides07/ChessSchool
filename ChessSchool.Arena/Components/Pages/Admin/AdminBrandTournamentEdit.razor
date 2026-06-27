@@ -1,0 +1,251 @@
+@page "/admin/brand/new"
+@page "/admin/brand/{Slug}/edit"
+@* prerender:false — форма только в интерактивном контуре (иначе HTTP-POST без имени формы). *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@attribute [Authorize(Policy = "Admin")]
+@inject BrandTournamentCatalog Catalog
+@inject IImageStorage Storage
+@inject NavigationManager Nav
+@inject ILogger<AdminBrandTournamentEdit> Logger
+
+<PageTitle>@(IsNew ? Loc.T("admin.bt.create") : Loc.T("admin.bt.edit")) — @Loc.T("admin.title")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-bar">
+    <div>
+        <a class="adm-back" href="admin/brand">@Loc.T("admin.back")</a>
+        <h1 class="adm-h1">@(IsNew ? Loc.T("admin.bt.create") : Loc.T("admin.bt.edit"))</h1>
+    </div>
+</div>
+
+@if (_model is null)
+{
+    <p class="adm-muted">@Loc.T("detail.notfound")</p>
+}
+else
+{
+    <div class="adm-form-grid">
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="brand-edit" class="adm-form">
+            @if (_error is not null)
+            {
+                <div class="adm-error" role="alert">@_error</div>
+            }
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.name")</span>
+                <InputText class="adm-in" @bind-Value="_model.Name" />
+            </label>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.slug")</span>
+                <InputText class="adm-in" @bind-Value="_model.Slug" disabled="@(!IsNew)" />
+                <span class="adm-hint">@Loc.T("admin.f.slug.hint")</span>
+            </label>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.btf.desc")</span>
+                <InputText class="adm-in" @bind-Value="_model.Description" />
+            </label>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.btf.start")</span>
+                <InputDate Type="InputDateType.DateTimeLocal" class="adm-in" @bind-Value="_startLocal" />
+            </label>
+
+            <div class="adm-two">
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.btf.initial")</span>
+                    <InputNumber class="adm-in" @bind-Value="_initialMin" />
+                </label>
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.btf.increment")</span>
+                    <InputNumber class="adm-in" @bind-Value="_model.IncrementSeconds" />
+                </label>
+            </div>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.btf.duration")</span>
+                <InputNumber class="adm-in" @bind-Value="_durationMin" />
+            </label>
+
+            <div class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.image")</span>
+                <InputText class="adm-in" @bind-Value="_model.ImageUrl" @bind-Value:event="oninput" />
+                <span class="adm-hint">@Loc.T("admin.f.image.hint")</span>
+                @if (Storage.IsConfigured)
+                {
+                    <div class="adm-upload">
+                        <label class="adm-btn adm-upload-btn @(_uploading ? "is-busy" : "")">
+                            @(_uploading ? Loc.T("admin.f.image.uploading") : Loc.T("admin.f.image.upload"))
+                            <InputFile OnChange="OnFileSelectedAsync" accept="image/*" disabled="@_uploading" hidden />
+                        </label>
+                        <span class="adm-hint">@Loc.T("admin.f.image.upload.hint")</span>
+                    </div>
+                    @if (_uploadError is not null)
+                    {
+                        <span class="adm-field-err">@_uploadError</span>
+                    }
+                }
+            </div>
+
+            <label class="adm-check">
+                <InputCheckbox @bind-Value="_model.Visible" />
+                <span>@Loc.T("admin.f.visible")</span>
+            </label>
+
+            <div class="adm-form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">@Loc.T("admin.save")</button>
+                <a class="adm-btn" href="admin/brand">@Loc.T("admin.cancel")</a>
+            </div>
+        </EditForm>
+
+        <div class="adm-preview">
+            <span class="adm-lbl">@Loc.T("admin.preview")</span>
+            <article class="bt-card">
+                <div class="bt-banner">
+                    @if (!string.IsNullOrWhiteSpace(_model.ImageUrl))
+                    {
+                        <img class="bt-img" src="@_model.ImageUrl" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+                    }
+                    else
+                    {
+                        <span class="bt-ico">♟</span>
+                    }
+                </div>
+                <div class="bt-body">
+                    <h2 class="bt-name">@(_model.Name is { Length: > 0 } ? _model.Name : "Название турнира")</h2>
+                    <p class="bt-desc">@_model.Description</p>
+                    <div class="bt-meta">@_startLocal.ToString("dd.MM HH:mm") · @_initialMin+@_model.IncrementSeconds</div>
+                </div>
+            </article>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Slug { get; set; }
+
+    private BrandTournament? _model;
+    private DateTime _startLocal = DateTime.Now.AddHours(1);
+    private int _initialMin = 3;
+    private int _durationMin = 60;
+    private string? _error;
+    private bool _uploading;
+    private string? _uploadError;
+    private bool IsNew => Slug is null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            _model = new BrandTournament { Visible = true };
+        }
+        else
+        {
+            _model = (await Catalog.BySlugAsync(Slug!))?.Clone()
+                ?? (await Catalog.AllFreshAsync()).FirstOrDefault(b => b.Slug == Slug)?.Clone();
+            if (_model is not null)
+            {
+                _startLocal = _model.StartsAt.ToLocalTime().DateTime;
+                _initialMin = Math.Max(1, _model.InitialSeconds / 60);
+                _durationMin = Math.Max(1, _model.DurationSeconds / 60);
+            }
+        }
+    }
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        var file = e.File;
+        if (file is null || _model is null) return;
+        if (!ImageKinds.IsAllowed(file.ContentType)) { _uploadError = Loc.T("admin.err.image.type"); return; }
+        if (file.Size > ImageKinds.MaxBytes) { _uploadError = Loc.T("admin.err.image.size"); return; }
+        _uploading = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(ImageKinds.MaxBytes);
+            _model.ImageUrl = await Storage.SaveAsync(stream, file.ContentType);
+        }
+        catch (Exception ex)
+        {
+            _uploadError = Loc.T("admin.err.image.failed");
+            Logger.LogWarning(ex, "Не удалось загрузить изображение бренд-турнира в хранилище.");
+        }
+        finally { _uploading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null) return;
+        _error = null;
+
+        _model.Name = _model.Name?.Trim() ?? "";
+        if (_model.Name.Length == 0) { _error = Loc.T("admin.err.name"); return; }
+
+        if (IsNew && string.IsNullOrWhiteSpace(_model.Slug))
+            _model.Slug = BroadcastFormat.Slugify(_model.Name);
+        _model.Slug = _model.Slug.Trim();
+        if (!BroadcastFormat.IsValidSlug(_model.Slug)) { _error = Loc.T("admin.err.slug"); return; }
+
+        if (_initialMin <= 0 || _durationMin <= 0) { _error = Loc.T("admin.err.duration"); return; }
+
+        if (IsNew && await Catalog.BySlugAsync(_model.Slug) is not null)
+        {
+            _error = Loc.T("admin.err.slug.exists");
+            return;
+        }
+
+        _model.InitialSeconds = _initialMin * 60;
+        _model.DurationSeconds = _durationMin * 60;
+        _model.StartsAt = new DateTimeOffset(DateTime.SpecifyKind(_startLocal, DateTimeKind.Local));
+
+        await Catalog.UpsertAsync(_model);
+        Nav.NavigateTo("admin/brand");
+    }
+}
+
+<style>
+    .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.3rem; flex-wrap: wrap; }
+    .adm-back { font-size: .9rem; color: var(--ink-2); font-weight: 600; }
+    .adm-back:hover { color: var(--accent); }
+    .adm-h1 { font-size: 1.7rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }
+    .adm-muted { color: var(--ink-2); }
+
+    .adm-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 1.6rem; align-items: start; }
+    .adm-form { display: flex; flex-direction: column; gap: .9rem; max-width: 560px; }
+    .adm-field { display: flex; flex-direction: column; gap: .3rem; }
+    .adm-two { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+    .adm-lbl { font-size: .8rem; font-weight: 700; color: var(--ink-2); }
+    .adm-in { width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font-size: .92rem; }
+    .adm-in:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
+    .adm-in:disabled { background: var(--surface-2); color: var(--muted); }
+    .adm-hint { font-size: .78rem; color: var(--muted); }
+    .adm-check { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink); font-weight: 560; }
+    .adm-form-actions { display: flex; align-items: center; gap: .8rem; margin-top: .4rem; }
+    .adm-btn { font-size: .9rem; font-weight: 600; padding: .45rem .8rem; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; text-decoration: none; }
+    .adm-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .adm-error { background: #fdecea; color: #c0392b; border: 1px solid color-mix(in srgb, #c0392b 30%, var(--line)); border-radius: var(--r-md); padding: .6rem .8rem; font-size: .9rem; }
+    .adm-upload { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-top: .15rem; }
+    .adm-upload-btn { cursor: pointer; display: inline-flex; align-items: center; }
+    .adm-upload-btn.is-busy { opacity: .6; pointer-events: none; }
+    .adm-field-err { font-size: .82rem; color: #c0392b; }
+
+    .adm-preview { position: sticky; top: 84px; display: flex; flex-direction: column; gap: .5rem; }
+    .bt-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm); overflow: hidden; }
+    .bt-banner { position: relative; aspect-ratio: 16 / 8; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); display: grid; place-items: center; overflow: hidden; }
+    .bt-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .bt-ico { font-size: 2rem; color: var(--accent); }
+    .bt-body { padding: .9rem 1rem; }
+    .bt-name { font-size: 1.05rem; font-weight: 720; margin: 0; color: var(--ink); }
+    .bt-desc { margin: .25rem 0 .5rem; font-size: .9rem; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bt-meta { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    @@media (max-width: 860px) {
+        .adm-form-grid { grid-template-columns: 1fr; }
+        .adm-preview { position: static; }
+    }
+</style>

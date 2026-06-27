@@ -4,6 +4,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject IHttpContextAccessor Http
 @inject NavigationManager Nav
+@inject ChessSchool.Arena.Services.BrandTournamentCatalog BrandCatalog
 
 <PageTitle>Расписание арена-турниров — ChessArena</PageTitle>
 <HeadContent>
@@ -65,6 +66,38 @@ else
                 </div>
             </div>
         </div>
+
+        @* ---------------- Лента «Главные турниры» (всегда сверху) ---------------- *@
+        @if (_brand.Count > 0)
+        {
+            <div class="bt-rail">
+                @foreach (var v in _brand.Take(4))
+                {
+                    var pill = BrandPill(v);
+                    <a class="bt-rcard" href="/t/@v.Brand.Slug">
+                        <div class="bt-rbanner bt-@pill.Cls">
+                            @if (!string.IsNullOrWhiteSpace(v.Brand.ImageUrl))
+                            {
+                                <img class="bt-rimg" src="@v.Brand.ImageUrl" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+                            }
+                            else
+                            {
+                                <span class="bt-rstar">★</span>
+                            }
+                            <span class="bt-rpill bt-@pill.Cls">@pill.Label</span>
+                        </div>
+                        <div class="bt-rbody">
+                            <span class="bt-rname">@v.Brand.Name</span>
+                            <span class="bt-rdesc">@v.Brand.Description</span>
+                            <span class="bt-rfoot">
+                                <span class="bt-rwhen">@(v.Summary.Status == TournamentStatus.Running ? Loc.MinutesLeft(v.Summary.SecondsLeft / 60) : v.Brand.StartsAt.ToLocalTime().ToString("dd.MM HH:mm"))</span>
+                                <span class="bt-rcta">@(v.Summary.Status == TournamentStatus.Running ? Loc.T("bt.watch") : Loc.T("bt.details")) →</span>
+                            </span>
+                        </div>
+                    </a>
+                }
+            </div>
+        }
 
         @* ---------------- Таймлайн (десктоп) ---------------- *@
         <div class="view view-tl">
@@ -136,9 +169,30 @@ else
                     </a>;
             }
 
+            @if (_brand.Count > 0)
+            {
+                <div class="lcat"><span>★ @Loc.T("bt.featured")</span></div>
+                <div class="lgrid">
+                    @foreach (var v in _brand)
+                    {
+                        <a class="lcard brand lcard-@StateOf(v.Summary.Status)" href="/t/@v.Brand.Slug">
+                            <div class="lcard-head">
+                                <span class="tlb-ico">★</span>
+                                <span class="lcard-title">@v.Brand.Name</span>
+                                <span class="badge @StatusBadge(v.Summary.Status)">@StatusText(v.Summary.Status)</span>
+                            </div>
+                            <div class="lcard-meta">
+                                <span>@v.Brand.StartsAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                                <span>@v.Summary.HumanCount 👤 @Loc.T("unit.players")</span>
+                                <span>@v.Summary.BotCount 🤖 @Loc.T("unit.bots")</span>
+                            </div>
+                        </a>
+                    }
+                </div>
+            }
             @if (_running.Count > 0)
             {
-                <div class="lcat"><span>@Loc.T("cat.running")</span></div>
+                <div class="lcat @(_brand.Count > 0 ? "lcat-gap" : "")"><span>@Loc.T("cat.running")</span></div>
                 <div class="lgrid">@foreach (var t in _running) { @card(t) }</div>
             }
             @if (_next.Count > 0)
@@ -155,6 +209,21 @@ else
 
         @* ---------------- Мобайл: только список предстоящих ---------------- *@
         <div class="sched-mobile">
+            @if (_brand.Count > 0)
+            {
+                <div class="lcat"><span>★ @Loc.T("bt.featured")</span></div>
+                <div class="up-list" style="margin-bottom:18px">
+                    @foreach (var v in _brand)
+                    {
+                        <a class="up-item brand" href="/t/@v.Brand.Slug">
+                            <span class="up-time">@v.Brand.StartsAt.ToLocalTime().ToString("HH:mm")</span>
+                            <span class="tlb-ico">★</span>
+                            <span class="up-title">@v.Brand.Name</span>
+                            <span class="badge @StatusBadge(v.Summary.Status)">@StatusText(v.Summary.Status)</span>
+                        </a>
+                    }
+                </div>
+            }
             <div class="lcat"><span>@Loc.T("cat.upcoming")</span></div>
             @if (_upcoming.Count == 0)
             {
@@ -198,6 +267,10 @@ else
     private string _dateLabel = "";
     private bool _listView; // выбранный вид (из cookie) — список вместо таймлайна
 
+    private IReadOnlyList<BrandTournamentView> _brand = [];   // «Главные турниры» (лента/дорожка/список)
+    private readonly List<Block> _brandBlocks = new();        // бренд-блоки таймлайна (верхняя дорожка)
+    private int _laneOffset;                                  // 1, если в окне есть бренд-дорожка
+
     private sealed record Block(string Id, int Col, int Span, int Row, string Type, string Title,
         string Time, int Humans, int Bots, string Tc, string State, bool Mine);
 
@@ -215,6 +288,9 @@ else
         _tournaments = await Grains.GetGrain<IArenaDirectoryGrain>(0).ListAsync(sub);
         _liveCount = _tournaments.Count(t => t.Status == TournamentStatus.Running);
 
+        // Бренд-турниры («Главные») — отдельный каталог + живые сводки грейнов.
+        _brand = await BrandCatalog.ListWithSummaryAsync(sub);
+
         var now = DateTimeOffset.Now;
         _dateLabel = Loc.DateLabel(now);
 
@@ -223,7 +299,9 @@ else
         _startHour = windowStart.Hour;
         _windowStartUnix = windowStart.ToUnixTimeSeconds();
 
+        BuildBrandBlocks(windowStart); // верхняя дорожка + сдвиг регулярных лейнов (если бренд в окне)
         BuildTimeline(windowStart);
+        _blocks.AddRange(_brandBlocks);
 
         _upcoming.AddRange(_tournaments
             .Where(t => t.Status == TournamentStatus.Created)
@@ -248,11 +326,43 @@ else
             span = Math.Min(span, cols - startHalf);
 
             _blocks.Add(new Block(
-                Id: t.Id, Col: startHalf + 2, Span: span, Row: LaneRow(type), Type: type,
+                Id: t.Id, Col: startHalf + 2, Span: span, Row: LaneRow(type) + _laneOffset, Type: type,
                 Title: ShortName(type), Time: t.StartsAt.ToLocalTime().ToString("HH:mm"),
                 Humans: t.HumanCount, Bots: t.BotCount, Tc: t.TimeControl.ToString(), State: StateOf(t.Status),
                 Mine: t.Joined));
         }
+    }
+
+    // Бренд-турниры, попадающие в окно таймлайна — отдельной верхней дорожкой (row 2); регулярные
+    // лейны сдвигаются вниз на _laneOffset. Счётчики/статус — из живой сводки грейна.
+    private void BuildBrandBlocks(DateTimeOffset windowStart)
+    {
+        int cols = Hours * 2;
+        foreach (var v in _brand)
+        {
+            var b = v.Brand;
+            int startHalf = (int)Math.Round((b.StartsAt.ToLocalTime() - windowStart).TotalMinutes / 30.0);
+            if (startHalf < 0 || startHalf >= cols) continue;
+            int span = Math.Min(Math.Max(1, (int)Math.Round(b.DurationSeconds / 1800.0)), cols - startHalf);
+            _brandBlocks.Add(new Block(
+                Id: b.Slug, Col: startHalf + 2, Span: span, Row: 2, Type: "brand", Title: b.Name,
+                Time: b.StartsAt.ToLocalTime().ToString("HH:mm"), Humans: v.Summary.HumanCount, Bots: v.Summary.BotCount,
+                Tc: new TimeControl(b.InitialSeconds, b.IncrementSeconds).ToString(), State: StateOf(v.Summary.Status),
+                Mine: v.Summary.Joined));
+        }
+        _laneOffset = _brandBlocks.Count > 0 ? 1 : 0;
+    }
+
+    // Статус-плашка карточки в ленте «Главных»: идёт сейчас / завтра / через N дн / скоро / завершён.
+    private (string Cls, string Label) BrandPill(BrandTournamentView v)
+    {
+        if (v.Summary.Status == TournamentStatus.Running) return ("live", Loc.StatusLabel("live", 0));
+        if (v.Summary.Status == TournamentStatus.Finished) return ("done", Loc.StatusLabel("done", 0));
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var start = DateOnly.FromDateTime(v.Brand.StartsAt.ToLocalTime().DateTime);
+        var days = Math.Max(0, start.DayNumber - today.DayNumber);
+        var kind = days <= 1 ? "tomorrow" : days <= 14 ? "soon" : "later";
+        return (days <= 14 ? "soon" : "later", Loc.StatusLabel(kind, days));
     }
 
     private static string BlockTitle(Block b) => (b.Mine ? Loc.T("mine.title") + " · " : "") + StateHint(b.State);
@@ -289,6 +399,7 @@ else
 
     private static string Icon(string type) => type switch
     {
+        "brand" => "★",
         "bullet" => "⚡",
         "rapid" => "⏱",
         _ => "🔥"
@@ -337,6 +448,31 @@ else
     .view-list { display: none; }
     #sv-list:checked ~ .view-list { display: block; }
     #sv-list:checked ~ .view-tl { display: none; }
+
+    /* ---------------- Лента «Главные турниры» ---------------- */
+    .bt-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 18px; }
+    .bt-rcard { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); transition: box-shadow .12s, transform .12s; }
+    .bt-rcard:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); color: var(--ink); }
+    .bt-rbanner { position: relative; aspect-ratio: 16 / 7; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+    .bt-rbanner.bt-live { background: #ffe3e0; }
+    .bt-rbanner.bt-done { background: var(--surface-2); }
+    .bt-rimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .bt-rstar { font-size: 1.8rem; color: var(--accent); }
+    .bt-rpill { position: absolute; top: 8px; left: 8px; z-index: 1; font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); }
+    .bt-rpill.bt-live { background: var(--danger); color: #fff; }
+    .bt-rpill.bt-soon { background: var(--accent); color: #fff; }
+    .bt-rbody { padding: .7rem .85rem; display: flex; flex-direction: column; gap: .2rem; }
+    .bt-rname { font-weight: 720; font-size: 1rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bt-rdesc { font-size: .85rem; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; }
+    .bt-rfoot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .35rem; }
+    .bt-rwhen { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .bt-rcta { font-size: .82rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+
+    /* Бренд-блок таймлайна — отдельная верхняя дорожка, акцентный вид */
+    .tlb.brand { background: #e7eeff; border-color: var(--accent); color: var(--accent-hover); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); opacity: 1; filter: none; }
+    .tlb.brand .tlb-title { font-weight: 760; }
+    .lcard.brand { border-left-color: var(--accent); }
+    .up-item.brand { border-left-color: var(--accent); }
 
     /* ---------------- Таймлайн ---------------- */
     .tl-wrap { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
@@ -405,7 +541,7 @@ else
     .up-pop { color: var(--muted); font-weight: 600; font-size: .82rem; font-variant-numeric: tabular-nums; }
 
     @@media (max-width: 900px) {
-        .sched-top .sched-controls, .view { display: none !important; }
+        .sched-top .sched-controls, .view, .bt-rail { display: none !important; }
         .sched-mobile { display: block; }
     }
 

@@ -1,0 +1,130 @@
+@page "/admin/brand"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@attribute [Authorize(Policy = "Admin")]
+@inject BrandTournamentCatalog Catalog
+@inject NavigationManager Nav
+
+<PageTitle>@Loc.T("admin.bt.title") — @Loc.T("admin.title")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-bar">
+    <div>
+        <a class="adm-back" href="admin">@Loc.T("admin.back")</a>
+        <h1 class="adm-h1">@Loc.T("admin.bt.title")</h1>
+    </div>
+    <a class="btn btn-primary btn-sm" href="admin/brand/new">+ @Loc.T("admin.bt.new")</a>
+</div>
+
+@if (_items is null)
+{
+    <p class="adm-muted">@Loc.T("loading")</p>
+}
+else if (_items.Count == 0)
+{
+    <p class="adm-muted">@Loc.T("admin.bt.empty")</p>
+}
+else
+{
+    <div class="adm-table" role="table">
+        <div class="adm-tr adm-th" role="row">
+            <span role="columnheader">@Loc.T("admin.f.name")</span>
+            <span role="columnheader">@Loc.T("admin.btf.start")</span>
+            <span role="columnheader">@Loc.T("admin.f.visible")</span>
+            <span role="columnheader"></span>
+        </div>
+        @foreach (var b in _items)
+        {
+            <div class="adm-tr @(b.Visible ? "" : "is-hidden")" role="row" @key="b.Slug">
+                <span class="adm-name" role="cell">
+                    <a href="/t/@b.Slug" target="_blank" rel="noopener">@b.Name</a>
+                </span>
+                <span class="adm-dates" role="cell">@b.StartsAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @(b.InitialSeconds / 60)+@b.IncrementSeconds</span>
+                <span role="cell">
+                    @if (b.Visible)
+                    {
+                        <span class="adm-vis on">@Loc.T("admin.bc.visible")</span>
+                    }
+                    else
+                    {
+                        <span class="adm-vis off">@Loc.T("admin.bc.hidden")</span>
+                    }
+                </span>
+                <span class="adm-actions" role="cell">
+                    <button class="adm-btn" @onclick="() => ToggleAsync(b)">
+                        @(b.Visible ? Loc.T("admin.bc.hide") : Loc.T("admin.bc.show"))
+                    </button>
+                    <a class="adm-btn" href="admin/brand/@b.Slug/edit">@Loc.T("admin.bc.edit.btn")</a>
+                    @if (_confirmDelete == b.Slug)
+                    {
+                        <span class="adm-confirm">
+                            @Loc.T("admin.bc.delete.confirm")
+                            <button class="adm-btn danger" @onclick="() => DeleteAsync(b.Slug)">@Loc.T("admin.bc.delete")</button>
+                            <button class="adm-btn" @onclick="() => _confirmDelete = null">@Loc.T("admin.cancel")</button>
+                        </span>
+                    }
+                    else
+                    {
+                        <button class="adm-btn danger" @onclick="() => _confirmDelete = b.Slug">@Loc.T("admin.bc.delete")</button>
+                    }
+                </span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<BrandTournament>? _items;
+    private string? _confirmDelete;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync() => _items = (await Catalog.AllFreshAsync())
+        .OrderBy(b => b.StartsAt).ToList();
+
+    private async Task ToggleAsync(BrandTournament b)
+    {
+        await Catalog.SetVisibleAsync(b.Slug, !b.Visible);
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(string slug)
+    {
+        _confirmDelete = null;
+        await Catalog.DeleteAsync(slug);
+        await ReloadAsync();
+    }
+}
+
+<style>
+    .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.3rem; flex-wrap: wrap; }
+    .adm-back { font-size: .9rem; color: var(--ink-2); font-weight: 600; }
+    .adm-back:hover { color: var(--accent); }
+    .adm-h1 { font-size: 1.7rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }
+    .adm-muted { color: var(--ink-2); }
+
+    .adm-table { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+    .adm-tr { display: grid; grid-template-columns: 2.2fr 1.4fr .8fr auto; align-items: center; gap: .8rem; padding: .7rem 1rem; border-top: 1px solid var(--line); }
+    .adm-tr:first-child { border-top: 0; }
+    .adm-th { background: var(--surface-2); font-size: .76rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
+    .adm-tr.is-hidden { opacity: .58; }
+    .adm-name { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+    .adm-name a { color: var(--ink); font-weight: 640; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .adm-name a:hover { color: var(--accent); }
+    .adm-dates { color: var(--ink-2); font-size: .92rem; }
+    .adm-vis { font-size: .74rem; font-weight: 700; padding: .15rem .5rem; border-radius: var(--r-pill); }
+    .adm-vis.on { background: #e7f4e9; color: #2e8b57; }
+    .adm-vis.off { background: var(--surface-2); color: var(--muted); }
+    .adm-actions { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+    .adm-btn { font-size: .82rem; font-weight: 600; padding: .32rem .6rem; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; text-decoration: none; }
+    .adm-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .adm-btn.danger { color: #c0392b; border-color: color-mix(in srgb, #c0392b 30%, var(--line)); }
+    .adm-btn.danger:hover { background: #fdecea; }
+    .adm-confirm { display: inline-flex; align-items: center; gap: .4rem; font-size: .82rem; color: var(--ink-2); }
+    @@media (max-width: 720px) {
+        .adm-tr { grid-template-columns: 1fr; gap: .4rem; }
+        .adm-th { display: none; }
+    }
+</style>

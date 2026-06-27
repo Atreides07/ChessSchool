@@ -5,7 +5,7 @@
 @inject IHttpContextAccessor Http
 @inject IGrainFactory Grains
 @inject NavigationManager Nav
-@inject ChessSchool.Arena.Services.IBrandTournaments Brand
+@inject ChessSchool.Arena.Services.BrandTournamentCatalog BrandCatalog
 
 @* Страница турнира на «тонком» клиенте: статический SSR-каркас без серверной Blazor-цепи и без
    ре-рендеров по таймеру. Шапку/таблицу/доски/свою партию рендерит браузерный JS (tournament.js),
@@ -16,10 +16,18 @@
 <HeadContent>
     @* Регулярные турниры расписания эфемерны → noindex. Бренд-турниры (кураторские, стабильный slug)
        индексируются. Признак — из IBrandTournaments (пока брендов нет → всё noindex). *@
-    @if (_indexable)
+    @if (_indexable && _brand is not null)
     {
         <meta name="robots" content="index,follow" />
-        <link rel="canonical" href="@($"{Nav.BaseUri}t/{Id}")" />
+        <link rel="canonical" href="@Canonical" />
+        <meta name="description" content="@_brand.Description" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="@_brand.Name" />
+        <meta property="og:description" content="@_brand.Description" />
+        <meta property="og:url" content="@Canonical" />
+        <meta property="og:image" content="@(string.IsNullOrWhiteSpace(_brand.ImageUrl) ? $"{Nav.BaseUri}og-image.png" : _brand.ImageUrl)" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">@((MarkupString)BrandJsonLd(_brand))</script>
     }
     else
     {
@@ -137,13 +145,16 @@
     [Parameter] public string Id { get; set; } = "";
 
     private ArenaStateDto? _initial;
+    private BrandTournament? _brand;
     private bool _indexable;
+    private string Canonical => $"{Nav.BaseUri}t/{Id}";
 
     // Начальное состояние для SSR — один stateless-запрос к грейну (контент сразу и без JS, для SEO).
     // Грейн недоступен/неизвестный id → каркас «Загрузка…», дальше JS дорисует по SignalR.
     protected override async Task OnInitializedAsync()
     {
-        _indexable = await Brand.IsBrandAsync(Id); // бренд-турнир индексируется, регулярный — нет
+        _brand = await BrandCatalog.BySlugAsync(Id);   // бренд-турнир → индексируется + богатая мета
+        _indexable = _brand is { Visible: true };
         try
         {
             var sub = Http.HttpContext?.User?.FindFirst("sub")?.Value ?? "";
@@ -170,6 +181,29 @@
         int h = 0;
         foreach (var ch in name) h = (h * 31 + ch) & 0x7fffffff;
         return Avatars[h % Avatars.Length];
+    }
+
+    // schema.org Event для бренд-турнира (rich-результаты + шеринг). Только для индексируемых страниц.
+    private string BrandJsonLd(BrandTournament b)
+    {
+        var graph = new Dictionary<string, object?>
+        {
+            ["@context"] = "https://schema.org",
+            ["@type"] = "Event",
+            ["name"] = b.Name,
+            ["description"] = b.Description,
+            ["startDate"] = b.StartsAt.ToString("o"),
+            ["endDate"] = b.StartsAt.AddSeconds(b.DurationSeconds).ToString("o"),
+            ["eventAttendanceMode"] = "https://schema.org/OnlineEventAttendanceMode",
+            ["eventStatus"] = "https://schema.org/EventScheduled",
+            ["url"] = Canonical,
+            ["image"] = string.IsNullOrWhiteSpace(b.ImageUrl) ? $"{Nav.BaseUri}og-image.png" : b.ImageUrl,
+            ["organizer"] = new Dictionary<string, object?> { ["@type"] = "Organization", ["name"] = "ChessArena", ["url"] = Nav.BaseUri },
+        };
+        return System.Text.Json.JsonSerializer.Serialize(graph, new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 
     // Локализованные строки + формы множественного числа для клиентского JS (на язык запроса).

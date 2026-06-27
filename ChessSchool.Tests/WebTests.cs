@@ -47,6 +47,10 @@ public class WebTests
             .WaitForResourceAsync("arena", KnownResourceStates.Running, cancellationToken)
             .WaitAsync(DefaultTimeout, cancellationToken);
 
+        // Home Arena (расписание + лента «Главные турниры») — SSR читает каталог бренд-турниров.
+        var arenaHome = await arena.GetAsync("/", cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, arenaHome.StatusCode);
+
         var tournamentPage = await arena.GetAsync("/t/test-tournament", cancellationToken);
         Assert.Equal(HttpStatusCode.OK, tournamentPage.StatusCode);
         var html = await tournamentPage.Content.ReadAsStringAsync(cancellationToken);

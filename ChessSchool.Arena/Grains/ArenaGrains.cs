@@ -44,16 +44,29 @@ public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDir
             .AddHours(-ArenaSchedule.WindowBackHours);
         var windowEnd = windowStart.AddHours(ArenaSchedule.WindowBackHours + ArenaSchedule.WindowAheadHours);
 
-        var ids = new List<string>();
+        // Будущие турниры (ещё не начались) синтезируем из расписания БЕЗ активации грейна: у них
+        // 0 игроков, а имя/контроль/длительность детерминированы из id. Окно — 6ч вперёд, поэтому это
+        // большинство слотов; иначе каждый заход главной поднимал бы десятки холодных грейнов (медленный
+        // TTFB, страница «висит» при переходе). Грейн зовём только для начавшихся (идут/завершились) —
+        // там нужно живое состояние (счётчики/статус), и эти грейны обычно тёплые (идущие держат себя живыми).
+        var future = new List<TournamentSummaryDto>();
+        var liveIds = new List<string>();
         foreach (var spec in ArenaSchedule.Series)
             for (var t = windowStart.AddMinutes(spec.OffsetMin); t < windowEnd; t = t.AddHours(spec.StepHours))
-                ids.Add(ArenaSchedule.MakeId(spec.Type, t));
+            {
+                var id = ArenaSchedule.MakeId(spec.Type, t);
+                if (t > now)
+                    future.Add(new TournamentSummaryDto(id, ArenaSchedule.MakeName(spec, t), spec.Tc,
+                        TournamentStatus.Created, PlayerCount: 0, SecondsLeft: 0, BotCount: 0, t, spec.DurationSec));
+                else
+                    liveIds.Add(id);
+            }
 
-        // Грейн сам конфигурируется из своего id (см. EnsureConfigured) — каталогу достаточно
-        // запросить карточку. Передаём sub, чтобы отметить турниры, где участвует пользователь.
-        var tasks = ids.Select(id => grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync(sub));
-        var list = await Task.WhenAll(tasks);
-        return list.OrderBy(t => t.StartsAt).ToList();
+        // Передаём sub, чтобы отметить турниры, где участвует пользователь.
+        var live = await Task.WhenAll(liveIds.Select(id =>
+            grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync(sub)));
+
+        return future.Concat(live).OrderBy(t => t.StartsAt).ToList();
     }
 }
 

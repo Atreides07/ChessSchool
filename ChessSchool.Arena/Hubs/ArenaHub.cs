@@ -33,6 +33,20 @@ public sealed class ArenaHub(IGrainFactory grains, ArenaBroadcaster broadcaster)
     /// <summary>Персональное состояние (ресинк после reconnect / для участника после общего пуша).</summary>
     public Task<ArenaStateDto> GetState(string id) => Grain(id).GetStateAsync(Sub ?? "");
 
+    /// <summary>
+    /// Страница «Все игры» (тонкий клиент): вступить в группу рассылки и получить ПОЛНЫЙ список досок.
+    /// В отличие от <see cref="JoinTournament"/> (4 доски для шапки) отдаёт все партии турнира.
+    /// </summary>
+    public async Task<IReadOnlyList<ArenaBoardDto>> JoinAllGames(string id)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, id);
+        broadcaster.Watch(id); // ретрансляция обновлений грейна в группу на этой ноде
+        return await Grain(id).GetBoardsAsync();
+    }
+
+    /// <summary>Перезабор полного списка досок (по общему пушу/после reconnect на странице «Все игры»).</summary>
+    public Task<IReadOnlyList<ArenaBoardDto>> GetAllBoards(string id) => Grain(id).GetBoardsAsync();
+
     /// <summary>Записаться/присоединиться к турниру (требует входа).</summary>
     public async Task<ArenaStateDto> Register(string id)
     {

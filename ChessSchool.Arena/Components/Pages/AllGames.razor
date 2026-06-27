@@ -1,14 +1,20 @@
 @page "/t/{Id}/games"
-@rendermode InteractiveServer
-@inherits LocalizedComponentBase
-@using ChessSchool.Arena
-@using ChessSchool.Arena.Services
-@inject IGrainFactory Grains
-@inject ArenaNotifier Notifier
-@inject IJSRuntime JS
-@implements IAsyncDisposable
+@inject NavigationManager Nav
+
+@* Страница «Все игры» на «тонком» клиенте: статический SSR-каркас без серверной Blazor-цепи и без
+   подписки-на-зрителя. Все доски (read-only) рендерит браузерный games.js из FEN, синхронизация —
+   SignalR прямо к /arenahub (cookie-auth, тот же origin), часы анимируются локально. Это снимает
+   «состояние на зрителя» с веб-сервера (для популярного турнира — тысячи зрителей без circuit'ов)
+   и переживает плохую сеть (reconnect → ресинк через GetAllBoards). *@
 
 <PageTitle>@Loc.T("link.allgames") — @Id</PageTitle>
+<HeadContent>
+    @* Эфемерная страница живых партий — не индексируем (полезный индексируемый контент — на /t/{id}). *@
+    <meta name="robots" content="noindex" />
+    @* Предзагрузка клиентской библиотеки параллельно с HTML (тот же fingerprinted-URL, что и import
+       в games.js через #ag-root) → одна загрузка + immutable-кэш, быстрый старт на медленном канале. *@
+    <link rel="modulepreload" href="@Assets["lib/signalr.js"]" />
+</HeadContent>
 
 <nav class="crumbs">
     <a href="/">@Loc.T("crumb.home")</a><span>›</span>
@@ -18,114 +24,34 @@
 
 <div class="ag-head">
     <h1 class="ag-title">@Loc.T("ag.title")</h1>
-    <span class="ag-count">@_boards.Count @Loc.T("ag.onboard")</span>
+    <span class="ag-count" id="ag-count"></span>
 </div>
 
-@if (_boards.Count == 0)
-{
-    <div class="ag-empty">@Loc.T("ag.empty") <a href="/t/@Id">@Loc.T("ag.back")</a></div>
-}
-else
-{
-    <div class="boards-grid">
-        @foreach (var b in _boards.Take(_visible))
-        {
-            <div class="bcard @(b.Status == GameStatus.Finished ? "done" : "")" @key="b.GameId">
-                <div class="bplayer">
-                    <span class="bava">@Avatar(b.BlackName)</span>
-                    <span class="bname">@b.BlackName</span>
-                    <span class="bscore">@b.BlackScore</span>
-                </div>
-                <div class="bclock @(b.Turn == PieceColor.Black && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.BlackMs / 1000)</div>
-                <div class="bboard">
-                    <Chessboard Fen="@b.Fen" LastFrom="@b.LastFrom" LastTo="@b.LastTo" CheckSquare="@b.CheckSquare" Disabled="true" />
-                    @if (b.Status == GameStatus.Finished)
-                    {
-                        <div class="bresult">
-                            <span class="rcell w">@GResult(b.Result, true)</span>
-                            <span class="rdash">–</span>
-                            <span class="rcell b">@GResult(b.Result, false)</span>
-                        </div>
-                    }
-                </div>
-                <div class="bclock @(b.Turn == PieceColor.White && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.WhiteMs / 1000)</div>
-                <div class="bplayer">
-                    <span class="bava">@Avatar(b.WhiteName)</span>
-                    <span class="bname">@b.WhiteName</span>
-                    <span class="bscore">@b.WhiteScore</span>
-                </div>
-            </div>
-        }
-    </div>
-
-    @* Скрытая кнопка + сентинел: games.js «кликает» её, когда сентинел появляется при скролле. *@
-    @if (_visible < _boards.Count)
-    {
-        <button id="games-more" class="ag-more" @onclick="LoadMore">@Loc.T("ag.more") (@(_boards.Count - _visible))</button>
-        <div id="games-sentinel" class="ag-sentinel"></div>
-    }
-}
-
+@* Контейнер заполняет games.js. Начальный текст — для первого кадра/без JS. *@
+<div id="ag-root" data-id="@Id" data-signalr="@Assets["lib/signalr.js"]">
+    <p class="ag-loading text-muted"><em>@Loc.T("loading")</em></p>
+</div>
+<script id="ag-loc" type="application/json">@((MarkupString)LocJson())</script>
 @* games.js подключён глобально в App.razor (исполняется и при enhanced-навигации). *@
 
 @code {
     [Parameter] public string Id { get; set; } = "";
 
-    private const int PageSize = 12;
-    private int _visible = PageSize;
-    private IReadOnlyList<ArenaBoardDto> _boards = [];
-    private IDisposable? _subscription;
-
-    private IArenaTournamentGrain T => Grains.GetGrain<IArenaTournamentGrain>(Id);
-
-    protected override async Task OnInitializedAsync()
+    // Локализованные строки для клиентского JS (на язык запроса).
+    private static string LocJson()
     {
-        await Refresh();
-        _subscription = Notifier.Subscribe(Id, () => _ = OnNotifiedAsync());
-    }
-
-    private async Task OnNotifiedAsync()
-    {
-        await Refresh();
-        await InvokeStateHasChangedLocalizedAsync(); // фоновый колбэк нотифаера — восстановить культуру
-    }
-
-    private async Task Refresh() => _boards = await T.GetBoardsAsync();
-
-    private void LoadMore() => _visible = Math.Min(_visible + PageSize, _boards.Count);
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        // Переинициализируем IntersectionObserver на текущий сентинел после каждого рендера.
-        await JS.InvokeVoidAsync("arenaGamesSetup");
-    }
-
-    private static string Mmss(long seconds)
-    {
-        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
-    }
-
-    private static string GResult(GameResult r, bool white) => r switch
-    {
-        GameResult.Draw => "½",
-        GameResult.WhiteWins => white ? "1" : "0",
-        GameResult.BlackWins => white ? "0" : "1",
-        _ => "—"
-    };
-
-    private static readonly string[] Avatars = ["👶", "🧑", "🧔", "🧓", "👩", "🧒", "👨", "👧"];
-    private static string Avatar(string name)
-    {
-        int h = 0;
-        foreach (var ch in name) h = (h * 31 + ch) & 0x7fffffff;
-        return Avatars[h % Avatars.Length];
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        _subscription?.Dispose();
-        return ValueTask.CompletedTask;
+        var l = new Dictionary<string, string>
+        {
+            ["onboard"] = Loc.T("ag.onboard"),
+            ["empty"] = Loc.T("ag.empty"),
+            ["back"] = Loc.T("ag.back"),
+            ["more"] = Loc.T("ag.more"),
+            ["loading"] = Loc.T("loading"),
+        };
+        return System.Text.Json.JsonSerializer.Serialize(l, new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 }
 
@@ -139,6 +65,7 @@ else
     .ag-head { display: flex; align-items: baseline; gap: .8rem; margin-bottom: 1.2rem; }
     .ag-title { margin: 0; font-size: 1.6rem; }
     .ag-count { color: var(--muted); font-weight: 600; }
+    .ag-loading { padding: 2rem 0; }
     .ag-empty { color: var(--ink-2); padding: 2rem 0; }
     .ag-empty a { color: var(--accent); font-weight: 700; }
 
@@ -161,4 +88,15 @@ else
 
     .ag-more { display: block; margin: 1.4rem auto 0; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font-weight: 700; padding: .6rem 1.4rem; border-radius: var(--r-md); cursor: pointer; }
     .ag-sentinel { height: 1px; }
+
+    /* ----- Мини-доска (клиентский рендер из FEN; серверный Chessboard здесь не используется) ----- */
+    .board-wrap { position: relative; width: 100%; }
+    .board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md); }
+    .board .sq { position: relative; display: flex; align-items: center; justify-content: center; }
+    .sq.light { background: #ecd6b3; }
+    .sq.dark { background: #b58863; }
+    .sq.hl.light { background: #cdd279; }
+    .sq.hl.dark { background: #aaa23a; }
+    .sq.chk { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
+    .piece-img { width: 90%; height: 90%; display: block; }
 </style>

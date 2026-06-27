@@ -102,7 +102,9 @@ else
 
             <div class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.f.image")</span>
-                <InputText class="adm-in" @bind-Value="_model.ImageUrl" @bind-Value:event="oninput" />
+                @* Обычный input с @bind:event="oninput" — на компоненте InputText модификатор
+                   :event="oninput" падает (ChangeEventArgs не конвертится в string). *@
+                <input class="adm-in" @bind="_model.ImageUrl" @bind:event="oninput" />
                 <span class="adm-hint">@Loc.T("admin.f.image.hint")</span>
                 @if (Storage.IsConfigured)
                 {

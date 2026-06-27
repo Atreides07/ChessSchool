@@ -1,5 +1,6 @@
 @page "/t/{Id}/games"
 @rendermode InteractiveServer
+@inherits LocalizedComponentBase
 @using ChessSchool.Arena
 @using ChessSchool.Arena.Services
 @inject IGrainFactory Grains
@@ -86,7 +87,7 @@ else
     private async Task OnNotifiedAsync()
     {
         await Refresh();
-        await InvokeAsync(StateHasChanged);
+        await InvokeStateHasChangedLocalizedAsync(); // фоновый колбэк нотифаера — восстановить культуру
     }
 
     private async Task Refresh() => _boards = await T.GetBoardsAsync();

@@ -1,5 +1,6 @@
 @page "/t/{Id}"
 @rendermode InteractiveServer
+@inherits LocalizedComponentBase
 @using ChessSchool.Arena
 @using ChessSchool.Arena.Services
 @inject IGrainFactory Grains
@@ -301,7 +302,7 @@ else
     private async Task OnNotifiedAsync()
     {
         await Refresh();
-        await InvokeAsync(StateHasChanged);
+        await InvokeStateHasChangedLocalizedAsync(); // фоновый колбэк нотифаера — восстановить культуру
     }
 
     private async Task Refresh()
@@ -315,7 +316,7 @@ else
         _clock = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
         while (await _clock.WaitForNextTickAsync())
             if (_state is { Status: TournamentStatus.Running }) // тикают часы партий и обратный отсчёт
-                await InvokeAsync(StateHasChanged);
+                await InvokeStateHasChangedLocalizedAsync();
     }
 
     private async Task Join() { await T.JoinAsync(_sub, _name); await Refresh(); await InvokeAsync(StateHasChanged); }

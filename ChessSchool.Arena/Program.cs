@@ -11,6 +11,9 @@ builder.AddServiceDefaults();
 // строился бы по внутреннему порту Kestrel, а не по внешнему хосту.
 builder.AddChessSchoolForwardedHeaders();
 
+// Локализация RU/EN (культура из ?culture=/cookie/Accept-Language).
+builder.AddChessSchoolLocalization();
+
 // Единый вход (SSO) — тот же аккаунт, что и в ChessSchool.
 builder.AddChessSchoolSso();
 
@@ -67,6 +70,7 @@ builder.Services.AddRazorComponents()
 var app = builder.Build();
 
 app.UseForwardedHeaders(); // как можно раньше: схема/хост из X-Forwarded-* до построения redirect_uri
+app.UseChessSchoolLocalization(); // культура запроса + эндпоинт /lang
 
 if (!app.Environment.IsDevelopment())
 {

@@ -29,11 +29,16 @@ public static class ArenaMajors
             new(2026, 8, 21), new(2026, 8, 28), "Сент-Луис", "США", "🇺🇸", "Плей-офф · топ-4", "https://grandchesstour.org"),
     ];
 
-    private static readonly string[] MonthsShort =
+    private static readonly string[] MonthsShortRu =
         ["", "янв.", "фев.", "мар.", "апр.", "мая", "июня", "июля", "авг.", "сент.", "окт.", "нояб.", "дек."];
-
-    private static readonly string[] MonthsGen =
+    private static readonly string[] MonthsShortEn =
+        ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    private static readonly string[] MonthsGenRu =
         ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+    private static readonly string[] MonthsFullEn =
+        ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    private static string[] MonthsShort => Loc.IsEn ? MonthsShortEn : MonthsShortRu;
 
     /// <summary>Не завершившиеся турниры в хронологическом порядке.</summary>
     public static IEnumerable<Major> Upcoming()
@@ -50,19 +55,21 @@ public static class ArenaMajors
             ? $"{a.Day}–{b.Day} {MonthsShort[b.Month]}"
             : $"{a.Day} {MonthsShort[a.Month]} – {b.Day} {MonthsShort[b.Month]}";
 
-    /// <summary>Полная дата «29 июня 2026» (для текста детальной страницы).</summary>
-    public static string LongDate(DateOnly d) => $"{d.Day} {MonthsGen[d.Month]} {d.Year}";
+    /// <summary>Полная дата «29 июня 2026» / «June 29, 2026».</summary>
+    public static string LongDate(DateOnly d) =>
+        Loc.IsEn ? $"{MonthsFullEn[d.Month]} {d.Day}, {d.Year}" : $"{d.Day} {MonthsGenRu[d.Month]} {d.Year}";
 
-    public static (string Label, string Cls) Status(Major t)
+    // Возвращает CSS-класс, вид статуса (для локализации) и число дней до старта. Текст даёт Loc.StatusLabel.
+    public static (string Cls, string Kind, int Days) Status(Major t)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         if (today < t.Start)
         {
             var days = t.Start.DayNumber - today.DayNumber;
-            return days <= 1 ? ("Завтра", "soon")
-                : days <= 14 ? ($"Через {days} дн.", "soon")
-                : ("Скоро", "later");
+            return days <= 1 ? ("soon", "tomorrow", days)
+                : days <= 14 ? ("soon", "soon", days)
+                : ("later", "later", days);
         }
-        return today <= t.End ? ("Идёт сейчас", "live") : ("Завершён", "done");
+        return today <= t.End ? ("live", "live", 0) : ("done", "done", 0);
     }
 }

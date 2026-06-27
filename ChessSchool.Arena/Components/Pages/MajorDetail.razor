@@ -3,28 +3,28 @@
 @inject NavigationManager Nav
 @inject IHttpContextAccessor Http
 
-@* Отдельная индексируемая страница турнира: свой URL, мета, schema.org Event + BreadcrumbList. *@
+@* Отдельная индексируемая страница турнира: свой URL, мета, schema.org Event + BreadcrumbList. Локализована. *@
 
 @if (_t is null)
 {
-    <PageTitle>Турнир не найден — ChessArena</PageTitle>
+    <PageTitle>@(Loc.IsEn ? "Tournament not found" : "Турнир не найден") — ChessArena</PageTitle>
     <HeadContent><meta name="robots" content="noindex" /></HeadContent>
     <div class="md-wrap">
-        <p class="md-404">Турнир не найден.</p>
-        <a class="md-back" href="majors">← Все турниры</a>
+        <p class="md-404">@Loc.T("detail.notfound")</p>
+        <a class="md-back" href="majors">@Loc.T("detail.all")</a>
     </div>
 }
 else
 {
     var t = _t;
     var st = ArenaMajors.Status(t);
-    <PageTitle>@t.Name 2026 — даты и место | ChessArena</PageTitle>
+    <PageTitle>@t.Name 2026 — @(Loc.IsEn ? "dates & venue" : "даты и место") | ChessArena</PageTitle>
     <HeadContent>
         <meta name="description" content="@MetaDescription(t)" />
         <meta name="robots" content="index,follow" />
         <link rel="canonical" href="@Canonical(t)" />
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="@($"{t.Name} 2026 — {t.Series}")" />
+        <meta property="og:title" content="@($"{t.Name} 2026 — {Loc.Tr(t.Series)}")" />
         <meta property="og:description" content="@MetaDescription(t)" />
         <meta property="og:url" content="@Canonical(t)" />
         <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
@@ -32,27 +32,27 @@ else
         <script type="application/ld+json">@((MarkupString)JsonLd(t))</script>
     </HeadContent>
 
-    <nav class="md-crumbs" aria-label="Хлебные крошки">
-        <a href="">Главная</a><span>›</span>
-        <a href="majors">Турниры</a><span>›</span>
+    <nav class="md-crumbs" aria-label="breadcrumb">
+        <a href="">@Loc.T("crumb.home")</a><span>›</span>
+        <a href="majors">@Loc.T("crumb.majors")</a><span>›</span>
         <span class="md-cur">@t.Name</span>
     </nav>
 
     <article class="md-card @st.Cls">
         <div class="md-row">
-            <span class="mj-series @t.SeriesCls">@t.Series</span>
-            <span class="mj-status @st.Cls">@st.Label</span>
+            <span class="mj-series @t.SeriesCls">@Loc.Tr(t.Series)</span>
+            <span class="mj-status @st.Cls">@Loc.StatusLabel(st.Kind, st.Days)</span>
         </div>
         <h1 class="md-title">@t.Name</h1>
         <dl class="md-facts">
-            <div><dt>Даты</dt><dd>@ArenaMajors.LongDate(t.Start) – @ArenaMajors.LongDate(t.End)</dd></div>
-            <div><dt>Место</dt><dd>@t.Flag @t.City, @t.Country</dd></div>
-            <div><dt>Формат</dt><dd>@t.Format</dd></div>
-            <div><dt>Серия</dt><dd>@t.Series</dd></div>
+            <div><dt>@Loc.T("detail.dates")</dt><dd>@ArenaMajors.LongDate(t.Start) – @ArenaMajors.LongDate(t.End)</dd></div>
+            <div><dt>@Loc.T("detail.place")</dt><dd>@t.Flag @Loc.Tr(t.City), @Loc.Tr(t.Country)</dd></div>
+            <div><dt>@Loc.T("detail.format")</dt><dd>@Loc.Tr(t.Format)</dd></div>
+            <div><dt>@Loc.T("detail.series")</dt><dd>@Loc.Tr(t.Series)</dd></div>
         </dl>
         <div class="md-actions">
-            <a class="btn btn-primary btn-sm" href="@t.Url" target="_blank" rel="noopener noreferrer">Сайт организатора ↗</a>
-            <a class="md-back" href="majors">← Все турниры</a>
+            <a class="btn btn-primary btn-sm" href="@t.Url" target="_blank" rel="noopener noreferrer">@Loc.T("detail.site")</a>
+            <a class="md-back" href="majors">@Loc.T("detail.all")</a>
         </div>
     </article>
 }
@@ -65,16 +65,20 @@ else
     protected override void OnParametersSet()
     {
         _t = ArenaMajors.BySlug(Slug);
-        // Несуществующий турнир — корректный 404 (важно для SEO: не плодим «мягкие» 200).
         if (_t is null && Http.HttpContext is { } ctx && !ctx.Response.HasStarted)
             ctx.Response.StatusCode = 404;
     }
 
     private string Canonical(Major t) => $"{Nav.BaseUri}majors/{t.Slug}";
 
-    private string MetaDescription(Major t) =>
-        $"{t.Name} 2026 ({t.Series}): {ArenaMajors.LongDate(t.Start)} – {ArenaMajors.LongDate(t.End)}, " +
-        $"{t.City}, {t.Country}. Формат: {t.Format}.";
+    private string MetaDescription(Major t)
+    {
+        var dates = $"{ArenaMajors.LongDate(t.Start)} – {ArenaMajors.LongDate(t.End)}";
+        var place = $"{Loc.Tr(t.City)}, {Loc.Tr(t.Country)}";
+        return Loc.IsEn
+            ? $"{t.Name} 2026 ({Loc.Tr(t.Series)}): {dates}, {place}. Format: {Loc.Tr(t.Format)}."
+            : $"{t.Name} 2026 ({Loc.Tr(t.Series)}): {dates}, {place}. Формат: {Loc.Tr(t.Format)}.";
+    }
 
     private string JsonLd(Major t)
     {
@@ -91,8 +95,8 @@ else
                 ["location"] = new Dictionary<string, object?>
                 {
                     ["@type"] = "Place",
-                    ["name"] = $"{t.City}, {t.Country}",
-                    ["address"] = $"{t.City}, {t.Country}",
+                    ["name"] = $"{Loc.Tr(t.City)}, {Loc.Tr(t.Country)}",
+                    ["address"] = $"{Loc.Tr(t.City)}, {Loc.Tr(t.Country)}",
                 },
                 ["url"] = Canonical(t),
                 ["image"] = $"{Nav.BaseUri}og-image.png",
@@ -102,8 +106,8 @@ else
                 ["@context"] = "https://schema.org", ["@type"] = "BreadcrumbList",
                 ["itemListElement"] = new object[]
                 {
-                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 1, ["name"] = "Главная", ["item"] = Nav.BaseUri },
-                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 2, ["name"] = "Турниры", ["item"] = $"{Nav.BaseUri}majors" },
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 1, ["name"] = Loc.T("crumb.home"), ["item"] = Nav.BaseUri },
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 2, ["name"] = Loc.T("crumb.majors"), ["item"] = $"{Nav.BaseUri}majors" },
                     new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 3, ["name"] = t.Name, ["item"] = Canonical(t) },
                 },
             },

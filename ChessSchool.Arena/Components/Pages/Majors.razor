@@ -6,14 +6,14 @@
    страница — оптимизирована под SEO (meta/canonical/OpenGraph + schema.org ItemList/Event/BreadcrumbList).
    Каждая карточка ведёт на отдельную индексируемую страницу /majors/{slug}. *@
 
-<PageTitle>Турниры мировых шахмат — расписание | ChessArena</PageTitle>
+<PageTitle>@Loc.T("majors.pagetitle")</PageTitle>
 
 <HeadContent>
     <meta name="description" content="@MetaDescription" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="@Canonical" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Турниры мировых шахмат — расписание" />
+    <meta property="og:title" content="@Loc.T("majors.title")" />
     <meta property="og:description" content="@MetaDescription" />
     <meta property="og:url" content="@Canonical" />
     <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
@@ -22,8 +22,8 @@
 </HeadContent>
 
 <div class="mj-head">
-    <h1 class="mj-title">Известные турниры</h1>
-    <p class="mj-sub">Топ-события мировых шахмат на ближайшие два месяца. Время местное у организаторов.</p>
+    <h1 class="mj-title">@Loc.T("majors.title")</h1>
+    <p class="mj-sub">@Loc.T("majors.sub")</p>
 </div>
 
 <div class="mj-grid">
@@ -32,18 +32,18 @@
         var st = ArenaMajors.Status(t);
         <article class="mj-card @st.Cls">
             <div class="mj-row">
-                <span class="mj-series @t.SeriesCls">@t.Series</span>
-                <span class="mj-status @st.Cls">@st.Label</span>
+                <span class="mj-series @t.SeriesCls">@Loc.Tr(t.Series)</span>
+                <span class="mj-status @st.Cls">@Loc.StatusLabel(st.Kind, st.Days)</span>
             </div>
             <h2 class="mj-name"><a class="mj-namelink" href="majors/@t.Slug">@t.Name</a></h2>
             <div class="mj-meta">
                 <span class="mj-date">@ArenaMajors.DateRange(t.Start, t.End)</span>
                 <span class="mj-dot">·</span>
-                <span class="mj-place">@t.Flag @t.City, @t.Country</span>
+                <span class="mj-place">@t.Flag @Loc.Tr(t.City), @Loc.Tr(t.Country)</span>
             </div>
             <div class="mj-foot">
-                <span class="mj-format">@t.Format</span>
-                <a class="mj-link" href="majors/@t.Slug">Подробнее →</a>
+                <span class="mj-format">@Loc.Tr(t.Format)</span>
+                <a class="mj-link" href="majors/@t.Slug">@Loc.T("majors.more")</a>
             </div>
         </article>
     }
@@ -53,8 +53,7 @@
     private string Canonical => $"{Nav.BaseUri}majors";
 
     private string MetaDescription =>
-        "Расписание известных мировых шахматных турниров на ближайшие два месяца: " +
-        $"{string.Join(", ", ArenaMajors.Upcoming().Take(4).Select(t => t.Name))} и другие. Даты, города, форматы.";
+        $"{Loc.T("majors.metaprefix")} {string.Join(", ", ArenaMajors.Upcoming().Take(4).Select(t => t.Name))} {Loc.T("majors.metasuffix")}";
 
     // schema.org: ItemList из Event-ов (url → внутренние детальные страницы) + BreadcrumbList.
     private string JsonLd()

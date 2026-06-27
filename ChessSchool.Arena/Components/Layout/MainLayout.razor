@@ -1,5 +1,7 @@
 @inherits LayoutComponentBase
 @using Microsoft.AspNetCore.Components.Authorization
+@using ChessSchool.Arena
+@inject NavigationManager Nav
 
 <input type="checkbox" id="ar-nav-toggle" class="ar-nav-toggle" />
 
@@ -16,10 +18,10 @@
 
         <nav class="ar-nav">
             <NavLink class="ar-link" href="" Match="NavLinkMatch.All">
-                <svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M6 4h12v4a6 6 0 01-12 0zM6 5H3v2a3 3 0 003 3M18 5h3v2a3 3 0 01-3 3" /></svg>Турниры «Арена»
+                <svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M6 4h12v4a6 6 0 01-12 0zM6 5H3v2a3 3 0 003 3M18 5h3v2a3 3 0 01-3 3" /></svg>@Loc.T("nav.arena")
             </NavLink>
             <NavLink class="ar-link" href="majors">
-                <svg viewBox="0 0 24 24"><path d="M3 5h18M5 5v6a7 7 0 0014 0V5M9 21h6M12 18v3" /><circle cx="12" cy="9" r="2.5" /></svg>Турниры
+                <svg viewBox="0 0 24 24"><path d="M3 5h18M5 5v6a7 7 0 0014 0V5M9 21h6M12 18v3" /><circle cx="12" cy="9" r="2.5" /></svg>@Loc.T("nav.majors")
             </NavLink>
         </nav>
     </aside>
@@ -31,9 +33,13 @@
             </label>
             <div class="ar-search">
                 <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" /></svg>
-                <input type="search" placeholder="Поиск по турнирам" aria-label="Поиск" />
+                <input type="search" placeholder="@Loc.T("search.placeholder")" aria-label="@Loc.T("search.placeholder")" />
             </div>
             <span class="ar-spacer"></span>
+            <div class="ar-lang" role="group" aria-label="Язык / Language">
+                <a href="@LangHref("ru")" class="@(Loc.IsEn ? "" : "on")">RU</a>
+                <a href="@LangHref("en")" class="@(Loc.IsEn ? "on" : "")">EN</a>
+            </div>
             <AuthorizeView>
                 <Authorized>
                     <ChessSchool.Design.UserMenu Name="@context.User.Identity?.Name"
@@ -41,7 +47,7 @@
                                                  SignOutHref="/signout" />
                 </Authorized>
                 <NotAuthorized>
-                    <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/">Войти</a>
+                    <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/">@Loc.T("auth.login")</a>
                 </NotAuthorized>
             </AuthorizeView>
         </header>
@@ -57,6 +63,15 @@
     <a href="." class="reload">Перезагрузить</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    // Переключение языка: /lang ставит cookie и возвращает на текущую страницу (без query-мусора).
+    private string LangHref(string culture)
+    {
+        var path = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0];
+        return $"/lang?culture={culture}&returnUrl={Uri.EscapeDataString(path)}";
+    }
+}
 
 <style>
     /* ---------- Оболочка с сайдбаром (стиль idChess) ---------- */
@@ -95,6 +110,11 @@
     .ar-search input { border: 0; background: transparent; outline: 0; width: 100%; font-size: .92rem; color: var(--ink); }
 
     .ar-spacer { flex: 1; }
+
+    .ar-lang { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 2px; }
+    .ar-lang a { font-size: .78rem; font-weight: 700; color: var(--ink-2); padding: .22rem .5rem; border-radius: var(--r-pill); line-height: 1; }
+    .ar-lang a.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+    .ar-lang a:hover { color: var(--ink); }
 
     .ar-content { padding: 26px 28px 60px; width: 100%; max-width: 1200px; }
 

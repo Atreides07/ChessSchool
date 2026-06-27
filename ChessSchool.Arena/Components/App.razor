@@ -1,5 +1,6 @@
-﻿<!DOCTYPE html>
-<html lang="ru">
+﻿@inject NavigationManager Nav
+<!DOCTYPE html>
+<html lang="@System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName">
 
 <head>
     <meta charset="utf-8" />
@@ -9,9 +10,22 @@
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["ChessSchool.Arena.styles.css"]" />
     <link rel="stylesheet" href="_content/ChessSchool.Design/css/design.css" />
+    <link rel="alternate" hreflang="ru" href="@Alt("ru")" />
+    <link rel="alternate" hreflang="en" href="@Alt("en")" />
+    <link rel="alternate" hreflang="x-default" href="@Alt("ru")" />
     <ImportMap />
     <HeadOutlet />
 </head>
+
+@code {
+    // hreflang-альтернативы: тот же URL с ?culture= — различимые языковые версии для краулеров.
+    private string Alt(string culture)
+    {
+        var uri = new Uri(Nav.Uri);
+        var path = uri.GetLeftPart(UriPartial.Path);
+        return $"{path}?culture={culture}";
+    }
+}
 
 <body>
     <Routes />

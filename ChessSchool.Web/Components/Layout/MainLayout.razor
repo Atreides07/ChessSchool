@@ -1,5 +1,7 @@
 @inherits LayoutComponentBase
 @using Microsoft.AspNetCore.Components.Authorization
+@using ChessSchool.Web
+@inject NavigationManager Nav
 
 <div class="ds-app">
     <header class="ds-topbar">
@@ -10,12 +12,16 @@
             ChessSchool
         </a>
         <nav class="ds-nav">
-            <NavLink class="ds-navlink" href="" Match="NavLinkMatch.All">Главная</NavLink>
-            <NavLink class="ds-navlink" href="school">ЛК школы</NavLink>
-            <NavLink class="ds-navlink" href="attribution">Атрибуция</NavLink>
-            <NavLink class="ds-navlink" href="play">Играть</NavLink>
+            <NavLink class="ds-navlink" href="" Match="NavLinkMatch.All">@Loc.T("nav.home")</NavLink>
+            <NavLink class="ds-navlink" href="school">@Loc.T("nav.school")</NavLink>
+            <NavLink class="ds-navlink" href="attribution">@Loc.T("nav.attribution")</NavLink>
+            <NavLink class="ds-navlink" href="play">@Loc.T("nav.play")</NavLink>
         </nav>
         <span class="ds-spacer"></span>
+        <div class="ds-lang" role="group" aria-label="Язык / Language">
+            <a href="@LangHref("ru")" class="@(Loc.IsEn ? "" : "on")">RU</a>
+            <a href="@LangHref("en")" class="@(Loc.IsEn ? "on" : "")">EN</a>
+        </div>
         <AuthorizeView>
             <Authorized>
                 <ChessSchool.Design.UserMenu Name="@context.User.Identity?.Name"
@@ -23,7 +29,7 @@
                                              SignOutHref="/signout" />
             </Authorized>
             <NotAuthorized>
-                <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/play">Войти</a>
+                <a class="btn btn-primary btn-sm" href="/signin?returnUrl=/play">@Loc.T("auth.login")</a>
             </NotAuthorized>
         </AuthorizeView>
     </header>
@@ -38,3 +44,18 @@
     <a href="" class="reload">Перезагрузить</a>
     <a class="dismiss">🗙</a>
 </div>
+
+<style>
+    .ds-lang { display: inline-flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 2px; }
+    .ds-lang a { font-size: .78rem; font-weight: 700; color: var(--ink-2); padding: .22rem .5rem; border-radius: var(--r-pill); line-height: 1; }
+    .ds-lang a.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+    .ds-lang a:hover { color: var(--ink); }
+</style>
+
+@code {
+    private string LangHref(string culture)
+    {
+        var path = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0];
+        return $"/lang?culture={culture}&returnUrl={Uri.EscapeDataString(path)}";
+    }
+}

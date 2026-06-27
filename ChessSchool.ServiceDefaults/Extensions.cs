@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -204,6 +206,50 @@ public static class Extensions
             o.KnownProxies.Clear();
         });
         return builder;
+    }
+
+    /// <summary>Поддерживаемые языки интерфейса (первый — по умолчанию).</summary>
+    public static readonly string[] SupportedCultures = ["ru", "en"];
+
+    /// <summary>
+    /// Локализация RU/EN. Культура определяется из `?culture=` (различимые URL для краулеров + hreflang),
+    /// затем из cookie (персистенс для людей), затем из Accept-Language; по умолчанию ru. Один query-ключ
+    /// `culture` задаёт и формат, и UI-культуру.
+    /// </summary>
+    public static IHostApplicationBuilder AddChessSchoolLocalization(this IHostApplicationBuilder builder)
+    {
+        builder.Services.AddLocalization();
+        builder.Services.Configure<RequestLocalizationOptions>(o =>
+        {
+            o.SetDefaultCulture(SupportedCultures[0]);
+            o.AddSupportedCultures(SupportedCultures);
+            o.AddSupportedUICultures(SupportedCultures);
+            o.ApplyCurrentCultureToResponseHeaders = true;
+            o.RequestCultureProviders =
+            [
+                new QueryStringRequestCultureProvider { QueryStringKey = "culture", UIQueryStringKey = "culture" },
+                new CookieRequestCultureProvider(),
+                new AcceptLanguageHeaderRequestCultureProvider(),
+            ];
+        });
+        return builder;
+    }
+
+    /// <summary>Включает локализацию запросов и эндпоинт `/lang` (ставит cookie языка и возвращает на returnUrl).</summary>
+    public static WebApplication UseChessSchoolLocalization(this WebApplication app)
+    {
+        app.UseRequestLocalization();
+        app.MapGet("/lang", (string culture, string? returnUrl, HttpContext ctx) =>
+        {
+            var c = culture == "en" ? "en" : "ru";
+            ctx.Response.Cookies.Append(
+                CookieRequestCultureProvider.DefaultCookieName,
+                CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(c)),
+                new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/" });
+            var dest = !string.IsNullOrEmpty(returnUrl) && returnUrl.StartsWith('/') ? returnUrl : "/";
+            return Results.LocalRedirect(dest);
+        });
+        return app;
     }
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)

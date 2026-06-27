@@ -1,14 +1,15 @@
 @page "/"
+@using ChessSchool.Web
 @inject NavigationManager Nav
 
-<PageTitle>ChessSchool — платформа для шахматных школ</PageTitle>
+<PageTitle>@Loc.T("home.pagetitle")</PageTitle>
 <HeadContent>
-    <meta name="description" content="Платформа для шахматных школ: автоматический учёт партий, рейтинг ученика, прогресс для родителей и онлайн-игра." />
+    <meta name="description" content="@Loc.T("home.metadesc")" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="@Nav.BaseUri" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="ChessSchool — прогресс юных шахматистов" />
-    <meta property="og:description" content="Платформа для шахматных школ: учёт партий, рейтинг ученика, прогресс для родителей и онлайн-игра." />
+    <meta property="og:title" content="@Loc.T("home.pagetitle")" />
+    <meta property="og:description" content="@Loc.T("home.metadesc")" />
     <meta property="og:url" content="@Nav.BaseUri" />
     <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -18,32 +19,29 @@
 </HeadContent>
 
 <section class="hero">
-    <span class="eyebrow">Платформа для шахматных школ</span>
-    <h1>Прогресс каждого ученика — на ладони</h1>
-    <p class="lead">
-        Тренеры видят, как растёт рейтинг ребёнка, родители следят за успехами по ссылке,
-        а ученики играют онлайн в реальном времени.
-    </p>
+    <span class="eyebrow">@Loc.T("home.eyebrow")</span>
+    <h1>@Loc.T("home.h1")</h1>
+    <p class="lead">@Loc.T("home.lead")</p>
     <div class="row row-wrap">
-        <a class="btn btn-primary btn-lg" href="school">Открыть кабинет школы</a>
-        <a class="btn btn-ghost btn-lg" href="play">Играть онлайн</a>
+        <a class="btn btn-primary btn-lg" href="school">@Loc.T("home.cta.school")</a>
+        <a class="btn btn-ghost btn-lg" href="play">@Loc.T("home.cta.play")</a>
     </div>
 </section>
 
 <div class="grid grid-auto mt-3">
     <div class="card">
-        <h3 class="card-title">Личный кабинет школы</h3>
-        <p class="text-secondary">Таблица учеников, рейтинг Glicko-2, статистика партий и побед.</p>
-        <a href="school">Открыть →</a>
+        <h3 class="card-title">@Loc.T("home.c1.title")</h3>
+        <p class="text-secondary">@Loc.T("home.c1.desc")</p>
+        <a href="school">@Loc.T("home.c1.link")</a>
     </div>
     <div class="card">
-        <h3 class="card-title">Онлайн-партии</h3>
-        <p class="text-secondary">Игра в реальном времени на Orleans + SignalR — под десятки тысяч партий.</p>
-        <a href="play">Играть →</a>
+        <h3 class="card-title">@Loc.T("home.c2.title")</h3>
+        <p class="text-secondary">@Loc.T("home.c2.desc")</p>
+        <a href="play">@Loc.T("home.c2.link")</a>
     </div>
     <div class="card">
-        <h3 class="card-title">Для родителей</h3>
-        <p class="text-secondary">Тренер делится ссылкой на профиль ребёнка — без регистрации.</p>
-        <a href="attribution">Атрибуция партий →</a>
+        <h3 class="card-title">@Loc.T("home.c3.title")</h3>
+        <p class="text-secondary">@Loc.T("home.c3.desc")</p>
+        <a href="attribution">@Loc.T("home.c3.link")</a>
     </div>
 </div>

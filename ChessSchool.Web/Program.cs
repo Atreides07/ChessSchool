@@ -12,6 +12,9 @@ builder.AddServiceDefaults();
 // по внешнему хосту, а не по внутреннему порту Kestrel.
 builder.AddChessSchoolForwardedHeaders();
 
+// Локализация RU/EN (культура из ?culture=/cookie/Accept-Language).
+builder.AddChessSchoolLocalization();
+
 // Единый вход (SSO) через общий IdP — тот же аккаунт, что и в Arena.
 builder.AddChessSchoolSso();
 
@@ -34,6 +37,7 @@ builder.Services.AddHttpClient<AuthApiClient>(c => c.BaseAddress = new("https+ht
 var app = builder.Build();
 
 app.UseForwardedHeaders();
+app.UseChessSchoolLocalization(); // культура запроса + эндпоинт /lang
 
 if (!app.Environment.IsDevelopment())
 {

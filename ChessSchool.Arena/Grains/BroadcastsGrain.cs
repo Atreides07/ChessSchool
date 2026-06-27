@@ -49,17 +49,7 @@ public sealed class BroadcastsGrain(
     /// </summary>
     private async Task ReconcileSeedAsync()
     {
-        int filled = 0;
-        foreach (var seed in BroadcastSeed.Initial)
-        {
-            var existing = store.State.Items.FirstOrDefault(b => b.Slug == seed.Slug);
-            if (existing is null) continue;
-            if (string.IsNullOrWhiteSpace(existing.ImageUrl) && !string.IsNullOrWhiteSpace(seed.ImageUrl))
-            {
-                existing.ImageUrl = seed.ImageUrl;
-                filled++;
-            }
-        }
+        var filled = BroadcastSeed.BackfillImages(store.State.Items);
         store.State.SeedVersion = BroadcastSeed.Version;
         await store.WriteStateAsync();
         logger.LogInformation("Каталог трансляций обновлён до версии сида {Version}: дозалито изображений {Filled}.",

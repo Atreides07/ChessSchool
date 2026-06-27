@@ -136,6 +136,30 @@ public class BroadcastsGrainTests
         finally { await cluster.StopAllSilosAsync(); }
     }
 
+    [Fact]
+    public void BackfillImages_FillsOnlyEmpties_BySlug_WithoutTouchingEdits()
+    {
+        // Каталог «как после v1»: у сид-записи пустой фон, у админской — свой (не сид), есть запись вне сида.
+        var seedSlug = BroadcastSeed.Initial.First(s => !string.IsNullOrWhiteSpace(s.ImageUrl)).Slug;
+        var custom = "https://my.cdn/edited.jpg";
+        var items = new List<Broadcast>
+        {
+            new() { Slug = seedSlug, ImageUrl = null },                 // должен заполниться из сида
+            new() { Slug = "custom-event", ImageUrl = custom },         // правка админа — не трогаем
+            new() { Slug = "unknown-slug", ImageUrl = null },           // нет в сиде — остаётся пустым
+        };
+
+        var filled = BroadcastSeed.BackfillImages(items);
+
+        Assert.Equal(1, filled);
+        Assert.False(string.IsNullOrWhiteSpace(items[0].ImageUrl)); // заполнено из сида
+        Assert.Equal(custom, items[1].ImageUrl);                    // не перетёрто
+        Assert.Null(items[2].ImageUrl);                             // вне сида — без изменений
+
+        // Идемпотентность: повторный вызов ничего не заполняет.
+        Assert.Equal(0, BroadcastSeed.BackfillImages(items));
+    }
+
     [Theory]
     [InlineData("Sinquefield Cup 2026", "sinquefield-cup-2026")]
     [InlineData("  Biel — Festival!! ", "biel-festival")]

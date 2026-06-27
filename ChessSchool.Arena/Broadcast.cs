@@ -54,6 +54,27 @@ public static class BroadcastSeed
     /// </summary>
     public const int Version = 2;
 
+    /// <summary>
+    /// Дозаливка новых полей сида в существующий каталог: заполняет ТОЛЬКО пустые <see cref="Broadcast.ImageUrl"/>
+    /// у записей, совпадающих по slug со стартовым набором (правки админа — непустые значения — не трогаются;
+    /// записи вне сида игнорируются). Возвращает число заполненных. Идемпотентно. Чистая функция — тестируется без Orleans.
+    /// </summary>
+    public static int BackfillImages(IEnumerable<Broadcast> items)
+    {
+        var bySlug = Initial.Where(s => !string.IsNullOrWhiteSpace(s.ImageUrl))
+            .ToDictionary(s => s.Slug, s => s.ImageUrl!);
+        int filled = 0;
+        foreach (var item in items)
+        {
+            if (string.IsNullOrWhiteSpace(item.ImageUrl) && bySlug.TryGetValue(item.Slug, out var img))
+            {
+                item.ImageUrl = img;
+                filled++;
+            }
+        }
+        return filled;
+    }
+
     public static IReadOnlyList<Broadcast> Initial =>
     [
         new() { Slug = "superunited-rapid-blitz-croatia-2026", Name = "SuperUnited Rapid & Blitz Croatia", Series = "Grand Chess Tour", SeriesCls = "gct", Start = new(2026, 6, 29), End = new(2026, 7, 6), City = "Загреб", Country = "Хорватия", Flag = "🇭🇷", Format = "Рапид и блиц", Url = "https://grandchesstour.org", ImageUrl = "https://grandchesstour.org/wp-content/uploads/2025/02/2025-GCT-Croatia-Rapid-and-Blitz-Day-1-Photo-1-767x434.webp" },

@@ -31,15 +31,61 @@ public static class BroadcastFormat
     public static string LongDate(DateOnly d) =>
         Loc.IsEn ? $"{MonthsFullEn[d.Month]} {d.Day}, {d.Year}" : $"{d.Day} {MonthsGenRu[d.Month]} {d.Year}";
 
-    /// <summary>URL-идентификатор из названия: латиница/цифры в нижнем регистре, пробелы → дефисы.</summary>
+    // Транслитерация кириллицы → латиница (ГОСТ-подобная), чтобы русские названия давали читаемый slug.
+    private static readonly Dictionary<char, string> Translit = new()
+    {
+        ['а'] = "a",
+        ['б'] = "b",
+        ['в'] = "v",
+        ['г'] = "g",
+        ['д'] = "d",
+        ['е'] = "e",
+        ['ё'] = "e",
+        ['ж'] = "zh",
+        ['з'] = "z",
+        ['и'] = "i",
+        ['й'] = "y",
+        ['к'] = "k",
+        ['л'] = "l",
+        ['м'] = "m",
+        ['н'] = "n",
+        ['о'] = "o",
+        ['п'] = "p",
+        ['р'] = "r",
+        ['с'] = "s",
+        ['т'] = "t",
+        ['у'] = "u",
+        ['ф'] = "f",
+        ['х'] = "kh",
+        ['ц'] = "ts",
+        ['ч'] = "ch",
+        ['ш'] = "sh",
+        ['щ'] = "shch",
+        ['ъ'] = "",
+        ['ы'] = "y",
+        ['ь'] = "",
+        ['э'] = "e",
+        ['ю'] = "yu",
+        ['я'] = "ya",
+    };
+
+    /// <summary>
+    /// URL-идентификатор из названия: транслитерация кириллицы → латиница, нижний регистр,
+    /// пробелы/символы → дефисы. «Шахматный турнир Бристоль» → «shakhmatnyy-turnir-bristol».
+    /// </summary>
     public static string Slugify(string s)
     {
-        var sb = new System.Text.StringBuilder(s.Length);
+        var sb = new System.Text.StringBuilder(s.Length * 2);
         bool prevDash = false;
-        foreach (var ch in s.Trim().ToLowerInvariant())
+        foreach (var raw in s.Trim().ToLowerInvariant())
         {
-            if (ch is >= 'a' and <= 'z' or >= '0' and <= '9') { sb.Append(ch); prevDash = false; }
-            else if (!prevDash && sb.Length > 0) { sb.Append('-'); prevDash = true; }
+            // Кириллицу разворачиваем в латиницу, остальное обрабатываем посимвольно.
+            var chunk = Translit.TryGetValue(raw, out var lat) ? lat : raw.ToString();
+            foreach (var ch in chunk)
+            {
+                if (ch is >= 'a' and <= 'z' or >= '0' and <= '9') { sb.Append(ch); prevDash = false; }
+                else if (!prevDash && sb.Length > 0) { sb.Append('-'); prevDash = true; }
+            }
         }
         return sb.ToString().Trim('-');
     }

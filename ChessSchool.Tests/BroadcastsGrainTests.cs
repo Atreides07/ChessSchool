@@ -164,6 +164,8 @@ public class BroadcastsGrainTests
     [InlineData("Sinquefield Cup 2026", "sinquefield-cup-2026")]
     [InlineData("  Biel — Festival!! ", "biel-festival")]
     [InlineData("GCT/Finals", "gct-finals")]
+    [InlineData("Шахматный турнир Бристоль", "shakhmatnyy-turnir-bristol")] // транслит кириллицы
+    [InlineData("Кубок 2026", "kubok-2026")]
     public void Slugify_ProducesUrlSafeSlug(string input, string expected) =>
         Assert.Equal(expected, BroadcastFormat.Slugify(input));
 

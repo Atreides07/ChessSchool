@@ -55,7 +55,7 @@ else
 
             <label class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.btf.start")</span>
-                <InputDate Type="InputDateType.DateTimeLocal" class="adm-in" @bind-Value="_startLocal" />
+                <InputDate Type="InputDateType.DateTimeLocal" class="adm-in" @bind-Value="_startLocal" @bind-Value:after="OnStartChanged" />
             </label>
 
             <div class="adm-two">
@@ -141,16 +141,31 @@ else
     private bool _slugTouched;
     private bool IsNew => Slug is null;
 
-    // Итоговый slug для превью URL: введённый вручную, иначе сгенерированный из названия (как при сохранении).
+    // Итоговый slug для превью URL: введённый вручную, иначе сгенерированный (как при сохранении).
     private string EffectiveSlug => _model is null ? ""
-        : !string.IsNullOrWhiteSpace(_model.Slug) ? _model.Slug : BroadcastFormat.Slugify(_model.Name);
+        : !string.IsNullOrWhiteSpace(_model.Slug) ? _model.Slug : GeneratedSlug();
 
-    // Живая генерация SEO-slug из названия, пока админ не правил slug вручную (только при создании).
+    // Авто-slug = транслит названия + дата старта. Дата делает URL одноимённых повторяющихся
+    // бренд-турниров уникальным и стабильным (напр. shakhmatnyy-turnir-bristol-2026-06-27).
+    private string GeneratedSlug()
+    {
+        var name = BroadcastFormat.Slugify(_model?.Name ?? "");
+        var date = _startLocal.ToString("yyyy-MM-dd");
+        return string.Join("-", new[] { name, date }.Where(p => !string.IsNullOrEmpty(p)));
+    }
+
+    // Живая генерация SEO-slug, пока админ не правил slug вручную (только при создании).
     private void OnNameInput(ChangeEventArgs e)
     {
         if (_model is null) return;
         _model.Name = e.Value?.ToString() ?? "";
-        if (IsNew && !_slugTouched) _model.Slug = BroadcastFormat.Slugify(_model.Name);
+        if (IsNew && !_slugTouched) _model.Slug = GeneratedSlug();
+    }
+
+    // Смена даты старта тоже обновляет авто-slug (новый повтор того же турнира → новый URL).
+    private void OnStartChanged()
+    {
+        if (_model is not null && IsNew && !_slugTouched) _model.Slug = GeneratedSlug();
     }
 
     private void OnSlugInput(ChangeEventArgs e)
@@ -209,7 +224,7 @@ else
         if (_model.Name.Length == 0) { _error = Loc.T("admin.err.name"); return; }
 
         if (IsNew && string.IsNullOrWhiteSpace(_model.Slug))
-            _model.Slug = BroadcastFormat.Slugify(_model.Name);
+            _model.Slug = GeneratedSlug();
         _model.Slug = _model.Slug.Trim();
         if (!BroadcastFormat.IsValidSlug(_model.Slug)) { _error = Loc.T("admin.err.slug"); return; }
 

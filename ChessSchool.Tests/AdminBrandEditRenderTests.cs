@@ -50,9 +50,11 @@ public class AdminBrandEditRenderTests : BunitContext
         try
         {
             Services.AddLogging();
+            Services.AddHttpClient();
             Services.AddSingleton<IGrainFactory>(cluster.GrainFactory);
             Services.AddSingleton<BrandTournamentCatalog>();
             Services.AddSingleton<IImageStorage, NullImageStorage>();
+            Services.AddSingleton<IImageIngestor, ImageIngestor>();
 
             var cut = Render<AdminBrandTournamentEdit>(p => p.Add(c => c.Slug, (string?)null));
 

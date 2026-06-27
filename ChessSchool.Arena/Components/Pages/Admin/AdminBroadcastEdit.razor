@@ -11,6 +11,7 @@
 @inject BroadcastsCatalog Catalog
 @inject NavigationManager Nav
 @inject IImageStorage Storage
+@inject IImageIngestor Ingestor
 @inject ILogger<AdminBroadcastEdit> Logger
 
 <PageTitle>@(IsNew ? Loc.T("admin.bc.create") : Loc.T("admin.bc.edit")) — @Loc.T("admin.title")</PageTitle>
@@ -223,6 +224,10 @@ else
             _error = Loc.T("admin.err.slug.exists");
             return;
         }
+
+        // Внешнюю ссылку на изображение переносим в наше хранилище (не зависим от чужого сайта).
+        try { _model.ImageUrl = await Ingestor.EnsureStoredAsync(_model.ImageUrl); }
+        catch (ImageIngestException) { _error = Loc.T("admin.err.image.fetch"); return; }
 
         await Catalog.UpsertAsync(_model);
         Nav.NavigateTo("admin/broadcasts");

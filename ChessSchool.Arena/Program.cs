@@ -102,6 +102,18 @@ else
     builder.Services.AddSingleton<ChessSchool.Arena.Services.IImageStorage, ChessSchool.Arena.Services.NullImageStorage>();
 }
 
+// Перенос внешних URL изображений в наше хранилище (картинку нельзя подменить на чужой стороне).
+// Клиент без авто-редиректа: редиректы следуем вручную, проверяя хост на каждом хопе (SSRF).
+builder.Services.AddHttpClient(ChessSchool.Arena.Services.ImageIngestor.HttpClientName, c =>
+        c.Timeout = TimeSpan.FromSeconds(15))
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+    });
+builder.Services.AddSingleton<ChessSchool.Arena.Services.IImageIngestor, ChessSchool.Arena.Services.ImageIngestor>();
+
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();
 

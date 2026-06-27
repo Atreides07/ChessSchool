@@ -9,6 +9,7 @@
 @attribute [Authorize(Policy = "Admin")]
 @inject BrandTournamentCatalog Catalog
 @inject IImageStorage Storage
+@inject IImageIngestor Ingestor
 @inject NavigationManager Nav
 @inject ILogger<AdminBrandTournamentEdit> Logger
 
@@ -242,6 +243,10 @@ else
         _model.InitialSeconds = _initialMin * 60;
         _model.DurationSeconds = _durationMin * 60;
         _model.StartsAt = new DateTimeOffset(DateTime.SpecifyKind(_startLocal, DateTimeKind.Local));
+
+        // Внешнюю ссылку на изображение переносим в наше хранилище (не зависим от чужого сайта).
+        try { _model.ImageUrl = await Ingestor.EnsureStoredAsync(_model.ImageUrl); }
+        catch (ImageIngestException) { _error = Loc.T("admin.err.image.fetch"); return; }
 
         await Catalog.UpsertAsync(_model);
         Nav.NavigateTo("admin/brand");

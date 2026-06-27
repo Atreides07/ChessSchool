@@ -125,8 +125,23 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Сжатие ДИНАМИЧЕСКИХ ответов (SSR-HTML главной ~60KB и enhanced-nav фетчи). Статику жмёт MapStaticAssets,
+// а HTML без этого уходил несжатым → на медленном канале (3G) ~секунды до первого кадра. Уровень Fastest:
+// быстрое сжатие без заметного CPU на запрос; на текстовом HTML даёт ~5-8x. EnableForHttps — HTML без секретов.
+builder.Services.AddResponseCompression(o =>
+{
+    o.EnableForHttps = true;
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+});
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(
+    o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(
+    o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
+
 var app = builder.Build();
 
+app.UseResponseCompression(); // как можно раньше: до отдачи статики и эндпоинтов
 app.UseForwardedHeaders(); // как можно раньше: схема/хост из X-Forwarded-* до построения redirect_uri
 app.UseChessSchoolLocalization(); // культура запроса + эндпоинт /lang
 

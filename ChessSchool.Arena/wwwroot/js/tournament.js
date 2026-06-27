@@ -13,10 +13,15 @@
     let authed = false, loginUrl = '/signin', L = {}, isEn = false;
     let sel = null, pendingPromo = null, myColor = 'w', flip = false, lastPersonalFetch = 0;
     let connecting = false, setupGen = 0; // защита от повторного входа в setup (иначе дубли соединений/таймеров)
+    let chessUrl = '/lib/chess.js', signalrUrl = '/lib/signalr.js'; // переопределяются fingerprinted-URL из #t-root
 
     async function ensureLibs() {
-        if (!ChessLib) ChessLib = (await import('https://esm.sh/chess.js@1')).Chess;
-        if (!signalR) signalR = await import('https://esm.sh/@microsoft/signalr@8');
+        // Локальные сборки (vendored в wwwroot/lib), а НЕ внешний CDN esm.sh: на медленном интернете
+        // обращение к esm.sh (DNS/TLS/латентность + цепочка под-импортов) надолго блокировало старт
+        // клиента — кнопки/доски не появлялись, клики «не реагировали». Со своего origin грузится быстро,
+        // кэшируется и сжимается вместе со страницей.
+        if (!ChessLib) ChessLib = (await import(chessUrl)).Chess;
+        if (!signalR) signalR = await import(signalrUrl);
     }
 
     function teardown() {
@@ -41,6 +46,10 @@
         connecting = true;
         authed = root.dataset.authed === '1';
         loginUrl = root.dataset.loginurl || '/signin';
+        // @Assets даёт ОТНОСИТЕЛЬНЫЙ путь ("lib/chess.<hash>.js") — для import() нужен валидный URL,
+        // поэтому резолвим в абсолютный относительно базы документа (иначе «голый» спецификатор → ошибка).
+        if (root.dataset.chess) chessUrl = new URL(root.dataset.chess, document.baseURI).href;
+        if (root.dataset.signalr) signalrUrl = new URL(root.dataset.signalr, document.baseURI).href;
         try { const cfg = JSON.parse(document.getElementById('t-loc').textContent); L = cfg.l; isEn = cfg.isEn; }
         catch (e) { L = {}; }
 

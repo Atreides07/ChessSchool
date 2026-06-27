@@ -14,6 +14,11 @@
 
 <PageTitle>@Loc.T("t.fallback") — ChessArena</PageTitle>
 <HeadContent>
+    @* Предзагрузка клиентских библиотек параллельно с HTML: к моменту запуска тонкого клиента они
+       уже в кэше → доска/кнопки появляются сразу, без ожидания загрузки модулей (важно на медленном
+       интернете). Тот же fingerprinted-URL, что и в import ниже (#t-root data-*) → одна загрузка + immutable-кэш. *@
+    <link rel="modulepreload" href="@Assets["lib/signalr.js"]" />
+    <link rel="modulepreload" href="@Assets["lib/chess.js"]" />
     @* Регулярные турниры расписания эфемерны → noindex. Бренд-турниры (кураторские, стабильный slug)
        индексируются. Признак — из IBrandTournaments (пока брендов нет → всё noindex). *@
     @if (_indexable && _brand is not null)
@@ -148,7 +153,8 @@
     </aside>
 </div>
 
-<div id="t-root" data-id="@Id" data-authed="@(authed ? "1" : "0")" data-loginurl="/signin?returnUrl=/t/@Id"></div>
+<div id="t-root" data-id="@Id" data-authed="@(authed ? "1" : "0")" data-loginurl="/signin?returnUrl=/t/@Id"
+     data-chess="@Assets["lib/chess.js"]" data-signalr="@Assets["lib/signalr.js"]"></div>
 <script id="t-loc" type="application/json">@((MarkupString)LocJson())</script>
 @* tournament.js подключён глобально в App.razor (исполняется и при enhanced-навигации). *@
 

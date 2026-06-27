@@ -1,8 +1,9 @@
 @* График динамики рейтинга. Чистый SVG — рендерится на сервере (SSR), хорошо для SEO. *@
+@using ChessSchool.Web
 
 @if (Points is { Count: > 1 })
 {
-    <svg viewBox="0 0 @Width @Height" class="rating-chart" role="img" aria-label="График рейтинга">
+    <svg viewBox="0 0 @Width @Height" class="rating-chart" role="img" aria-label="@Loc.T("rc.aria")">
         <polyline fill="none" stroke="#1b6ec2" stroke-width="2" points="@_polyline" />
         @foreach (var (x, y) in _dots)
         {
@@ -14,7 +15,7 @@
 }
 else
 {
-    <p class="text-muted">Недостаточно данных для графика.</p>
+    <p class="text-muted">@Loc.T("rc.nodata")</p>
 }
 
 @code {

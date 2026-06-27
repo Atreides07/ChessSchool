@@ -1,4 +1,5 @@
 @page "/play"
+@using ChessSchool.Web
 @inject IConfiguration Config
 
 @* Онлайн-партия на «тонком» клиенте: статический SSR-каркас без .NET в браузере и без
@@ -6,39 +7,52 @@
    браузерный SignalR прямо к игровому хабу. Это снимает нагрузку «состояние на каждого игрока»
    с веб-сервера (масштаб) и переживает плохую сеть (reconnect → ресинк). *@
 
-<PageTitle>Играть онлайн</PageTitle>
+<PageTitle>@Loc.T("play.pagetitle")</PageTitle>
 
 @{
     var authed = HttpContext?.User?.Identity?.IsAuthenticated == true;
     var hub = Config["services:gameserver:https:0"] ?? Config["services:gameserver:http:0"] ?? "";
 }
 
-<h1>Онлайн-партия</h1>
+<h1>@Loc.T("play.h1")</h1>
 
 @if (!authed)
 {
     <div class="card ds-narrow">
-        <p class="text-secondary">Войдите единым аккаунтом ChessSchool ID, чтобы играть.</p>
-        <a class="btn btn-primary" href="/signin?returnUrl=/play">Войти через ChessSchool ID</a>
+        <p class="text-secondary">@Loc.T("play.loginprompt")</p>
+        <a class="btn btn-primary" href="/signin?returnUrl=/play">@Loc.T("play.loginbtn")</a>
     </div>
 }
 else
 {
     <div class="card game">
-        <div id="status" class="status text-secondary">Подключение к игровому серверу…</div>
+        <div id="status" class="status text-secondary">@Loc.T("play.connecting")</div>
         <div id="players" class="players"></div>
         <div class="board-wrap">
             <div id="board" class="board"></div>
             <div id="promo" class="promo" hidden></div>
         </div>
         <div class="controls">
-            <button id="find" class="btn btn-primary">Найти соперника (блиц 5+2)</button>
-            <button id="resign" class="btn btn-sm btn-outline-danger" hidden>Сдаться</button>
+            <button id="find" class="btn btn-primary">@Loc.T("play.find")</button>
+            <button id="resign" class="btn btn-sm btn-outline-danger" hidden>@Loc.T("play.resign")</button>
         </div>
     </div>
 
     <script type="module">
         const HUB = @((MarkupString)System.Text.Json.JsonSerializer.Serialize(hub));
+        // Локализованные строки статусов (на язык запроса) — пробрасываем из сервера в клиентский JS.
+        const L = {
+            finished: @((MarkupString)J("play.finished")),
+            yourMove: @((MarkupString)J("play.yourmove")),
+            oppMove: @((MarkupString)J("play.oppmove")),
+            whiteWon: @((MarkupString)J("play.whitewon")),
+            blackWon: @((MarkupString)J("play.blackwon")),
+            draw: @((MarkupString)J("play.draw")),
+            reconnecting: @((MarkupString)J("play.reconnecting")),
+            connected: @((MarkupString)J("play.connected")),
+            searching: @((MarkupString)J("play.searching")),
+            notFound: @((MarkupString)J("play.notfound")),
+        };
         // Свежий токен берём с серверного эндпоинта (обновляется по refresh) — не вшиваем в страницу.
         const getToken = async () => {
             const r = await fetch('/api/game-token', { credentials: 'include' });
@@ -100,8 +114,8 @@ else
                 if (lastState.lastFrom && cells[lastState.lastFrom]) cells[lastState.lastFrom].classList.add('hl');
                 if (lastState.lastTo && cells[lastState.lastTo]) cells[lastState.lastTo].classList.add('hl');
                 if (lastState.checkSquare && cells[lastState.checkSquare]) cells[lastState.checkSquare].classList.add('chk');
-                statusEl.textContent = finished ? ('Партия завершена — ' + result(lastState.result))
-                    : (chess.turn() === myColor ? 'Ваш ход' : 'Ход соперника');
+                statusEl.textContent = finished ? (L.finished + result(lastState.result))
+                    : (chess.turn() === myColor ? L.yourMove : L.oppMove);
                 resignBtn.hidden = finished;
             }
             renderClocks();
@@ -158,7 +172,7 @@ else
 
         const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
         const fmt = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
-        const result = (r) => r === 1 ? 'победили белые' : r === 2 ? 'победили чёрные' : r === 3 ? 'ничья' : '—';
+        const result = (r) => r === 1 ? L.whiteWon : r === 2 ? L.blackWon : r === 3 ? L.draw : '—';
 
         const conn = new signalR.HubConnectionBuilder()
             .withUrl(HUB + '/gamehub', { accessTokenFactory: getToken })
@@ -166,7 +180,7 @@ else
             .build();
 
         conn.on('GameState', s => render(s));
-        conn.onreconnecting(() => statusEl.textContent = 'Переподключение…');
+        conn.onreconnecting(() => statusEl.textContent = L.reconnecting);
         conn.onreconnected(async () => { // плохая сеть: после reconnect ресинхронизируемся с сервером
             if (gameId) { const s = await conn.invoke('JoinGame', gameId); if (s) render(s); }
         });
@@ -174,16 +188,16 @@ else
         buildBoard();
         setInterval(renderClocks, 250);
         await conn.start();
-        statusEl.textContent = 'Подключено. Нажмите «Найти соперника».';
+        statusEl.textContent = L.connected;
 
         findBtn.onclick = async () => {
-            findBtn.disabled = true; statusEl.textContent = 'Ищем соперника…';
+            findBtn.disabled = true; statusEl.textContent = L.searching;
             try {
                 const f = await conn.invoke('FindMatch', 300, 2);
                 gameId = f.gameId; myColor = f.color === 0 ? 'w' : 'b'; flip = myColor === 'b';
                 buildBoard();
                 render(await conn.invoke('JoinGame', gameId));
-            } catch { statusEl.textContent = 'Соперник не найден. Попробуйте ещё раз.'; findBtn.disabled = false; }
+            } catch { statusEl.textContent = L.notFound; findBtn.disabled = false; }
         };
         resignBtn.onclick = () => { if (gameId) conn.invoke('Resign', gameId).then(s => s && render(s)); };
     </script>
@@ -191,6 +205,9 @@ else
 
 @code {
     [CascadingParameter] public HttpContext? HttpContext { get; set; }
+
+    // JSON-строка локализованного значения для безопасной вставки в JS.
+    private static string J(string key) => System.Text.Json.JsonSerializer.Serialize(Loc.T(key));
 }
 
 <style>

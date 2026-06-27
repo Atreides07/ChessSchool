@@ -1,32 +1,33 @@
 @page "/school"
 @rendermode InteractiveServer
+@using ChessSchool.Web
 @inject SchoolApiClient Api
 @inject NavigationManager Nav
 
-<PageTitle>ЛК школы — ученики</PageTitle>
+<PageTitle>@Loc.T("school.pagetitle")</PageTitle>
 
 <div class="section-head">
     <div>
-        <h1>Шахматная школа №1</h1>
-        <p class="text-secondary mb-0">Рейтинг и статистика учеников. Нажмите на имя — откроется профиль с графиком.</p>
+        <h1>@Loc.T("school.h1")</h1>
+        <p class="text-secondary mb-0">@Loc.T("school.sub")</p>
     </div>
 </div>
 
 <div class="card">
     <div class="add-row">
-        <input @bind="_newName" placeholder="Имя нового ученика" class="input" />
-        <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">Добавить</button>
+        <input @bind="_newName" placeholder="@Loc.T("school.newname")" class="input" />
+        <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">@Loc.T("school.add")</button>
     </div>
 
     @if (_students is null)
     {
-        <p class="text-muted"><em>Загрузка…</em></p>
+        <p class="text-muted"><em>@Loc.T("loading")</em></p>
     }
     else
     {
         <table class="table hover">
             <thead>
-                <tr><th>Ученик</th><th>Рейтинг</th><th>Партий</th><th>% побед</th><th>Аккаунт</th><th>Родителю</th></tr>
+                <tr><th>@Loc.T("school.col.student")</th><th>@Loc.T("school.col.rating")</th><th>@Loc.T("school.col.games")</th><th>@Loc.T("school.col.winrate")</th><th>@Loc.T("school.col.account")</th><th>@Loc.T("school.col.parent")</th></tr>
             </thead>
             <tbody>
                 @foreach (var s in _students)
@@ -39,14 +40,14 @@
                         <td>
                             @if (s.AccountLinked)
                             {
-                                <span class="badge badge-success">привязан</span>
+                                <span class="badge badge-success">@Loc.T("school.linked")</span>
                             }
                             else
                             {
-                                <button class="btn btn-sm btn-ghost" @onclick="() => _linkingId = s.Id">Привязать</button>
+                                <button class="btn btn-sm btn-ghost" @onclick="() => _linkingId = s.Id">@Loc.T("school.link")</button>
                             }
                         </td>
-                        <td><button class="btn btn-sm btn-ghost" @onclick="() => Share(s.Id)">Ссылка</button></td>
+                        <td><button class="btn btn-sm btn-ghost" @onclick="() => Share(s.Id)">@Loc.T("school.share")</button></td>
                     </tr>
                 }
             </tbody>
@@ -56,10 +57,10 @@
     @if (_linkingId is { } lid)
     {
         <div class="link-panel">
-            <span>Email онлайн-аккаунта ученика:</span>
+            <span>@Loc.T("school.emaillabel")</span>
             <input @bind="_linkEmail" placeholder="player@example.com" class="form-control" />
-            <button class="btn btn-primary btn-sm" @onclick="() => LinkAccount(lid)">Привязать</button>
-            <button class="btn btn-link btn-sm" @onclick="() => _linkingId = null">Отмена</button>
+            <button class="btn btn-primary btn-sm" @onclick="() => LinkAccount(lid)">@Loc.T("school.link")</button>
+            <button class="btn btn-link btn-sm" @onclick="() => _linkingId = null">@Loc.T("school.cancel")</button>
             @if (_linkError is not null) { <span class="text-danger">@_linkError</span> }
         </div>
     }
@@ -67,7 +68,7 @@
     @if (_shareUrl is not null)
     {
         <div class="alert alert-info mt-2">
-            Ссылка для родителя (только просмотр): <a href="@_shareUrl">@_shareUrl</a>
+            @Loc.T("school.shareparent") <a href="@_shareUrl">@_shareUrl</a>
         </div>
     }
 </div>
@@ -102,7 +103,7 @@
     {
         _linkError = null;
         var updated = await Api.LinkAccountAsync(studentId, _linkEmail.Trim());
-        if (updated is null) { _linkError = "Пользователь с таким email не найден."; return; }
+        if (updated is null) { _linkError = Loc.T("school.linkerr"); return; }
         _linkingId = null;
         _linkEmail = "";
         await Load();

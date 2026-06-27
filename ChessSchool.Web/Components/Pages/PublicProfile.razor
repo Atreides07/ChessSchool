@@ -1,22 +1,23 @@
 @page "/p/{Token}"
+@using ChessSchool.Web
 @inject SchoolApiClient Api
 
-<PageTitle>@(_profile?.Student.DisplayName ?? "Профиль ученика")</PageTitle>
+<PageTitle>@(_profile?.Student.DisplayName ?? Loc.T("profile.fallback"))</PageTitle>
 <HeadContent>
     <meta name="robots" content="noindex" />
 </HeadContent>
 
 @if (_loaded && _profile is null)
 {
-    <div class="alert alert-warning">Ссылка недействительна или истекла.</div>
+    <div class="alert alert-warning">@Loc.T("public.invalid")</div>
 }
 else if (_profile is null)
 {
-    <p><em>Загрузка…</em></p>
+    <p><em>@Loc.T("loading")</em></p>
 }
 else
 {
-    <p class="text-muted">Профиль ученика для родителя (только просмотр).</p>
+    <p class="text-muted">@Loc.T("public.sub")</p>
     <ProfileView Profile="_profile" />
 }
 

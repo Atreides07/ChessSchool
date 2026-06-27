@@ -1,16 +1,17 @@
 @page "/students/{Id:guid}"
+@using ChessSchool.Web
 @inject SchoolApiClient Api
 
-<PageTitle>@(_profile?.Student.DisplayName ?? "Профиль ученика")</PageTitle>
+<PageTitle>@(_profile?.Student.DisplayName ?? Loc.T("profile.fallback"))</PageTitle>
 
 @if (_profile is null)
 {
-    <p><em>Загрузка…</em></p>
+    <p><em>@Loc.T("loading")</em></p>
 }
 else
 {
     <ProfileView Profile="_profile" />
-    <p><a href="school">← К списку учеников</a></p>
+    <p><a href="school">@Loc.T("profile.tolist")</a></p>
 }
 
 @code {

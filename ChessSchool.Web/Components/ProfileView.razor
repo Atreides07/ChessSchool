@@ -1,37 +1,38 @@
 @* Профиль ученика: рейтинг, график, последние партии. Используется в ЛК и на публичной странице. *@
+@using ChessSchool.Web
 
 <h1>@Profile.Student.DisplayName</h1>
 
 <div class="card">
     <div class="stats">
-        <div class="stat"><span class="stat-label">Рейтинг</span><span class="stat-value">@Profile.Student.Rating</span></div>
-        <div class="stat"><span class="stat-label">Партий</span><span class="stat-value">@Profile.Student.GamesPlayed</span></div>
-        <div class="stat"><span class="stat-label">Побед</span><span class="stat-value">@Profile.Student.Wins</span></div>
-        <div class="stat"><span class="stat-label">% побед</span><span class="stat-value">@Profile.Student.WinRate%</span></div>
+        <div class="stat"><span class="stat-label">@Loc.T("pv.rating")</span><span class="stat-value">@Profile.Student.Rating</span></div>
+        <div class="stat"><span class="stat-label">@Loc.T("pv.games")</span><span class="stat-value">@Profile.Student.GamesPlayed</span></div>
+        <div class="stat"><span class="stat-label">@Loc.T("pv.wins")</span><span class="stat-value">@Profile.Student.Wins</span></div>
+        <div class="stat"><span class="stat-label">@Loc.T("pv.winrate")</span><span class="stat-value">@Profile.Student.WinRate%</span></div>
     </div>
 </div>
 
 <div class="card mt-2">
-    <h3 class="card-title">Динамика рейтинга</h3>
+    <h3 class="card-title">@Loc.T("pv.dynamics")</h3>
     <RatingChart Points="Profile.RatingHistory" />
 </div>
 
 <div class="card mt-2">
-    <h3 class="card-title">Последние партии</h3>
+    <h3 class="card-title">@Loc.T("pv.recent")</h3>
     @if (Profile.RecentGames.Count == 0)
     {
-        <p class="text-muted mb-0">Партий пока нет.</p>
+        <p class="text-muted mb-0">@Loc.T("pv.nogames")</p>
     }
     else
     {
         <table class="table hover">
-            <thead><tr><th>Дата</th><th>Цвет</th><th>Соперник</th><th>Итог</th><th>± рейтинг</th></tr></thead>
+            <thead><tr><th>@Loc.T("pv.col.date")</th><th>@Loc.T("pv.col.color")</th><th>@Loc.T("pv.col.opp")</th><th>@Loc.T("pv.col.result")</th><th>@Loc.T("pv.col.delta")</th></tr></thead>
             <tbody>
                 @foreach (var g in Profile.RecentGames)
                 {
                     <tr>
                         <td>@g.PlayedAt.LocalDateTime.ToString("dd.MM.yyyy")</td>
-                        <td>@(g.Color == PieceColor.White ? "Белые" : "Чёрные")</td>
+                        <td>@(g.Color == PieceColor.White ? Loc.T("pv.white") : Loc.T("pv.black"))</td>
                         <td>@g.OpponentName</td>
                         <td>@ResultBadge(g)</td>
                         <td><span class="@(g.RatingChange >= 0 ? "delta-up" : "delta-down")">@(g.RatingChange > 0 ? "+" : "")@g.RatingChange</span></td>
@@ -50,9 +51,9 @@
         bool isWhite = g.Color == PieceColor.White;
         var (text, cls) = g.Result switch
         {
-            GameResult.Draw => ("Ничья", "badge"),
-            GameResult.WhiteWins => isWhite ? ("Победа", "badge badge-success") : ("Поражение", "badge badge-danger"),
-            GameResult.BlackWins => isWhite ? ("Поражение", "badge badge-danger") : ("Победа", "badge badge-success"),
+            GameResult.Draw => (Loc.T("pv.draw"), "badge"),
+            GameResult.WhiteWins => isWhite ? (Loc.T("pv.win"), "badge badge-success") : (Loc.T("pv.loss"), "badge badge-danger"),
+            GameResult.BlackWins => isWhite ? (Loc.T("pv.loss"), "badge badge-danger") : (Loc.T("pv.win"), "badge badge-success"),
             _ => ("—", "badge")
         };
         builder.OpenElement(0, "span");

@@ -1,22 +1,20 @@
 @page "/attribution"
 @rendermode InteractiveServer
+@using ChessSchool.Web
 @inject SchoolApiClient Api
 
-<PageTitle>Очередь атрибуции партий</PageTitle>
+<PageTitle>@Loc.T("attr.pagetitle")</PageTitle>
 
-<h1>Атрибуция тренировочных партий</h1>
-<p class="text-muted">
-    Партии, записанные приложением без чек-ина, попадают сюда. Назначьте игроков и цвета —
-    после этого партия учитывается в рейтинге.
-</p>
+<h1>@Loc.T("attr.h1")</h1>
+<p class="text-muted">@Loc.T("attr.intro")</p>
 
 @if (_pending is null || _students is null)
 {
-    <p><em>Загрузка…</em></p>
+    <p><em>@Loc.T("loading")</em></p>
 }
 else if (_pending.Count == 0)
 {
-    <div class="alert alert-success">Очередь пуста — все партии атрибутированы. 🎉</div>
+    <div class="alert alert-success">@Loc.T("attr.empty")</div>
 }
 else
 {
@@ -24,31 +22,31 @@ else
     {
         <div class="pending-card">
             <div class="meta">
-                <span>Доска: <strong>@g.DeviceRef</strong></span>
+                <span>@Loc.T("attr.board") <strong>@g.DeviceRef</strong></span>
                 <span>@g.PlayedAt.LocalDateTime.ToString("dd.MM HH:mm")</span>
             </div>
             <code>@g.Pgn</code>
             <div class="assign">
-                <label>Белые:
+                <label>@Loc.T("attr.white")
                     <select @bind="_form[g.Id].White">
                         <option value="">—</option>
                         @foreach (var s in _students) { <option value="@s.Id">@s.DisplayName</option> }
                     </select>
                 </label>
-                <label>Чёрные:
+                <label>@Loc.T("attr.black")
                     <select @bind="_form[g.Id].Black">
                         <option value="">—</option>
                         @foreach (var s in _students) { <option value="@s.Id">@s.DisplayName</option> }
                     </select>
                 </label>
-                <label>Итог:
+                <label>@Loc.T("attr.result")
                     <select @bind="_form[g.Id].Result">
                         <option value="@GameResult.WhiteWins">1–0</option>
                         <option value="@GameResult.Draw">½–½</option>
                         <option value="@GameResult.BlackWins">0–1</option>
                     </select>
                 </label>
-                <button class="btn btn-primary btn-sm" @onclick="() => Attribute(g.Id)">Сохранить</button>
+                <button class="btn btn-primary btn-sm" @onclick="() => Attribute(g.Id)">@Loc.T("attr.save")</button>
             </div>
         </div>
     }

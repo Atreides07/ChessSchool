@@ -34,6 +34,11 @@ public sealed class BroadcastsState
     [Id(0)] public List<Broadcast> Items { get; set; } = [];
     /// <summary>Каталог уже инициализирован стартовым набором (чтобы сид не перетирал правки админа).</summary>
     [Id(1)] public bool Seeded { get; set; }
+    /// <summary>
+    /// Версия применённого сида. Позволяет дозалить новые поля стартового набора (напр. изображения)
+    /// в уже засеянный каталог, не перетирая правки админа — см. <see cref="BroadcastSeed.Version"/>.
+    /// </summary>
+    [Id(2)] public int SeedVersion { get; set; }
 }
 
 /// <summary>
@@ -43,6 +48,12 @@ public sealed class BroadcastsState
 /// </summary>
 public static class BroadcastSeed
 {
+    /// <summary>
+    /// Версия стартового набора. Повышай при добавлении новых полей в сид (напр. изображений),
+    /// чтобы грейн одноразово дозалил их в уже засеянный каталог. v1 — без изображений, v2 — с ними.
+    /// </summary>
+    public const int Version = 2;
+
     public static IReadOnlyList<Broadcast> Initial =>
     [
         new() { Slug = "superunited-rapid-blitz-croatia-2026", Name = "SuperUnited Rapid & Blitz Croatia", Series = "Grand Chess Tour", SeriesCls = "gct", Start = new(2026, 6, 29), End = new(2026, 7, 6), City = "Загреб", Country = "Хорватия", Flag = "🇭🇷", Format = "Рапид и блиц", Url = "https://grandchesstour.org", ImageUrl = "https://grandchesstour.org/wp-content/uploads/2025/02/2025-GCT-Croatia-Rapid-and-Blitz-Day-1-Photo-1-767x434.webp" },

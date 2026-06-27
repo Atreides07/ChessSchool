@@ -45,7 +45,7 @@ else
                     @if (!string.IsNullOrWhiteSpace(t.ImageUrl))
                     {
                         <img class="mj-img" src="@t.ImageUrl" alt="" aria-hidden="true"
-                             loading="lazy" decoding="async" fetchpriority="low" />
+                             loading="lazy" decoding="async" fetchpriority="low" referrerpolicy="no-referrer" />
                     }
                     <span class="mj-series @t.SeriesCls">@Loc.Tr(t.Series)</span>
                     <span class="mj-status @st.Cls">@Loc.StatusLabel(st.Kind, st.Days)</span>

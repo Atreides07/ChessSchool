@@ -118,7 +118,7 @@ else
                 <div class="mj-banner @_model.SeriesCls">
                     @if (!string.IsNullOrWhiteSpace(_model.ImageUrl))
                     {
-                        <img class="mj-img" src="@_model.ImageUrl" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+                        <img class="mj-img" src="@_model.ImageUrl" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
                     }
                     <span class="mj-series @_model.SeriesCls">@(_model.Series is { Length: > 0 } ? _model.Series : "Серия")</span>
                 </div>

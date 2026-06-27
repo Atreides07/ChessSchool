@@ -31,10 +31,39 @@ public sealed class BroadcastsGrain(
         {
             store.State.Items = BroadcastSeed.Initial.Select(b => b.Clone()).ToList();
             store.State.Seeded = true;
+            store.State.SeedVersion = BroadcastSeed.Version;
             await store.WriteStateAsync();
             logger.LogInformation("Каталог трансляций инициализирован стартовым набором ({Count}).", store.State.Items.Count);
         }
+        else if (store.State.SeedVersion < BroadcastSeed.Version)
+        {
+            await ReconcileSeedAsync();
+        }
         await base.OnActivateAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Дозаливка новых полей сида в уже засеянный каталог (повышение версии). Заполняет ТОЛЬКО пустые
+    /// значения у существующих по slug записей — правки админа (непустые поля) не трогаются. Идемпотентно.
+    /// Сейчас касается только изображений (v1 → v2).
+    /// </summary>
+    private async Task ReconcileSeedAsync()
+    {
+        int filled = 0;
+        foreach (var seed in BroadcastSeed.Initial)
+        {
+            var existing = store.State.Items.FirstOrDefault(b => b.Slug == seed.Slug);
+            if (existing is null) continue;
+            if (string.IsNullOrWhiteSpace(existing.ImageUrl) && !string.IsNullOrWhiteSpace(seed.ImageUrl))
+            {
+                existing.ImageUrl = seed.ImageUrl;
+                filled++;
+            }
+        }
+        store.State.SeedVersion = BroadcastSeed.Version;
+        await store.WriteStateAsync();
+        logger.LogInformation("Каталог трансляций обновлён до версии сида {Version}: дозалито изображений {Filled}.",
+            BroadcastSeed.Version, filled);
     }
 
     public Task<IReadOnlyList<Broadcast>> GetAllAsync() =>

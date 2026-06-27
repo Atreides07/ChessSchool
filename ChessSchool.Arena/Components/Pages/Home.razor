@@ -481,7 +481,8 @@ else
     #sv-list:checked ~ .view-tl { display: none; }
 
     /* ---------------- Лента «Главные турниры» ---------------- */
-    .bt-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 18px; }
+    /* auto-fill (не auto-fit): пустые треки сохраняются, поэтому единственная карточка не растягивается на всю ширину. */
+    .bt-rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 280px)); gap: 12px; margin-top: 18px; justify-content: start; }
     .bt-rcard { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); transition: box-shadow .12s, transform .12s; }
     .bt-rcard:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); color: var(--ink); }
     .bt-rbanner { position: relative; aspect-ratio: 16 / 7; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); text-decoration: none; }

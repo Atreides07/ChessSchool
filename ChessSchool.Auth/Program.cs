@@ -20,6 +20,10 @@ builder.AddServiceDefaults();
 // строились по внешнему https-хосту (иначе токены/discovery будут с внутренним адресом).
 builder.AddChessSchoolForwardedHeaders();
 
+// Локализация страницы входа RU/EN. Cookie языка живёт на хосте веб-приложения и не приходит на
+// отдельный домен IdP, поэтому язык определяется по Accept-Language (или ?culture=).
+builder.AddChessSchoolLocalization();
+
 // Общий DataProtection-keyring (Redis при наличии): cookie-сессия IdP расшифровывается любой нодой —
 // без этого при нескольких нодах IdP вход «прыгал» бы и логин ломался.
 builder.AddChessSchoolDataProtection();
@@ -123,6 +127,7 @@ using (var scope = app.Services.CreateScope())
 if (migrateRequested) return; // режим миграции: схему применили — выходим (job завершён)
 
 app.UseForwardedHeaders(); // схема/хост из X-Forwarded-* до построения issuer/redirect
+app.UseChessSchoolLocalization(); // культура страницы входа (Accept-Language/?culture)
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -286,9 +291,23 @@ static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
     _ => [Destinations.AccessToken]
 };
 
-static string LoginPage(string ret, string? error, bool register) => $$"""
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{(register ? "Регистрация" : "Вход")}} — ChessSchool ID</title>
+static string LoginPage(string ret, string? error, bool register)
+{
+    var en = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "en";
+    // Локализованные строки страницы входа.
+    string lang = en ? "en" : "ru";
+    string titleReg = en ? "Sign up" : "Регистрация", titleLogin = en ? "Sign in" : "Вход";
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string err = en ? "Invalid credentials or email already taken." : "Неверные данные или email уже занят.";
+    string lPassword = en ? "Password" : "Пароль", lName = en ? "Name" : "Имя";
+    string phName = en ? "Your name" : "Ваше имя", phPass6 = en ? "At least 6 characters" : "Минимум 6 символов";
+    string btnLogin = en ? "Sign in" : "Войти", btnCreate = en ? "Create account" : "Создать аккаунт";
+    string noAcc = en ? "No account?" : "Нет аккаунта?", doReg = en ? "Sign up" : "Зарегистрироваться";
+    string haveAcc = en ? "Already have an account?" : "Уже есть аккаунт?";
+    string secured = en ? "Secured by OpenID Connect" : "Защищено OpenID Connect";
+    return $$"""
+<!doctype html><html lang="{{lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{(register ? titleReg : titleLogin)}} — ChessSchool ID</title>
 <style>
 :root{--ink:#0e1116;--ink2:#5b6470;--muted:#8b93a1;--line:#d6dae1;--accent:#2b6ef2;--accent-h:#1f5ad8;--bg:#f6f7f9;--surface:#fff}
 *{box-sizing:border-box}
@@ -320,31 +339,32 @@ button:hover{background:var(--accent-h)}
 <input type="checkbox" id="mode" {{(register ? "checked" : "")}}>
 <div class="card">
 <div class="brand"><span class="logo"><svg viewBox="0 0 45 45" width="18" height="18" fill="#fff"><path d="M18 10c1-1 3-2 5-2 7 0 12 6 12 16v14H13c0-6 3-9 7-12-2 1-5 2-7 1-2-1-2-3-1-5-2 1-4 1-5-1-1-3 1-5 4-7 .5-1 1-2 0-3 1-1 2-1 3 0z"/></svg></span> ChessSchool ID</div>
-<p class="sub">Единый аккаунт для ChessSchool и Arena</p>
-{{(error is not null ? "<p class=\"err\">Неверные данные или email уже занят.</p>" : "")}}
+<p class="sub">{{sub}}</p>
+{{(error is not null ? $"<p class=\"err\">{err}</p>" : "")}}
 
 <div class="view-login">
-<h1>Вход</h1>
+<h1>{{titleLogin}}</h1>
 <form method="post" action="/account/login">
 <input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
 <label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
-<label>Пароль</label><input name="password" type="password" placeholder="••••••••" required>
-<button type="submit">Войти</button></form>
-<p class="switch">Нет аккаунта? <label for="mode" class="as-link">Зарегистрироваться</label></p>
+<label>{{lPassword}}</label><input name="password" type="password" placeholder="••••••••" required>
+<button type="submit">{{btnLogin}}</button></form>
+<p class="switch">{{noAcc}} <label for="mode" class="as-link">{{doReg}}</label></p>
 </div>
 
 <div class="view-reg">
-<h1>Регистрация</h1>
+<h1>{{titleReg}}</h1>
 <form method="post" action="/account/register">
 <input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
-<label>Имя</label><input name="name" placeholder="Ваше имя">
+<label>{{lName}}</label><input name="name" placeholder="{{phName}}">
 <label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
-<label>Пароль</label><input name="password" type="password" placeholder="Минимум 6 символов" required>
-<button type="submit">Создать аккаунт</button></form>
-<p class="switch">Уже есть аккаунт? <label for="mode" class="as-link">Войти</label></p>
+<label>{{lPassword}}</label><input name="password" type="password" placeholder="{{phPass6}}" required>
+<button type="submit">{{btnCreate}}</button></form>
+<p class="switch">{{haveAcc}} <label for="mode" class="as-link">{{btnLogin}}</label></p>
 </div>
 
-<p class="muted">Защищено OpenID Connect</p></div></body></html>
+<p class="muted">{{secured}}</p></div></body></html>
 """;
+}
 
 record ByEmailRequest(string Email);

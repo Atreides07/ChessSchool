@@ -52,8 +52,13 @@ builder.Services.AddSingleton(new ChessSchool.Arena.Services.ArenaRuntimeOptions
 // Readiness-проверка Redis (в /health, не в /alive).
 if (redisConn is not null) builder.Services.AddHealthChecks().AddRedis(redisConn, name: "redis");
 
-// Внутрипроцессный pub/sub для push-обновлений турниров (грейн → компоненты).
+// Внутрипроцессный pub/sub для push-обновлений турниров (грейн → компоненты/хаб).
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();
+
+// SignalR-хаб страницы турнира (тонкий клиент). Backplane НЕ нужен: кросс-нодовость обеспечивает
+// ArenaNotifier (Redis pub/sub) — каждая нода рассылает своим локальным соединениям (см. ArenaBroadcaster).
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaBroadcaster>();
 
 // Каталог трансляций: источник истины — грейн (Redis grain storage), на ноде — кэш с TTL поверх него.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();
@@ -156,6 +161,9 @@ app.MapGet("/media/broadcasts/{key}", async (string key, HttpContext ctx,
     ctx.Response.Headers.CacheControl = "public,max-age=31536000,immutable";
     return Results.Stream(img.Content, img.ContentType);
 });
+
+// Хаб страницы турнира (тонкий браузерный клиент подключается по тому же origin → cookie-auth).
+app.MapHub<ChessSchool.Arena.Hubs.ArenaHub>("/arenahub");
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

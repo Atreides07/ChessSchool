@@ -1,391 +1,91 @@
 @page "/t/{Id}"
-@rendermode InteractiveServer
-@inherits LocalizedComponentBase
 @using ChessSchool.Arena
-@using ChessSchool.Arena.Services
-@inject IGrainFactory Grains
-@inject ArenaNotifier Notifier
-@inject AuthenticationStateProvider AuthState
-@implements IAsyncDisposable
+@inject IHttpContextAccessor Http
 
-<PageTitle>@(_state?.Name ?? Loc.T("t.fallback"))</PageTitle>
+@* Страница турнира на «тонком» клиенте: статический SSR-каркас без серверной Blazor-цепи и без
+   ре-рендеров по таймеру. Шапку/таблицу/доски/свою партию рендерит браузерный JS (tournament.js),
+   синхронизация — SignalR прямо к /arenahub (cookie-auth, тот же origin), часы анимируются локально.
+   Это снимает «состояние на зрителя» с веб-сервера (масштаб) и переживает плохую сеть (reconnect → ресинк). *@
 
-@if (_state is null)
-{
-    <p class="text-muted"><em>@Loc.T("loading")</em></p>
+<PageTitle>@Loc.T("t.fallback") — ChessArena</PageTitle>
+<HeadContent><meta name="robots" content="noindex" /></HeadContent>
+
+@{
+    var authed = Http.HttpContext?.User?.Identity?.IsAuthenticated == true;
 }
-else
-{
-    <nav class="crumbs">
-        <a href="/">@Loc.T("crumb.home")</a><span>›</span>
-        <a href="/">@Loc.T("nav.arena")</a><span>›</span>
-        <span class="crumbs-cur">@_state.Name</span>
-    </nav>
 
-    <div class="t-grid">
-        <div class="t-main">
-            @* ----- Шапка турнира ----- *@
-            <div class="t-hero card">
-                <div class="t-thumb @(_state.Status == TournamentStatus.Running ? "" : "dim")">
-                    @if (_state.Status == TournamentStatus.Running)
-                    {
-                        <span class="t-live"><span class="t-dot"></span>Live</span>
-                    }
-                    else if (_state.Status == TournamentStatus.Finished)
-                    {
-                        <span class="t-live past">@Loc.T("t.finished")</span>
-                    }
-                    else
-                    {
-                        <span class="t-live past">@Loc.T("t.soon")</span>
-                    }
-                </div>
+<nav class="crumbs">
+    <a href="/">@Loc.T("crumb.home")</a><span>›</span>
+    <a href="/">@Loc.T("nav.arena")</a><span>›</span>
+    <span class="crumbs-cur" id="t-crumb"></span>
+</nav>
 
-                <div class="t-hero-mid">
-                    <div class="t-meta">
-                        <span>@_state.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
-                        <span>@(_state.DurationSeconds / 60) @Loc.T("t.minutes")</span><span class="sep">•</span>
-                        <span>@Loc.T("t.control") @(_state.TimeControl.InitialSeconds / 60) + @_state.TimeControl.IncrementSeconds</span>
-                    </div>
-                    <h1 class="t-title">@_state.Name</h1>
-                </div>
+<div class="t-grid">
+    <div class="t-main" id="t-main"><p class="text-muted"><em>@Loc.T("loading")</em></p></div>
 
-                <div class="t-hero-side">
-                    @if (_state.Status == TournamentStatus.Running)
-                    {
-                        <div class="t-countdown">@Loc.T("t.endin") <strong>@Hms(Remaining())</strong></div>
-                    }
-                    else if (_state.Status == TournamentStatus.Created)
-                    {
-                        <div class="t-countdown">@Loc.T("t.start") <strong>@_state.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm")</strong></div>
-                    }
-
-                    <div class="t-parts" title="@HumanCount @Loc.Participants(HumanCount) · @_state.BotCount @Loc.T("unit.bots")">
-                        <span class="t-ava-row">
-                            @foreach (var s in _state.Standings.Take(3))
-                            {
-                                <span class="t-ava">@Avatar(s.Name)</span>
-                            }
-                        </span>
-                        <span>@_state.Standings.Count @Loc.Participants(_state.Standings.Count)</span>
-                    </div>
-
-                    @ActionButton()
-                </div>
-            </div>
-
-            @* ----- Своя интерактивная партия (когда участвуешь и идёт турнир) ----- *@
-            @if (_state.Status == TournamentStatus.Running && _state.Joined)
-            {
-                @if (_state.MyGame is { } g)
-                {
-                    <div class="card my-game">
-                        <div class="players">
-                            <span>@(g.BlackBerserk ? "⚡ " : "")@g.BlackName <span class="clock @(g.Turn == PieceColor.Black && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, false) / 1000)</span></span>
-                            <span>@(g.WhiteBerserk ? "⚡ " : "")@g.WhiteName <span class="clock @(g.Turn == PieceColor.White && g.Status == GameStatus.InProgress ? "active" : "")">@Mmss(EffMs(g, true) / 1000)</span></span>
-                        </div>
-                        <Chessboard Fen="@g.Fen" FlipForBlack="g.MyColor == PieceColor.Black"
-                                    LastFrom="@g.LastFrom" LastTo="@g.LastTo" CheckSquare="@g.CheckSquare"
-                                    Disabled="@(g.Status != GameStatus.InProgress)"
-                                    MyTurn="@(g.Turn == g.MyColor)" OnMove="DoMove" />
-                        <div class="gstatus">
-                            @if (g.Status == GameStatus.Finished)
-                            {
-                                <strong>@ResultText(g)</strong> <span class="text-muted">@Loc.T("game.waitnext")</span>
-                            }
-                            else
-                            {
-                                <span class="text-secondary">@(g.Turn == g.MyColor ? Loc.T("game.yourmove") : Loc.T("game.oppmove"))</span>
-                                <span class="ds-spacer"></span>
-                                @if (g.MyBerserkAvailable)
-                                {
-                                    <button class="btn btn-warn btn-sm" @onclick="Berserk" title="@Loc.T("game.berserktip")">⚡ Berserk</button>
-                                }
-                                <button class="btn btn-outline-danger btn-sm" @onclick="Resign">@Loc.T("game.resign")</button>
-                            }
-                        </div>
-                    </div>
-                }
-                else
-                {
-                    <div class="card waiting">
-                        <div class="search-anim" aria-hidden="true">
-                            <span class="search-ring"></span>
-                            <span class="search-piece">@((MarkupString)ChessPieces.Svg('n'))</span>
-                        </div>
-                        <div class="search-text">@Loc.T("waiting.search")<span class="dots"><i></i><i></i><i></i></span></div>
-                        <div class="text-muted mt-1">@Loc.T("waiting.score") <strong>@_state.MyScore</strong></div>
-                    </div>
-                }
-            }
-
-            @* ----- Трансляция партий (4 доски + «Все игры») ----- *@
-            @if (Broadcast().Count > 0)
-            {
-                <div class="sec-head">
-                    <h2 class="sec-title">@Loc.T("sec.games")</h2>
-                    <a class="all-games" href="/t/@Id/games">@Loc.T("link.allgames")</a>
-                </div>
-                <div class="boards-grid">
-                    @foreach (var b in Broadcast().Take(4))
-                    {
-                        <div class="bcard @(b.Status == GameStatus.Finished ? "done" : "")">
-                            <div class="bplayer">
-                                <span class="bava">@Avatar(b.BlackName)</span>
-                                <span class="bname">@b.BlackName</span>
-                                <span class="bscore">@b.BlackScore</span>
-                            </div>
-                            <div class="bclock @(b.Turn == PieceColor.Black && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.BlackMs / 1000)</div>
-                            <div class="bboard">
-                                <Chessboard Fen="@b.Fen" LastFrom="@b.LastFrom" LastTo="@b.LastTo" CheckSquare="@b.CheckSquare" Disabled="true" />
-                                @if (b.Status == GameStatus.Finished)
-                                {
-                                    <div class="bresult">
-                                        <span class="rcell w">@GResult(b.Result, true)</span>
-                                        <span class="rdash">–</span>
-                                        <span class="rcell b">@GResult(b.Result, false)</span>
-                                    </div>
-                                }
-                            </div>
-                            <div class="bclock @(b.Turn == PieceColor.White && b.Status == GameStatus.InProgress ? "active" : "")">@Mmss(b.WhiteMs / 1000)</div>
-                            <div class="bplayer">
-                                <span class="bava">@Avatar(b.WhiteName)</span>
-                                <span class="bname">@b.WhiteName</span>
-                                <span class="bscore">@b.WhiteScore</span>
-                            </div>
-                        </div>
-                    }
-                </div>
-            }
-
-            @* ----- Таблица лидеров ----- *@
-            @{
-                var ranked = _state.Standings;
-                var podium = ranked.Take(3).ToList();
-            }
-            @if (podium.Count > 0)
-            {
-                <div class="podium">
-                    @foreach (var p in podium)
-                    {
-                        <div class="pod @PodClass(p.Rank)">
-                            <div class="pod-cup">@Trophy(p.Rank)</div>
-                            <div class="pod-name">@p.Name</div>
-                            <div class="pod-stat">@p.Games @Loc.T("pod.games") • @p.Wins @Loc.T("pod.wins") • @p.Score @Loc.T("pod.pts")</div>
-                        </div>
-                    }
-                </div>
-            }
-            <div class="st-list">
-                @foreach (var s in ranked)
-                {
-                    <div class="st-card">
-                        <div class="st-head">
-                            <span class="st-ava">@Avatar(s.Name)</span>
-                            <span class="st-name">@s.Name @if (s.OnFire) { <span class="fire">🔥 @s.Streak</span> }</span>
-                            <span class="st-place">@(s.Rank) @Loc.T("st.place")</span>
-                            <span class="st-score">@s.Score</span>
-                        </div>
-                        @if (s.Results.Count > 0)
-                        {
-                            <div class="st-chips">
-                                @foreach (var r in s.Results)
-                                {
-                                    <span class="chip @ChipClass(r)">@r</span>
-                                }
-                            </div>
-                        }
-                    </div>
-                }
-            </div>
+    <aside class="t-side">
+        <div class="card score-rules">
+            <h3 class="card-title">@Loc.T("rules.title")</h3>
+            <div class="sr-sub">@Loc.T("rules.sub")</div>
+            <div class="sr-row"><span>@Loc.T("rules.win")</span><strong>+ 2</strong></div>
+            <div class="sr-row"><span>@Loc.T("rules.draw")</span><strong>+ 1</strong></div>
+            <div class="sr-row"><span>@Loc.T("rules.loss")</span><strong>0</strong></div>
+            <div class="sr-bonus"><span>@Loc.T("rules.streak")</span><strong>@Loc.T("rules.bonus")</strong></div>
         </div>
+    </aside>
+</div>
 
-        @* ----- Правая колонка: правила (на мобиле уезжает вниз страницы) ----- *@
-        <aside class="t-side">
-            <div class="card score-rules">
-                <h3 class="card-title">@Loc.T("rules.title")</h3>
-                <div class="sr-sub">@Loc.T("rules.sub")</div>
-                <div class="sr-row"><span>@Loc.T("rules.win")</span><strong>+ 2</strong></div>
-                <div class="sr-row"><span>@Loc.T("rules.draw")</span><strong>+ 1</strong></div>
-                <div class="sr-row"><span>@Loc.T("rules.loss")</span><strong>0</strong></div>
-                <div class="sr-bonus"><span>@Loc.T("rules.streak")</span><strong>@Loc.T("rules.bonus")</strong></div>
-            </div>
-        </aside>
-    </div>
-}
+<div id="t-root" data-id="@Id" data-authed="@(authed ? "1" : "0")" data-loginurl="/signin?returnUrl=/t/@Id"></div>
+<script id="t-loc" type="application/json">@((MarkupString)LocJson())</script>
+<script src="js/tournament.js"></script>
 
 @code {
     [Parameter] public string Id { get; set; } = "";
 
-    private bool _authenticated;
-    private string _sub = "", _name = "";
-    private ArenaStateDto? _state;
-    private DateTimeOffset _stateAt;
-    private PeriodicTimer? _clock;
-    private IDisposable? _subscription;
-
-    private IArenaTournamentGrain T => Grains.GetGrain<IArenaTournamentGrain>(Id);
-
-    private int HumanCount => _state is null ? 0 : Math.Max(0, _state.Standings.Count - _state.BotCount);
-
-    // Партии для трансляции, исключая собственную (она показана отдельной интерактивной доской).
-    private List<ArenaBoardDto> Broadcast() => _state is null
-        ? []
-        : _state.Boards.Where(b => _state.MyGame is null || b.GameId != _state.MyGame.GameId).ToList();
-
-    // Осталось до конца турнира (с локальной анимацией между обновлениями состояния).
-    private int Remaining() => _state is null ? 0
-        : Math.Max(0, _state.SecondsLeft - (int)(DateTimeOffset.UtcNow - _stateAt).TotalSeconds);
-
-    private RenderFragment ActionButton() => builder =>
+    // Локализованные строки + формы множественного числа для клиентского JS (на язык запроса).
+    private static string LocJson()
     {
-        // Кнопка действия в шапке: вход / запись / участие — в зависимости от статуса и авторизации.
-        string? label = null, css = "btn btn-join", badge = null;
-        Action? onClick = null;
-
-        if (!_authenticated && _state!.Status != TournamentStatus.Finished)
+        var l = new Dictionary<string, string>
         {
-            label = _state.Status == TournamentStatus.Created ? Loc.T("act.loginreg") : Loc.T("act.login");
-        }
-        else if (_state!.Status == TournamentStatus.Running && _authenticated)
-        {
-            if (_state.Joined) badge = Loc.T("act.injoined");
-            else { label = Loc.T("act.join"); onClick = () => _ = Join(); }
-        }
-        else if (_state.Status == TournamentStatus.Created && _authenticated)
-        {
-            if (_state.Joined) badge = Loc.T("act.registered");
-            else { label = Loc.T("act.register"); onClick = () => _ = Join(); }
-        }
-
-        if (badge is not null)
-        {
-            builder.OpenElement(0, "span");
-            builder.AddAttribute(1, "class", "badge badge-success t-badge");
-            builder.AddContent(2, badge);
-            builder.CloseElement();
-        }
-        else if (label is not null && onClick is not null)
-        {
-            builder.OpenElement(10, "button");
-            builder.AddAttribute(11, "class", css);
-            builder.AddAttribute(12, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, onClick));
-            builder.AddContent(13, label);
-            builder.CloseElement();
-        }
-        else if (label is not null)
-        {
-            builder.OpenElement(20, "a");
-            builder.AddAttribute(21, "class", css);
-            builder.AddAttribute(22, "href", $"/signin?returnUrl=/t/{Id}");
-            builder.AddContent(23, label);
-            builder.CloseElement();
-        }
-    };
-
-    protected override async Task OnInitializedAsync()
-    {
-        var user = (await AuthState.GetAuthenticationStateAsync()).User;
-        _authenticated = user.Identity?.IsAuthenticated == true;
-        if (_authenticated)
-        {
-            _sub = user.FindFirst("sub")?.Value ?? user.Identity!.Name ?? "anon";
-            _name = user.Identity!.Name ?? Loc.T("player.default");
-        }
-
-        await Refresh(); // состояние доступно и анонимам (просмотр результатов)
-
-        _subscription = Notifier.Subscribe(Id, () => _ = OnNotifiedAsync());
-        _ = AnimateClockAsync();
-    }
-
-    private async Task OnNotifiedAsync()
-    {
-        await Refresh();
-        await InvokeStateHasChangedLocalizedAsync(); // фоновый колбэк нотифаера — восстановить культуру
-    }
-
-    private async Task Refresh()
-    {
-        _state = await T.GetStateAsync(_sub);
-        _stateAt = DateTimeOffset.UtcNow;
-    }
-
-    private async Task AnimateClockAsync()
-    {
-        _clock = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
-        while (await _clock.WaitForNextTickAsync())
-            if (_state is { Status: TournamentStatus.Running }) // тикают часы партий и обратный отсчёт
-                await InvokeStateHasChangedLocalizedAsync();
-    }
-
-    private async Task Join() { await T.JoinAsync(_sub, _name); await Refresh(); await InvokeAsync(StateHasChanged); }
-
-    private async Task DoMove((string From, string To, string? Promotion) m)
-    {
-        await T.MoveAsync(_sub, new MoveInput(m.From, m.To, m.Promotion));
-        await Refresh();
-    }
-
-    private async Task Berserk() { await T.BerserkAsync(_sub); await Refresh(); }
-
-    private async Task Resign() { await T.ResignAsync(_sub); await Refresh(); }
-
-    private long EffMs(ArenaGameDto g, bool white)
-    {
-        long baseMs = white ? g.WhiteMs : g.BlackMs;
-        bool active = g.Status == GameStatus.InProgress &&
-            ((white && g.Turn == PieceColor.White) || (!white && g.Turn == PieceColor.Black));
-        if (!active) return baseMs;
-        return Math.Max(0, baseMs - (long)(DateTimeOffset.UtcNow - _stateAt).TotalMilliseconds);
-    }
-
-    private static string Mmss(long seconds)
-    {
-        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
-    }
-
-    private static string Hms(int seconds)
-    {
-        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return $"{(int)t.TotalHours:D2}:{t.Minutes:D2}:{t.Seconds:D2}";
-    }
-
-    private static string Trophy(int rank) => rank switch { 1 => "🥇", 2 => "🥈", 3 => "🥉", _ => rank.ToString() };
-    private static string PodClass(int rank) => rank switch { 1 => "gold", 2 => "silver", 3 => "bronze", _ => "" };
-
-    private static string ChipClass(int r) => r switch { >= 4 => "c-bonus", 2 => "c-win", 1 => "c-draw", _ => "c-loss" };
-
-    private static readonly string[] Avatars = ["👶", "🧑", "🧔", "🧓", "👩", "🧒", "👨", "👧"];
-    private static string Avatar(string name)
-    {
-        int h = 0;
-        foreach (var ch in name) h = (h * 31 + ch) & 0x7fffffff;
-        return Avatars[h % Avatars.Length];
-    }
-
-    private static string GResult(GameResult r, bool white) => r switch
-    {
-        GameResult.Draw => "½",
-        GameResult.WhiteWins => white ? "1" : "0",
-        GameResult.BlackWins => white ? "0" : "1",
-        _ => "—"
-    };
-
-    private static string ResultText(ArenaGameDto g) => g.Result switch
-    {
-        GameResult.WhiteWins => Loc.T("res.white"),
-        GameResult.BlackWins => Loc.T("res.black"),
-        GameResult.Draw => Loc.T("res.draw"),
-        _ => "—"
-    };
-
-    public ValueTask DisposeAsync()
-    {
-        _subscription?.Dispose();
-        _clock?.Dispose();
-        return ValueTask.CompletedTask;
+            ["loading"] = Loc.T("loading"),
+            ["finished"] = Loc.T("t.finished"),
+            ["soon"] = Loc.T("t.soon"),
+            ["minutes"] = Loc.T("t.minutes"),
+            ["control"] = Loc.T("t.control"),
+            ["endin"] = Loc.T("t.endin"),
+            ["start"] = Loc.T("t.start"),
+            ["loginreg"] = Loc.T("act.loginreg"),
+            ["login"] = Loc.T("act.login"),
+            ["join"] = Loc.T("act.join"),
+            ["injoined"] = Loc.T("act.injoined"),
+            ["register"] = Loc.T("act.register"),
+            ["registered"] = Loc.T("act.registered"),
+            ["search"] = Loc.T("waiting.search"),
+            ["score"] = Loc.T("waiting.score"),
+            ["yourmove"] = Loc.T("game.yourmove"),
+            ["oppmove"] = Loc.T("game.oppmove"),
+            ["waitnext"] = Loc.T("game.waitnext"),
+            ["berserktip"] = Loc.T("game.berserktip"),
+            ["resign"] = Loc.T("game.resign"),
+            ["games"] = Loc.T("sec.games"),
+            ["allgames"] = Loc.T("link.allgames"),
+            ["reswhite"] = Loc.T("res.white"),
+            ["resblack"] = Loc.T("res.black"),
+            ["resdraw"] = Loc.T("res.draw"),
+            ["place"] = Loc.T("st.place"),
+            ["podgames"] = Loc.T("pod.games"),
+            ["podwins"] = Loc.T("pod.wins"),
+            ["podpts"] = Loc.T("pod.pts"),
+            // Формы множественного числа «участник(а/ов)» — переиспользуем серверную логику Loc.Participants.
+            ["participant_one"] = Loc.Participants(1),
+            ["participant_few"] = Loc.Participants(2),
+            ["participant_many"] = Loc.Participants(5),
+        };
+        return System.Text.Json.JsonSerializer.Serialize(new { l, isEn = Loc.IsEn },
+            new System.Text.Json.JsonSerializerOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            });
     }
 }
 
@@ -456,6 +156,7 @@ else
     /* ----- Своя партия ----- */
     .my-game { margin-top: 1.2rem; }
     .my-game .players { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .75rem; font-size: 1.05rem; }
+    .my-game .board-wrap { position: relative; width: min(92vw, 448px); }
     .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
@@ -481,6 +182,26 @@ else
         .search-text .dots i { opacity: 1; }
     }
     .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm); }
+
+    /* ----- Доска (клиентский рендер: серверный Chessboard здесь не рендерится) ----- */
+    .board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md); }
+    .board .sq { position: relative; border: none; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .board.mini .sq { cursor: default; }
+    .sq.light { background: #ecd6b3; }
+    .sq.dark { background: #b58863; }
+    .sq.hl.light { background: #cdd279; }
+    .sq.hl.dark { background: #aaa23a; }
+    .sq.chk { background: radial-gradient(circle at center, #ff8a7a 0%, #d23b2e 80%); }
+    .sq.sel { outline: 3px solid var(--accent); outline-offset: -3px; }
+    .coord { position: absolute; font-size: clamp(8px, 2.2vw, 11px); font-weight: 700; line-height: 1; user-select: none; pointer-events: none; }
+    .coord.rank { top: 3px; left: 4px; }
+    .coord.file { bottom: 2px; right: 4px; }
+    .coord.on-light { color: #b58863; }
+    .coord.on-dark { color: #ecd6b3; }
+    .piece-img { width: 90%; height: 90%; display: block; }
+    .promo { position: absolute; top: 35%; left: 50%; transform: translateX(-50%); display: flex; gap: .25rem; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 2; }
+    .promo-btn { width: 48px; height: 48px; padding: 4px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; cursor: pointer; }
+    .promo-btn .cp { width: 100%; height: 100%; }
 
     /* ----- Таблица лидеров ----- */
     .podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.6rem 0 1.2rem; }
@@ -525,7 +246,6 @@ else
     }
 
     @@media (max-width: 560px) {
-        /* Шапка в столбик: превью-баннер на всю ширину, затем мета/заголовок и действия. */
         .t-hero { gap: .9rem; }
         .t-thumb { width: 100%; aspect-ratio: 16 / 7; }
         .t-title { font-size: 1.3rem; }
@@ -535,6 +255,5 @@ else
         .boards-grid { grid-template-columns: 1fr; }
         .sec-head { flex-wrap: wrap; gap: .3rem; }
         .crumbs { font-size: .85rem; }
-        .results { gap: 1rem; }
     }
 </style>

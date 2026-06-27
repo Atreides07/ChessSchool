@@ -39,5 +39,22 @@ public class WebTests
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Страница турнира Arena — статический SSR тонкого клиента (без Blazor-circuit): каркас + конфиг
+        // + клиентский скрипт; доступна анонимно (зрители). Проверяем, что миграция не сломала отдачу.
+        var arena = app.CreateHttpClient("arena");
+        await app.ResourceNotifications
+            .WaitForResourceAsync("arena", KnownResourceStates.Running, cancellationToken)
+            .WaitAsync(DefaultTimeout, cancellationToken);
+
+        var tournamentPage = await arena.GetAsync("/t/test-tournament", cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, tournamentPage.StatusCode);
+        var html = await tournamentPage.Content.ReadAsStringAsync(cancellationToken);
+        Assert.Contains("id=\"t-root\"", html);
+        Assert.Contains("js/tournament.js", html);
+
+        // Хаб турнира смапплен и доступен анонимно (зрители подключаются без входа).
+        var negotiate = await arena.PostAsync("/arenahub/negotiate?negotiateVersion=1", null, cancellationToken);
+        Assert.NotEqual(HttpStatusCode.NotFound, negotiate.StatusCode);
     }
 }

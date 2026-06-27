@@ -4,6 +4,7 @@ using ChessSchool.Auth.Data;
 using ChessSchool.Contracts;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -21,8 +22,41 @@ builder.AddServiceDefaults();
 builder.AddChessSchoolForwardedHeaders();
 
 // Локализация страницы входа RU/EN. Cookie языка живёт на хосте веб-приложения и не приходит на
-// отдельный домен IdP, поэтому язык определяется по Accept-Language (или ?culture=).
+// отдельный домен IdP, поэтому язык определяется по ui_locales (OIDC), затем Accept-Language/?culture.
 builder.AddChessSchoolLocalization();
+
+// Уважаем OIDC-параметр ui_locales (язык приложения): из запроса /connect/authorize или из ReturnUrl
+// (когда authorize редиректит на /account/login). Проверяется раньше прочих провайдеров.
+builder.Services.Configure<RequestLocalizationOptions>(o =>
+    o.RequestCultureProviders.Insert(0, new CustomRequestCultureProvider(ctx =>
+    {
+        static string? Pick(string? raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            foreach (var tag in raw.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var two = tag.Split('-')[0].ToLowerInvariant();
+                if (two is "ru" or "en") return two;
+            }
+            return null;
+        }
+
+        var q = ctx.Request.Query;
+        var c = Pick(q["ui_locales"]);
+        if (c is null)
+        {
+            var ret = q["ReturnUrl"].ToString();
+            if (string.IsNullOrEmpty(ret)) ret = q["return"].ToString();
+            var qi = ret.IndexOf('?');
+            if (qi >= 0)
+            {
+                var parsed = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(ret[qi..]);
+                if (parsed.TryGetValue("ui_locales", out var v)) c = Pick(v);
+                else if (parsed.TryGetValue("culture", out var cv)) c = Pick(cv);
+            }
+        }
+        return Task.FromResult<ProviderCultureResult?>(c is null ? null : new ProviderCultureResult(c));
+    })));
 
 // Общий DataProtection-keyring (Redis при наличии): cookie-сессия IdP расшифровывается любой нодой —
 // без этого при нескольких нодах IdP вход «прыгал» бы и логин ломался.

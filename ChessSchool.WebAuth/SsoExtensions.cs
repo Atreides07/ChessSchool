@@ -66,6 +66,12 @@ public static class SsoExtensions
             // для SignalR и обновлять его по refresh_token при истечении.
             o.Events = new OpenIdConnectEvents
             {
+                // Пробрасываем язык приложения на страницу входа IdP через стандартный OIDC-параметр ui_locales.
+                OnRedirectToIdentityProvider = ctx =>
+                {
+                    ctx.ProtocolMessage.UiLocales = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                    return Task.CompletedTask;
+                },
                 OnTokenValidated = ctx =>
                 {
                     var r = ctx.TokenEndpointResponse;

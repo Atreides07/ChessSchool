@@ -200,6 +200,46 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task FinishedGame_StaysForPlayerAndViewers_UntilSeekNext()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("linger-arena");
+            await t.ConfigureAsync("Хвост", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+
+            await t.JoinAsync("a", "Игрок A");
+            await t.JoinAsync("b", "Игрок B");
+            await t.SeekAsync("a");
+            await t.SeekAsync("b"); // спарились
+            var live = await t.GetStateAsync("a");
+            Assert.NotNull(live.MyGame);
+            var gameId = live.MyGame!.GameId;
+
+            // A сдаётся — партия завершена, но доска у A не исчезает и не запускается следующая.
+            await t.ResignAsync("a");
+            var afterResign = await t.GetStateAsync("a");
+            Assert.NotNull(afterResign.MyGame);
+            Assert.Equal(GameStatus.Finished, afterResign.MyGame!.Status);
+            Assert.False(afterResign.Seeking); // следующего соперника не ищем автоматически
+
+            // Спустя время дольше прежнего «хвоста» (6с) доска всё ещё на месте — её держит человек.
+            await Task.Delay(TimeSpan.FromSeconds(8));
+            var stillThere = await t.GetStateAsync("a");
+            Assert.NotNull(stillThere.MyGame);
+            Assert.Contains(await t.GetBoardsAsync(), x => x.GameId == gameId); // и в трансляции для зрителей
+
+            // A нажимает «подобрать соперника» → отцепляется от завершённой партии и входит в поиск.
+            await t.SeekAsync("a");
+            var seeking = await t.GetStateAsync("a");
+            Assert.Null(seeking.MyGame);
+            Assert.True(seeking.Seeking);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
     public async Task GetBoards_OnRunningArena_ReturnsActiveGames()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

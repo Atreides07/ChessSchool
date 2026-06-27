@@ -155,6 +155,9 @@ public sealed class ArenaTournamentGrain(
     private const int BotSkill = 5; // уровень Stockfish (0..20)
     // Сколько секунд человек ждёт соперника-человека, прежде чем к нему подключат бота.
     private const int WaitForBotSeconds = 10;
+    // Хвост показа завершённой партии БЕЗ живого участника (бот-vs-бот / человек уже ушёл): зрители
+    // успевают увидеть финал, потом партия убирается. Партию, которую смотрит человек, держим без таймера.
+    private const int FinishedLingerSeconds = 6;
     private int _botCounter;
 
     private static readonly string[] BotNames =
@@ -487,10 +490,18 @@ public sealed class ArenaTournamentGrain(
     {
         EnsureConfigured();
         if (Status() != TournamentStatus.Running) return; // искать соперника можно только в идущем турнире
-        if (_players.TryGetValue(sub, out var p) && !p.IsBot && !p.Playing && !p.Seeking)
+        if (_players.TryGetValue(sub, out var p) && !p.IsBot)
         {
-            p.Seeking = true;
-            p.WaitingSince = DateTimeOffset.UtcNow;
+            // Если игрок смотрел результат завершённой партии — отцепляем его (доска уезжает, а сама
+            // партия без живого участника позже убирается в Tick). От ИДУЩЕЙ партии «искать» нельзя.
+            bool inActiveGame = p.GameId is { } gid && _games.TryGetValue(gid, out var g)
+                && g.Status == GameStatus.InProgress;
+            if (!inActiveGame)
+            {
+                p.Playing = false;
+                p.GameId = null;
+                if (!p.Seeking) { p.Seeking = true; p.WaitingSince = DateTimeOffset.UtcNow; }
+            }
         }
         EnsureTimer();
         Tick();          // попытка мгновенного пейринга с другим ищущим
@@ -549,10 +560,10 @@ public sealed class ArenaTournamentGrain(
     /// <summary>Трансляция «идёт сейчас»: активные + только что завершённые партии (с финальным счётом).</summary>
     private IReadOnlyList<ArenaBoardDto> BuildBoards(int take)
     {
-        var now = DateTimeOffset.UtcNow;
+        // Завершённые партии показываем, пока они есть в _games (их срок жизни решает Tick: пока смотрит
+        // человек — без таймера; иначе короткий хвост для зрителей). Здесь по таймеру не отсекаем.
         return _games.Values
-            .Where(g => g.Status == GameStatus.InProgress
-                || (g.FinishedAt is { } f && (now - f).TotalSeconds <= 6))
+            .Where(g => g.Status == GameStatus.InProgress || g.FinishedAt is not null)
             .OrderByDescending(g => g.Status == GameStatus.InProgress)
             .ThenByDescending(g => ScoreOf(g.WhiteSub) + ScoreOf(g.BlackSub))
             .Take(take)
@@ -644,10 +655,17 @@ public sealed class ArenaTournamentGrain(
             if (DeductClock(g, g.Board.Turn)) FinishGame(g);
 
         var now = DateTimeOffset.UtcNow;
-        foreach (var g in _games.Values.Where(g => g.Status != GameStatus.InProgress
-            && g.FinishedAt is { } f && (now - f).TotalSeconds > 6).ToList())
+        foreach (var g in _games.Values.Where(g => g.Status != GameStatus.InProgress).ToList())
         {
-            foreach (var s in new[] { g.WhiteSub, g.BlackSub }) FreePlayer(s);
+            // Завершённую партию держим, пока её смотрит участник-человек: его доска не исчезает сама,
+            // только когда он нажмёт «подобрать соперника» (тогда он отцепится в SeekAsync). Партиям без
+            // живого участника (бот-vs-бот или человек уже ушёл) даём короткий хвост для зрителей, затем
+            // убираем — иначе _games рос бы без предела (горячий путь, неограниченная коллекция).
+            bool humanHolds = IsHumanHolding(g.WhiteSub, g.Id) || IsHumanHolding(g.BlackSub, g.Id);
+            if (humanHolds) continue;
+            if (g.FinishedAt is { } f && (now - f).TotalSeconds <= FinishedLingerSeconds) continue;
+            foreach (var s in new[] { g.WhiteSub, g.BlackSub })
+                if (_players.TryGetValue(s, out var pl) && pl.GameId == g.Id) FreePlayer(s);
             _games.Remove(g.Id);
         }
 
@@ -754,6 +772,10 @@ public sealed class ArenaTournamentGrain(
         var promo = uci.Length > 4 ? uci[4].ToString() : null;
         return g.Board.TryMove(from, to, promo);
     }
+
+    // Завершённую партию «держит» участник-человек, пока не ушёл из неё (не нажал «подобрать соперника»).
+    private bool IsHumanHolding(string sub, string gameId) =>
+        _players.TryGetValue(sub, out var p) && !p.IsBot && p.GameId == gameId;
 
     private void FreePlayer(string sub)
     {

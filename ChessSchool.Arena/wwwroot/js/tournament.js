@@ -240,7 +240,8 @@
         const fin = g.status === 2;
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
         const gstatus = fin
-            ? `<strong>${esc(resultText(g.result))}</strong> <span class="text-muted">${esc(L.waitnext)}</span>`
+            ? `<strong>${esc(resultText(g.result))}</strong><span class="ds-spacer"></span>
+               <button class="btn btn-join btn-sm" id="t-seek">${esc(L.seek)}</button>`
             : `<span class="text-secondary">${esc(g.turn === (g.myColor) ? L.yourmove : L.oppmove)}</span>
                <span class="ds-spacer"></span>
                ${g.myBerserkAvailable ? `<button class="btn btn-warn btn-sm" id="t-berserk" title="${esc(L.berserktip)}">⚡ Berserk</button>` : ''}

@@ -157,7 +157,6 @@ public static class Loc
         ["t.start"] = ("Старт:", "Start:"),
         ["waiting.search"] = ("Ищем соперника", "Looking for an opponent"),
         ["waiting.score"] = ("Ваши очки:", "Your score:"),
-        ["game.waitnext"] = ("— ждём следующего соперника…", "— waiting for the next opponent…"),
         ["game.yourmove"] = ("Ваш ход", "Your move"),
         ["game.oppmove"] = ("Ход соперника — можно сделать предход", "Opponent's move — you can premove"),
         ["game.berserktip"] = ("Время пополам, без инкремента, +1 очко за победу", "Half the time, no increment, +1 point for a win"),

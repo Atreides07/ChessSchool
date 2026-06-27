@@ -1,6 +1,28 @@
-﻿<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        @* AuthorizeRouteView включает enforcement [Authorize] на страницах (напр. админка /admin). *@
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @if (context.User.Identity?.IsAuthenticated != true)
+                {
+                    @* Аноним → на единый вход, с возвратом на запрошенную страницу. *@
+                    Nav.NavigateTo($"/signin?returnUrl={Uri.EscapeDataString(new Uri(Nav.Uri).PathAndQuery)}", forceLoad: true);
+                }
+                else
+                {
+                    <LayoutView Layout="typeof(Layout.MainLayout)">
+                        <div class="ar-denied">
+                            <h1>@(Loc.IsEn ? "Access denied" : "Доступ запрещён")</h1>
+                            <p>@(Loc.IsEn ? "This section is for administrators only." : "Этот раздел доступен только администраторам.")</p>
+                            <a class="btn btn-primary btn-sm" href="/">@(Loc.IsEn ? "Home" : "На главную")</a>
+                        </div>
+                    </LayoutView>
+                }
+            </NotAuthorized>
+        </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>

@@ -1,0 +1,229 @@
+@page "/admin/broadcasts/new"
+@page "/admin/broadcasts/{Slug}/edit"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@attribute [Authorize(Policy = "Admin")]
+@inject BroadcastsCatalog Catalog
+@inject NavigationManager Nav
+
+<PageTitle>@(IsNew ? Loc.T("admin.bc.create") : Loc.T("admin.bc.edit")) — @Loc.T("admin.title")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-bar">
+    <div>
+        <a class="adm-back" href="admin/broadcasts">@Loc.T("admin.back")</a>
+        <h1 class="adm-h1">@(IsNew ? Loc.T("admin.bc.create") : Loc.T("admin.bc.edit"))</h1>
+    </div>
+</div>
+
+@if (_model is null)
+{
+    <p class="adm-muted">@Loc.T("detail.notfound")</p>
+}
+else
+{
+    <div class="adm-form-grid">
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="adm-form">
+            @if (_error is not null)
+            {
+                <div class="adm-error" role="alert">@_error</div>
+            }
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.name")</span>
+                <InputText class="adm-in" @bind-Value="_model.Name" />
+            </label>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.slug")</span>
+                <InputText class="adm-in" @bind-Value="_model.Slug" disabled="@(!IsNew)" />
+                <span class="adm-hint">@Loc.T("admin.f.slug.hint")</span>
+            </label>
+
+            <div class="adm-two">
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.series")</span>
+                    <InputText class="adm-in" @bind-Value="_model.Series" />
+                </label>
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.seriescls")</span>
+                    <InputSelect class="adm-in" @bind-Value="_model.SeriesCls">
+                        <option value="gct">Grand Chess Tour (синий)</option>
+                        <option value="cls">Классика (серый)</option>
+                        <option value="wom">Женский (розовый)</option>
+                    </InputSelect>
+                </label>
+            </div>
+
+            <div class="adm-two">
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.start")</span>
+                    <InputDate class="adm-in" @bind-Value="_model.Start" />
+                </label>
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.end")</span>
+                    <InputDate class="adm-in" @bind-Value="_model.End" />
+                </label>
+            </div>
+
+            <div class="adm-two">
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.city")</span>
+                    <InputText class="adm-in" @bind-Value="_model.City" />
+                </label>
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.country")</span>
+                    <InputText class="adm-in" @bind-Value="_model.Country" />
+                </label>
+            </div>
+
+            <div class="adm-two">
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.flag")</span>
+                    <InputText class="adm-in" @bind-Value="_model.Flag" />
+                </label>
+                <label class="adm-field">
+                    <span class="adm-lbl">@Loc.T("admin.f.format")</span>
+                    <InputText class="adm-in" @bind-Value="_model.Format" />
+                </label>
+            </div>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.url")</span>
+                <InputText class="adm-in" @bind-Value="_model.Url" />
+            </label>
+
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.image")</span>
+                <InputText class="adm-in" @bind-Value="_model.ImageUrl" @bind-Value:event="oninput" />
+                <span class="adm-hint">@Loc.T("admin.f.image.hint")</span>
+            </label>
+
+            <label class="adm-check">
+                <InputCheckbox @bind-Value="_model.Visible" />
+                <span>@Loc.T("admin.f.visible")</span>
+            </label>
+
+            <div class="adm-form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">@Loc.T("admin.save")</button>
+                <a class="adm-btn" href="admin/broadcasts">@Loc.T("admin.cancel")</a>
+            </div>
+        </EditForm>
+
+        <div class="adm-preview">
+            <span class="adm-lbl">@Loc.T("admin.preview")</span>
+            <article class="mj-card">
+                <div class="mj-banner @_model.SeriesCls">
+                    @if (!string.IsNullOrWhiteSpace(_model.ImageUrl))
+                    {
+                        <img class="mj-img" src="@_model.ImageUrl" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+                    }
+                    <span class="mj-series @_model.SeriesCls">@(_model.Series is { Length: > 0 } ? _model.Series : "Серия")</span>
+                </div>
+                <div class="mj-body">
+                    <h2 class="mj-name">@(_model.Name is { Length: > 0 } ? _model.Name : "Название трансляции")</h2>
+                    <div class="mj-meta">
+                        <span class="mj-date">@BroadcastFormat.DateRange(_model.Start, _model.End)</span>
+                        <span class="mj-dot">·</span>
+                        <span class="mj-place">@_model.Flag @_model.City, @_model.Country</span>
+                    </div>
+                </div>
+            </article>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Slug { get; set; }
+
+    private Broadcast? _model;
+    private string? _error;
+    private bool IsNew => Slug is null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            _model = new Broadcast { SeriesCls = "cls", Start = today, End = today, Visible = true };
+        }
+        else
+        {
+            _model = (await Catalog.BySlugAsync(Slug!))?.Clone()
+                ?? (await Catalog.AllFreshAsync()).FirstOrDefault(b => b.Slug == Slug)?.Clone();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null) return;
+        _error = null;
+
+        _model.Name = _model.Name?.Trim() ?? "";
+        if (_model.Name.Length == 0) { _error = Loc.T("admin.err.name"); return; }
+
+        // На создании пустой slug — генерируем из названия.
+        if (IsNew && string.IsNullOrWhiteSpace(_model.Slug))
+            _model.Slug = BroadcastFormat.Slugify(_model.Name);
+        _model.Slug = _model.Slug.Trim();
+        if (!BroadcastFormat.IsValidSlug(_model.Slug)) { _error = Loc.T("admin.err.slug"); return; }
+
+        if (_model.End < _model.Start) { _error = Loc.T("admin.err.dates"); return; }
+
+        if (IsNew && await Catalog.BySlugAsync(_model.Slug) is not null)
+        {
+            _error = Loc.T("admin.err.slug.exists");
+            return;
+        }
+
+        await Catalog.UpsertAsync(_model);
+        Nav.NavigateTo("admin/broadcasts");
+    }
+}
+
+<style>
+    .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.3rem; flex-wrap: wrap; }
+    .adm-back { font-size: .9rem; color: var(--ink-2); font-weight: 600; }
+    .adm-back:hover { color: var(--accent); }
+    .adm-h1 { font-size: 1.7rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }
+    .adm-muted { color: var(--ink-2); }
+
+    .adm-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 1.6rem; align-items: start; }
+    .adm-form { display: flex; flex-direction: column; gap: .9rem; max-width: 560px; }
+    .adm-field { display: flex; flex-direction: column; gap: .3rem; }
+    .adm-two { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+    .adm-lbl { font-size: .8rem; font-weight: 700; color: var(--ink-2); }
+    .adm-in { width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font-size: .92rem; }
+    .adm-in:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
+    .adm-in:disabled { background: var(--surface-2); color: var(--muted); }
+    .adm-hint { font-size: .78rem; color: var(--muted); }
+    .adm-check { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink); font-weight: 560; }
+    .adm-form-actions { display: flex; align-items: center; gap: .8rem; margin-top: .4rem; }
+    .adm-btn { font-size: .9rem; font-weight: 600; padding: .45rem .8rem; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; text-decoration: none; }
+    .adm-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .adm-error { background: #fdecea; color: #c0392b; border: 1px solid color-mix(in srgb, #c0392b 30%, var(--line)); border-radius: var(--r-md); padding: .6rem .8rem; font-size: .9rem; }
+
+    .adm-preview { position: sticky; top: 84px; display: flex; flex-direction: column; gap: .5rem; }
+    .adm-preview .mj-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .adm-preview .mj-banner { position: relative; aspect-ratio: 16 / 7; width: 100%; overflow: hidden; padding: .7rem .8rem; display: flex; align-items: flex-start; }
+    .adm-preview .mj-banner.gct { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), var(--surface)); }
+    .adm-preview .mj-banner.cls { background: linear-gradient(135deg, var(--surface-2), var(--surface)); }
+    .adm-preview .mj-banner.wom { background: linear-gradient(135deg, #fbe6f1, var(--surface)); }
+    .adm-preview .mj-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+    .adm-preview .mj-series { position: relative; z-index: 2; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .2rem .5rem; border-radius: var(--r-pill); }
+    .adm-preview .mj-series.gct { background: color-mix(in srgb, var(--accent) 14%, white); color: var(--accent); }
+    .adm-preview .mj-series.cls { background: white; color: var(--ink-2); }
+    .adm-preview .mj-series.wom { background: #fbe6f1; color: #b5277e; }
+    .adm-preview .mj-body { padding: 1rem 1.15rem 1.1rem; display: flex; flex-direction: column; gap: .55rem; }
+    .adm-preview .mj-name { font-size: 1.12rem; font-weight: 720; margin: 0; color: var(--ink); }
+    .adm-preview .mj-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; color: var(--ink-2); font-size: .92rem; }
+    .adm-preview .mj-date { font-weight: 640; color: var(--ink); }
+    .adm-preview .mj-dot { color: var(--muted); }
+
+    @@media (max-width: 860px) {
+        .adm-form-grid { grid-template-columns: 1fr; }
+        .adm-preview { position: static; }
+    }
+</style>

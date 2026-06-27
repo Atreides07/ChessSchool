@@ -1,0 +1,175 @@
+@page "/broadcasts"
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@inject NavigationManager Nav
+@inject BroadcastsCatalog Catalog
+
+@* Трансляции шахматных событий. Статический SSR, публичная контентная страница — оптимизирована под
+   SEO (meta/canonical/OpenGraph + schema.org ItemList/Event/BreadcrumbList). Каждая карточка ведёт на
+   отдельную индексируемую страницу /broadcasts/{slug}. Контент управляется из админки (каталог в грейне).
+   Фон карточки — lazy/async <img> с фиксированным aspect-ratio: медленная или упавшая картинка не
+   блокирует рендер и не влияет на индексируемый контент (он весь в SSR-HTML). *@
+
+<PageTitle>@Loc.T("bc.pagetitle")</PageTitle>
+
+<HeadContent>
+    <meta name="description" content="@MetaDescription" />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="@Canonical" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="@Loc.T("bc.title")" />
+    <meta property="og:description" content="@MetaDescription" />
+    <meta property="og:url" content="@Canonical" />
+    <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">@((MarkupString)JsonLd())</script>
+</HeadContent>
+
+<div class="mj-head">
+    <h1 class="mj-title">@Loc.T("bc.title")</h1>
+    <p class="mj-sub">@Loc.T("bc.sub")</p>
+</div>
+
+@if (_items.Count == 0)
+{
+    <p class="mj-empty">@Loc.T("bc.empty")</p>
+}
+else
+{
+    <div class="mj-grid">
+        @foreach (var t in _items)
+        {
+            var st = BroadcastFormat.Status(t);
+            <article class="mj-card @st.Cls">
+                <div class="mj-banner @t.SeriesCls">
+                    @if (!string.IsNullOrWhiteSpace(t.ImageUrl))
+                    {
+                        <img class="mj-img" src="@t.ImageUrl" alt="" aria-hidden="true"
+                             loading="lazy" decoding="async" fetchpriority="low" />
+                    }
+                    <span class="mj-series @t.SeriesCls">@Loc.Tr(t.Series)</span>
+                    <span class="mj-status @st.Cls">@Loc.StatusLabel(st.Kind, st.Days)</span>
+                </div>
+                <div class="mj-body">
+                    <h2 class="mj-name"><a class="mj-namelink" href="broadcasts/@t.Slug">@t.Name</a></h2>
+                    <div class="mj-meta">
+                        <span class="mj-date">@BroadcastFormat.DateRange(t.Start, t.End)</span>
+                        <span class="mj-dot">·</span>
+                        <span class="mj-place">@t.Flag @Loc.Tr(t.City), @Loc.Tr(t.Country)</span>
+                    </div>
+                    <div class="mj-foot">
+                        <span class="mj-format">@Loc.Tr(t.Format)</span>
+                        <a class="mj-link" href="broadcasts/@t.Slug">@Loc.T("bc.more")</a>
+                    </div>
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<Broadcast> _items = [];
+
+    protected override async Task OnInitializedAsync() => _items = await Catalog.PublicAsync();
+
+    private string Canonical => $"{Nav.BaseUri}broadcasts";
+
+    private string MetaDescription =>
+        $"{Loc.T("bc.metaprefix")} {string.Join(", ", _items.Take(4).Select(t => t.Name))} {Loc.T("bc.metasuffix")}";
+
+    // schema.org: ItemList из Event-ов (url → внутренние детальные страницы) + BreadcrumbList.
+    private string JsonLd()
+    {
+        var items = _items.Select((t, i) => (object)new Dictionary<string, object?>
+        {
+            ["@type"] = "ListItem",
+            ["position"] = i + 1,
+            ["item"] = new Dictionary<string, object?>
+            {
+                ["@type"] = "Event",
+                ["name"] = t.Name,
+                ["startDate"] = t.Start.ToString("yyyy-MM-dd"),
+                ["endDate"] = t.End.ToString("yyyy-MM-dd"),
+                ["eventAttendanceMode"] = "https://schema.org/OnlineEventAttendanceMode",
+                ["location"] = new Dictionary<string, object?> { ["@type"] = "Place", ["name"] = $"{t.City}, {t.Country}" },
+                ["url"] = $"{Nav.BaseUri}broadcasts/{t.Slug}",
+            },
+        }).ToList();
+
+        var graph = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["@context"] = "https://schema.org", ["@type"] = "ItemList",
+                ["name"] = Loc.IsEn ? "Chess broadcasts" : "Шахматные трансляции", ["itemListElement"] = items,
+            },
+            new Dictionary<string, object?>
+            {
+                ["@context"] = "https://schema.org", ["@type"] = "BreadcrumbList",
+                ["itemListElement"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 1, ["name"] = Loc.T("crumb.home"), ["item"] = Nav.BaseUri },
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 2, ["name"] = Loc.T("crumb.broadcasts"), ["item"] = Canonical },
+                },
+            },
+        };
+        return System.Text.Json.JsonSerializer.Serialize(graph, new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+    }
+}
+
+<style>
+    .mj-head { margin-bottom: 1.4rem; }
+    .mj-title { font-size: 1.9rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: 0 0 .35rem; }
+    .mj-sub { color: var(--ink-2); margin: 0; }
+    .mj-empty { color: var(--ink-2); }
+
+    .mj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+
+    .mj-card {
+        background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+        box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden;
+        transition: box-shadow .15s ease, transform .15s ease;
+    }
+    .mj-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .mj-card.live { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+    /* Баннер с фиксированным aspect-ratio: layout не «прыгает» при ленивой подгрузке картинки (нет CLS).
+       До/без изображения виден тонированный по серии градиент-заглушка. Чипы — поверх лёгкого скрима. */
+    .mj-banner { position: relative; aspect-ratio: 16 / 7; width: 100%; overflow: hidden; padding: .7rem .8rem;
+                 display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+    .mj-banner.gct { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), var(--surface)); }
+    .mj-banner.cls { background: linear-gradient(135deg, var(--surface-2), var(--surface)); }
+    .mj-banner.wom { background: linear-gradient(135deg, #fbe6f1, var(--surface)); }
+    .mj-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+    /* Скрим только под чипами (верх), чтобы они читались на любой картинке; основная часть фото открыта. */
+    .mj-banner::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 56px; z-index: 1;
+        background: linear-gradient(180deg, rgba(0,0,0,.32), transparent); }
+    .mj-banner > .mj-series, .mj-banner > .mj-status { position: relative; z-index: 2; }
+
+    .mj-body { padding: 1rem 1.15rem 1.1rem; display: flex; flex-direction: column; gap: .55rem; }
+
+    .mj-series { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .2rem .5rem; border-radius: var(--r-pill); }
+    .mj-series.gct { background: color-mix(in srgb, var(--accent) 14%, white); color: var(--accent); }
+    .mj-series.cls { background: white; color: var(--ink-2); }
+    .mj-series.wom { background: #fbe6f1; color: #b5277e; }
+
+    .mj-status { font-size: .74rem; font-weight: 700; padding: .2rem .5rem; border-radius: var(--r-pill); }
+    .mj-status.live { background: #ffe3e0; color: #d23b2e; }
+    .mj-status.soon { background: #e7f4e9; color: #2e8b57; }
+    .mj-status.later, .mj-status.done { background: white; color: var(--muted); }
+
+    .mj-name { font-size: 1.12rem; font-weight: 720; margin: 0; line-height: 1.25; }
+    .mj-namelink { color: var(--ink); }
+    .mj-namelink:hover { color: var(--accent); }
+    .mj-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; color: var(--ink-2); font-size: .92rem; }
+    .mj-date { font-weight: 640; color: var(--ink); }
+    .mj-dot { color: var(--muted); }
+
+    .mj-foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .25rem; padding-top: .7rem; border-top: 1px solid var(--line); }
+    .mj-format { font-size: .82rem; color: var(--muted); }
+    .mj-link { font-size: .88rem; font-weight: 640; color: var(--accent); }
+    .mj-link:hover { text-decoration: underline; }
+</style>

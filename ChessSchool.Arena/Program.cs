@@ -55,6 +55,25 @@ if (redisConn is not null) builder.Services.AddHealthChecks().AddRedis(redisConn
 // Внутрипроцессный pub/sub для push-обновлений турниров (грейн → компоненты).
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();
 
+// Каталог трансляций: источник истины — грейн (Redis grain storage), на ноде — кэш с TTL поверх него.
+builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();
+
+// Авторизация админки (/admin): доступ только у e-mail из конфигурации Admin:Emails (через запятую).
+// В Development при пустом списке админом считается любой аутентифицированный пользователь (удобство dev);
+// вне Development пустой список = доступ закрыт всем (безопасный дефолт production-ready).
+var adminEmails = (builder.Configuration["Admin:Emails"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+var adminFallbackAny = builder.Environment.IsDevelopment();
+builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy =>
+    policy.RequireAssertion(ctx =>
+    {
+        if (ctx.User.Identity?.IsAuthenticated != true) return false;
+        if (adminEmails.Length == 0) return adminFallbackAny;
+        var email = ctx.User.FindFirst("email")?.Value
+            ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+        return email is not null && adminEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
+    }));
+
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();
 
@@ -93,19 +112,24 @@ app.MapGet("/robots.txt", (HttpRequest r) =>
 {
     var b = $"{r.Scheme}://{r.Host}";
     return Results.Text(
-        $"User-agent: *\nAllow: /\nDisallow: /signin\nDisallow: /signout\nSitemap: {b}/sitemap.xml\n",
+        $"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /signin\nDisallow: /signout\nSitemap: {b}/sitemap.xml\n",
         "text/plain");
 });
-app.MapGet("/sitemap.xml", (HttpRequest r) =>
+app.MapGet("/sitemap.xml", async (HttpRequest r, ChessSchool.Arena.Services.BroadcastsCatalog catalog) =>
 {
     var b = $"{r.Scheme}://{r.Host}";
-    var paths = new List<string> { "", "majors" };
-    paths.AddRange(ChessSchool.Arena.ArenaMajors.All.Select(m => $"majors/{m.Slug}"));
+    var paths = new List<string> { "", "broadcasts" };
+    // Только видимые трансляции — скрытые не должны попадать в индекс.
+    paths.AddRange((await catalog.PublicAsync()).Select(m => $"broadcasts/{m.Slug}"));
     var locs = string.Join("\n", paths.Select(u => $"  <url><loc>{b}/{u}</loc></url>"));
     return Results.Text(
         $"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n{locs}\n</urlset>\n",
         "application/xml");
 });
+
+// Раздел переименован «Турниры» → «Трансляции»: старые пути 301-редиректятся на /broadcasts (без битых ссылок).
+app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
+app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

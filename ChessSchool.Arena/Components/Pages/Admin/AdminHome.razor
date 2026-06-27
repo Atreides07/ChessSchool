@@ -1,0 +1,42 @@
+@page "/admin"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Policy = "Admin")]
+
+@* Главная админки. Закрытый раздел — не индексируется (см. robots Disallow: /admin + noindex). *@
+
+<PageTitle>@Loc.T("admin.title") — ChessArena</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-head">
+    <h1 class="adm-h1">@Loc.T("admin.title")</h1>
+    <p class="adm-sub">@Loc.T("admin.sub")</p>
+</div>
+
+<div class="adm-cards">
+    <a class="adm-tile" href="admin/broadcasts">
+        <span class="adm-tile-ic">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5" /><path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7" /></svg>
+        </span>
+        <span class="adm-tile-t">@Loc.T("admin.section.broadcasts")</span>
+        <span class="adm-tile-d">@Loc.T("admin.section.broadcasts.desc")</span>
+    </a>
+</div>
+
+<style>
+    .adm-head { margin-bottom: 1.4rem; }
+    .adm-h1 { font-size: 1.9rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: 0 0 .35rem; }
+    .adm-sub { color: var(--ink-2); margin: 0; }
+    .adm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+    .adm-tile { display: flex; flex-direction: column; gap: .4rem; padding: 1.2rem 1.25rem; background: var(--surface);
+                border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+                transition: box-shadow .15s ease, transform .15s ease; }
+    .adm-tile:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .adm-tile-ic { width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--r-md);
+                   background: color-mix(in srgb, var(--accent) 12%, transparent); margin-bottom: .3rem; }
+    .adm-tile-ic svg { width: 22px; height: 22px; stroke: var(--accent); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .adm-tile-t { font-size: 1.1rem; font-weight: 720; color: var(--ink); }
+    .adm-tile-d { font-size: .9rem; color: var(--ink-2); }
+    .ar-denied { padding: 2rem 0; }
+    .ar-denied h1 { font-size: 1.6rem; font-weight: 760; color: var(--ink); margin: 0 0 .5rem; }
+    .ar-denied p { color: var(--ink-2); margin: 0 0 1rem; }
+</style>

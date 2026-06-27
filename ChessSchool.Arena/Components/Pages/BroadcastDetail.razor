@@ -1,0 +1,170 @@
+@page "/broadcasts/{Slug}"
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@inject NavigationManager Nav
+@inject IHttpContextAccessor Http
+@inject BroadcastsCatalog Catalog
+
+@* Отдельная индексируемая страница трансляции: свой URL, мета, schema.org Event + BreadcrumbList. Локализована. *@
+
+@if (_t is null)
+{
+    <PageTitle>@(Loc.IsEn ? "Broadcast not found" : "Трансляция не найдена") — ChessArena</PageTitle>
+    <HeadContent><meta name="robots" content="noindex" /></HeadContent>
+    <div class="md-wrap">
+        <p class="md-404">@Loc.T("detail.notfound")</p>
+        <a class="md-back" href="broadcasts">@Loc.T("detail.all")</a>
+    </div>
+}
+else
+{
+    var t = _t;
+    var st = BroadcastFormat.Status(t);
+    var ogImage = string.IsNullOrWhiteSpace(t.ImageUrl) ? $"{Nav.BaseUri}og-image.png" : t.ImageUrl;
+    <PageTitle>@t.Name — @(Loc.IsEn ? "dates & venue" : "даты и место") | ChessArena</PageTitle>
+    <HeadContent>
+        <meta name="description" content="@MetaDescription(t)" />
+        <meta name="robots" content="index,follow" />
+        <link rel="canonical" href="@Canonical(t)" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="@($"{t.Name} — {Loc.Tr(t.Series)}")" />
+        <meta property="og:description" content="@MetaDescription(t)" />
+        <meta property="og:url" content="@Canonical(t)" />
+        <meta property="og:image" content="@ogImage" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">@((MarkupString)JsonLd(t))</script>
+    </HeadContent>
+
+    <nav class="md-crumbs" aria-label="breadcrumb">
+        <a href="">@Loc.T("crumb.home")</a><span>›</span>
+        <a href="broadcasts">@Loc.T("crumb.broadcasts")</a><span>›</span>
+        <span class="md-cur">@t.Name</span>
+    </nav>
+
+    <article class="md-card @st.Cls">
+        @if (!string.IsNullOrWhiteSpace(t.ImageUrl))
+        {
+            <div class="md-hero @t.SeriesCls">
+                <img class="md-img" src="@t.ImageUrl" alt="" aria-hidden="true"
+                     loading="lazy" decoding="async" fetchpriority="low" />
+            </div>
+        }
+        <div class="md-pad">
+            <div class="md-row">
+                <span class="mj-series @t.SeriesCls">@Loc.Tr(t.Series)</span>
+                <span class="mj-status @st.Cls">@Loc.StatusLabel(st.Kind, st.Days)</span>
+            </div>
+            <h1 class="md-title">@t.Name</h1>
+            <dl class="md-facts">
+                <div><dt>@Loc.T("detail.dates")</dt><dd>@BroadcastFormat.LongDate(t.Start) – @BroadcastFormat.LongDate(t.End)</dd></div>
+                <div><dt>@Loc.T("detail.place")</dt><dd>@t.Flag @Loc.Tr(t.City), @Loc.Tr(t.Country)</dd></div>
+                <div><dt>@Loc.T("detail.format")</dt><dd>@Loc.Tr(t.Format)</dd></div>
+                <div><dt>@Loc.T("detail.series")</dt><dd>@Loc.Tr(t.Series)</dd></div>
+            </dl>
+            <div class="md-actions">
+                @if (!string.IsNullOrWhiteSpace(t.Url))
+                {
+                    <a class="btn btn-primary btn-sm" href="@t.Url" target="_blank" rel="noopener noreferrer">@Loc.T("detail.site")</a>
+                }
+                <a class="md-back" href="broadcasts">@Loc.T("detail.all")</a>
+            </div>
+        </div>
+    </article>
+}
+
+@code {
+    [Parameter] public string Slug { get; set; } = "";
+
+    private Broadcast? _t;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _t = await Catalog.BySlugAsync(Slug);
+        // Скрытая трансляция не должна индексироваться/открываться по прямой ссылке как контент.
+        if (_t is { Visible: false }) _t = null;
+        if (_t is null && Http.HttpContext is { } ctx && !ctx.Response.HasStarted)
+            ctx.Response.StatusCode = 404;
+    }
+
+    private string Canonical(Broadcast t) => $"{Nav.BaseUri}broadcasts/{t.Slug}";
+
+    private string MetaDescription(Broadcast t)
+    {
+        var dates = $"{BroadcastFormat.LongDate(t.Start)} – {BroadcastFormat.LongDate(t.End)}";
+        var place = $"{Loc.Tr(t.City)}, {Loc.Tr(t.Country)}";
+        return Loc.IsEn
+            ? $"{t.Name} ({Loc.Tr(t.Series)}): {dates}, {place}. Format: {Loc.Tr(t.Format)}."
+            : $"{t.Name} ({Loc.Tr(t.Series)}): {dates}, {place}. Формат: {Loc.Tr(t.Format)}.";
+    }
+
+    private string JsonLd(Broadcast t)
+    {
+        var graph = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["@context"] = "https://schema.org", ["@type"] = "Event",
+                ["name"] = t.Name,
+                ["startDate"] = t.Start.ToString("yyyy-MM-dd"),
+                ["endDate"] = t.End.ToString("yyyy-MM-dd"),
+                ["eventAttendanceMode"] = "https://schema.org/OfflineEventAttendanceMode",
+                ["eventStatus"] = "https://schema.org/EventScheduled",
+                ["location"] = new Dictionary<string, object?>
+                {
+                    ["@type"] = "Place",
+                    ["name"] = $"{Loc.Tr(t.City)}, {Loc.Tr(t.Country)}",
+                    ["address"] = $"{Loc.Tr(t.City)}, {Loc.Tr(t.Country)}",
+                },
+                ["url"] = Canonical(t),
+                ["image"] = string.IsNullOrWhiteSpace(t.ImageUrl) ? $"{Nav.BaseUri}og-image.png" : t.ImageUrl,
+            },
+            new Dictionary<string, object?>
+            {
+                ["@context"] = "https://schema.org", ["@type"] = "BreadcrumbList",
+                ["itemListElement"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 1, ["name"] = Loc.T("crumb.home"), ["item"] = Nav.BaseUri },
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 2, ["name"] = Loc.T("crumb.broadcasts"), ["item"] = $"{Nav.BaseUri}broadcasts" },
+                    new Dictionary<string, object?> { ["@type"] = "ListItem", ["position"] = 3, ["name"] = t.Name, ["item"] = Canonical(t) },
+                },
+            },
+        };
+        return System.Text.Json.JsonSerializer.Serialize(graph, new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+    }
+}
+
+<style>
+    .md-wrap { padding: 1rem 0; }
+    .md-404 { color: var(--ink-2); }
+    .md-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; font-size: .9rem; color: var(--ink-2); margin-bottom: 1.1rem; }
+    .md-crumbs a { color: var(--ink-2); font-weight: 600; }
+    .md-crumbs a:hover { color: var(--accent); }
+    .md-crumbs span { color: var(--muted); }
+    .md-crumbs .md-cur { color: var(--ink); font-weight: 600; }
+
+    .md-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); max-width: 640px; overflow: hidden; }
+    .md-card.live { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+    /* Геро-изображение: фиксированный aspect-ratio (нет CLS), lazy/async — не блокирует контент. */
+    .md-hero { position: relative; aspect-ratio: 16 / 6; width: 100%; overflow: hidden; }
+    .md-hero.gct { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), var(--surface)); }
+    .md-hero.cls { background: linear-gradient(135deg, var(--surface-2), var(--surface)); }
+    .md-hero.wom { background: linear-gradient(135deg, #fbe6f1, var(--surface)); }
+    .md-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    .md-pad { padding: 1.4rem 1.5rem; }
+    .md-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; }
+    .md-title { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; color: var(--ink); margin: 0 0 1rem; line-height: 1.2; }
+
+    .md-facts { display: grid; grid-template-columns: 1fr; gap: .55rem; margin: 0 0 1.2rem; }
+    .md-facts > div { display: flex; gap: .8rem; }
+    .md-facts dt { width: 86px; flex: none; color: var(--muted); font-size: .9rem; }
+    .md-facts dd { margin: 0; color: var(--ink); font-weight: 600; }
+
+    .md-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .md-back { color: var(--ink-2); font-weight: 600; font-size: .92rem; }
+    .md-back:hover { color: var(--accent); }
+</style>

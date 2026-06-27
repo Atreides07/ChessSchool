@@ -77,6 +77,20 @@ builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy =>
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();
 
+// Хранилище фоновых изображений трансляций: S3 (реальный в проде, MinIO локально) при наличии конфига
+// Storage:S3, иначе заглушка (загрузка недоступна, но поле URL остаётся рабочим). Бакет приватный —
+// файлы отдаются через собственный эндпоинт /media (нет mixed-content и публичной экспозиции бакета).
+var s3Options = builder.Configuration.GetSection("Storage:S3").Get<ChessSchool.Arena.Services.S3Options>() ?? new();
+if (s3Options.IsConfigured)
+{
+    builder.Services.AddSingleton(s3Options);
+    builder.Services.AddSingleton<ChessSchool.Arena.Services.IImageStorage, ChessSchool.Arena.Services.S3ImageStorage>();
+}
+else
+{
+    builder.Services.AddSingleton<ChessSchool.Arena.Services.IImageStorage, ChessSchool.Arena.Services.NullImageStorage>();
+}
+
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();
 
@@ -130,6 +144,18 @@ app.MapGet("/sitemap.xml", async (HttpRequest r, ChessSchool.Arena.Services.Broa
 // Раздел переименован «Турниры» → «Трансляции»: старые пути 301-редиректятся на /broadcasts (без битых ссылок).
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
 app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));
+
+// Отдача загруженных фонов из приватного бакета S3 (нет mixed-content и публичной экспозиции).
+// Ключ иммутабелен (guid) → агрессивное кэширование браузером/CDN снимает нагрузку с приложения.
+app.MapGet("/media/broadcasts/{key}", async (string key, HttpContext ctx,
+    ChessSchool.Arena.Services.IImageStorage storage, CancellationToken ct) =>
+{
+    if (!ChessSchool.Arena.Services.ImageKinds.IsValidKey(key)) return Results.NotFound();
+    var img = await storage.OpenAsync(key, ct);
+    if (img is null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "public,max-age=31536000,immutable";
+    return Results.Stream(img.Content, img.ContentType);
+});
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

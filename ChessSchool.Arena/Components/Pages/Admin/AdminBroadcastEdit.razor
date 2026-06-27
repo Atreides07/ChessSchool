@@ -5,8 +5,11 @@
 @using ChessSchool.Arena
 @using ChessSchool.Arena.Services
 @attribute [Authorize(Policy = "Admin")]
+@using Microsoft.Extensions.Logging
 @inject BroadcastsCatalog Catalog
 @inject NavigationManager Nav
+@inject IImageStorage Storage
+@inject ILogger<AdminBroadcastEdit> Logger
 
 <PageTitle>@(IsNew ? Loc.T("admin.bc.create") : Loc.T("admin.bc.edit")) — @Loc.T("admin.title")</PageTitle>
 <HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
@@ -95,11 +98,25 @@ else
                 <InputText class="adm-in" @bind-Value="_model.Url" />
             </label>
 
-            <label class="adm-field">
+            <div class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.f.image")</span>
                 <InputText class="adm-in" @bind-Value="_model.ImageUrl" @bind-Value:event="oninput" />
                 <span class="adm-hint">@Loc.T("admin.f.image.hint")</span>
-            </label>
+                @if (Storage.IsConfigured)
+                {
+                    <div class="adm-upload">
+                        <label class="adm-btn adm-upload-btn @(_uploading ? "is-busy" : "")">
+                            @(_uploading ? Loc.T("admin.f.image.uploading") : Loc.T("admin.f.image.upload"))
+                            <InputFile OnChange="OnFileSelectedAsync" accept="image/*" disabled="@_uploading" hidden />
+                        </label>
+                        <span class="adm-hint">@Loc.T("admin.f.image.upload.hint")</span>
+                    </div>
+                    @if (_uploadError is not null)
+                    {
+                        <span class="adm-field-err">@_uploadError</span>
+                    }
+                }
+            </div>
 
             <label class="adm-check">
                 <InputCheckbox @bind-Value="_model.Visible" />
@@ -140,7 +157,32 @@ else
 
     private Broadcast? _model;
     private string? _error;
+    private bool _uploading;
+    private string? _uploadError;
     private bool IsNew => Slug is null;
+
+    // Загрузка файла в наше хранилище (S3): источник под нашим контролем, его нельзя подменить снаружи.
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        var file = e.File;
+        if (file is null || _model is null) return;
+        if (!ImageKinds.IsAllowed(file.ContentType)) { _uploadError = Loc.T("admin.err.image.type"); return; }
+        if (file.Size > ImageKinds.MaxBytes) { _uploadError = Loc.T("admin.err.image.size"); return; }
+
+        _uploading = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(ImageKinds.MaxBytes);
+            _model.ImageUrl = await Storage.SaveAsync(stream, file.ContentType);
+        }
+        catch (Exception ex)
+        {
+            _uploadError = Loc.T("admin.err.image.failed");
+            Logger.LogWarning(ex, "Не удалось загрузить изображение трансляции в хранилище.");
+        }
+        finally { _uploading = false; }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -204,6 +246,10 @@ else
     .adm-btn { font-size: .9rem; font-weight: 600; padding: .45rem .8rem; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; text-decoration: none; }
     .adm-btn:hover { background: var(--surface-2); color: var(--ink); }
     .adm-error { background: #fdecea; color: #c0392b; border: 1px solid color-mix(in srgb, #c0392b 30%, var(--line)); border-radius: var(--r-md); padding: .6rem .8rem; font-size: .9rem; }
+    .adm-upload { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-top: .15rem; }
+    .adm-upload-btn { cursor: pointer; display: inline-flex; align-items: center; }
+    .adm-upload-btn.is-busy { opacity: .6; pointer-events: none; }
+    .adm-field-err { font-size: .82rem; color: #c0392b; }
 
     .adm-preview { position: sticky; top: 84px; display: flex; flex-direction: column; gap: .5rem; }
     .adm-preview .mj-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; }

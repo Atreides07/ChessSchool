@@ -21,6 +21,20 @@ var redis = builder.AddRedis("redis").WithDataVolume();
 // наблюдаемости локально: сервисы шлют в него телеметрию при наличии ConnectionStrings:seq.
 var seq = builder.AddSeq("seq").WithDataVolume().ExcludeFromManifest();
 
+// MinIO — S3-совместимое объектное хранилище для фоновых изображений трансляций. Позволяет проверить
+// прод-путь S3 локально тем же кодом (AWS SDK): в проде — реальный S3, локально — этот контейнер.
+// Учётные данные — только для dev. Бакет приватный (отдаём через /media), создаётся приложением.
+const string minioUser = "minioadmin";
+const string minioPassword = "minioadmin";
+var minio = builder.AddContainer("minio", "minio/minio")
+    .WithEnvironment("MINIO_ROOT_USER", minioUser)
+    .WithEnvironment("MINIO_ROOT_PASSWORD", minioPassword)
+    .WithArgs("server", "/data", "--console-address", ":9001")
+    .WithHttpEndpoint(targetPort: 9000, name: "s3")
+    .WithHttpEndpoint(targetPort: 9001, name: "console")
+    .WithVolume("minio-data", "/data");
+var minioS3 = minio.GetEndpoint("s3");
+
 // Отдельный сервис авторизации (IdP) — переиспользуемый, как Google Auth.
 var auth = builder.AddProject<Projects.ChessSchool_Auth>("auth")
     .WithEnvironment("InternalApiKey", internalKey)
@@ -71,8 +85,16 @@ var arena = builder.AddProject<Projects.ChessSchool_Arena>("arena")
     .WithReference(auth)
     .WithReference(redis) // Orleans clustering+persist турниров, DataProtection, ticket-store
     .WithReference(seq)
+    // S3-хранилище фонов трансляций (локально — MinIO; в проде задаётся реальный S3 через конфиг).
+    .WithEnvironment("Storage__S3__ServiceUrl", minioS3)
+    .WithEnvironment("Storage__S3__Bucket", "broadcasts")
+    .WithEnvironment("Storage__S3__AccessKey", minioUser)
+    .WithEnvironment("Storage__S3__SecretKey", minioPassword)
+    .WithEnvironment("Storage__S3__ForcePathStyle", "true")
+    .WithEnvironment("Storage__S3__CreateBucketIfMissing", "true")
     .WaitFor(auth)
-    .WaitFor(redis);
+    .WaitFor(redis)
+    .WaitFor(minio);
 
 // Регистрируем веб-клиентов в IdP: разрешённый redirect_uri = базовый адрес приложения.
 auth.WithEnvironment("Sso__Clients__chessschool-web", web.GetEndpoint("https"));

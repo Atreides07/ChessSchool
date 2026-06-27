@@ -41,32 +41,6 @@ else
                 </div>
                 <h1>@Loc.T("sched.title")</h1>
             </div>
-
-            <div class="sched-controls">
-                <div class="seg seg-view">
-                    <label for="sv-tl">
-                        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h10" /></svg>@Loc.T("view.timeline")
-                    </label>
-                    <label for="sv-list">
-                        <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>@Loc.T("view.list")
-                    </label>
-                </div>
-
-                <div class="sched-filters">
-                    <span class="now-pill">
-                        <button type="button" class="chev" data-tl-scroll="-1" aria-label="@Loc.T("ctl.back")">‹</button>
-                        <button type="button" class="now-btn" data-tl-now>@Loc.T("ctl.now")</button>
-                        <button type="button" class="chev" data-tl-scroll="1" aria-label="@Loc.T("ctl.fwd")">›</button>
-                    </span>
-                    <div class="seg seg-range" role="group" aria-label="@Loc.T("ctl.scale")">
-                        <button type="button" class="rng" data-tl-zoom="1">1ч</button>
-                        <button type="button" class="rng is-active" data-tl-zoom="4">4ч</button>
-                        @* Окно расписания — 9ч (3 назад + 6 вперёд), столько планирует ArenaDirectoryGrain.
-                           «9ч» вписывает всё окно во вьюпорт; зума шире данных нет. *@
-                        <button type="button" class="rng" data-tl-zoom="9">9ч</button>
-                    </div>
-                </div>
-            </div>
         </div>
 
         @* ---------------- Лента «Главные турниры» (всегда сверху) ---------------- *@
@@ -131,6 +105,36 @@ else
                 }
             </div>
         }
+
+        @* Панель управления — отдельной строкой вплотную к таймлайну (под бренд-лентой): контролы
+           рядом с тем, чем управляют. В режиме «Список» стрелки/масштаб не нужны — скрываются (CSS). *@
+        <div class="sched-bar">
+            <div class="sched-controls">
+                <div class="seg seg-view">
+                    <label for="sv-tl">
+                        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h10" /></svg>@Loc.T("view.timeline")
+                    </label>
+                    <label for="sv-list">
+                        <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>@Loc.T("view.list")
+                    </label>
+                </div>
+
+                <div class="sched-filters">
+                    <span class="now-pill">
+                        <button type="button" class="chev" data-tl-scroll="-1" aria-label="@Loc.T("ctl.back")">‹</button>
+                        <button type="button" class="now-btn" data-tl-now>@Loc.T("ctl.now")</button>
+                        <button type="button" class="chev" data-tl-scroll="1" aria-label="@Loc.T("ctl.fwd")">›</button>
+                    </span>
+                    <div class="seg seg-range" role="group" aria-label="@Loc.T("ctl.scale")">
+                        <button type="button" class="rng" data-tl-zoom="1">1ч</button>
+                        <button type="button" class="rng is-active" data-tl-zoom="4">4ч</button>
+                        @* Окно расписания — 9ч (3 назад + 6 вперёд), столько планирует ArenaDirectoryGrain.
+                           «9ч» вписывает всё окно во вьюпорт; зума шире данных нет. *@
+                        <button type="button" class="rng" data-tl-zoom="9">9ч</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         @* ---------------- Таймлайн (десктоп) ---------------- *@
         <div class="view view-tl">
@@ -461,8 +465,10 @@ else
     .sched-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px var(--danger-weak); }
     .sched h1 { margin: 0; }
 
-    .sched-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
-    .sched-filters { display: flex; align-items: center; gap: 10px; }
+    /* Панель управления — строкой над таймлайном: переключатель слева, навигация/масштаб справа. */
+    .sched-bar { margin-top: 16px; }
+    .sched-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .sched-filters { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
     .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 3px; gap: 2px; }
     .seg label, .seg .rng { display: inline-flex; align-items: center; gap: .4rem; padding: .42rem .85rem; border-radius: var(--r-pill); font-size: .85rem; font-weight: 600; color: var(--ink-2); cursor: pointer; user-select: none; white-space: nowrap; border: 0; background: transparent; }
@@ -475,12 +481,14 @@ else
     .now-pill .now-btn { border: 0; background: transparent; color: var(--ink-2); font-weight: 600; font-size: .85rem; padding: .25rem .4rem; cursor: pointer; }
     .now-pill .now-btn:hover { color: var(--ink); }
 
-    #sv-tl:checked ~ .sched-top .seg-view label[for="sv-tl"],
-    #sv-list:checked ~ .sched-top .seg-view label[for="sv-list"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+    #sv-tl:checked ~ .sched-bar .seg-view label[for="sv-tl"],
+    #sv-list:checked ~ .sched-bar .seg-view label[for="sv-list"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 
     .view-list { display: none; }
     #sv-list:checked ~ .view-list { display: block; }
     #sv-list:checked ~ .view-tl { display: none; }
+    /* В списочном виде стрелки/масштаб не нужны — остаётся только переключатель Таймлайн/Список. */
+    #sv-list:checked ~ .sched-bar .sched-filters { display: none; }
 
     /* ---------------- Лента «Главные турниры» ---------------- */
     /* auto-fill (не auto-fit): пустые треки сохраняются, поэтому единственная карточка не растягивается на всю ширину. */
@@ -523,7 +531,7 @@ else
     .up-item.brand { border-left-color: var(--accent); }
 
     /* ---------------- Таймлайн ---------------- */
-    .tl-wrap { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .tl-wrap { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
     .tl-scroll { overflow-x: auto; }
     .tl-grid { display: grid; grid-template-columns: 16px repeat(var(--cols), var(--colw, 92px)); grid-auto-rows: 76px; position: relative; width: max-content; }
 
@@ -604,7 +612,7 @@ else
     .up-pop { color: var(--muted); font-weight: 600; font-size: .82rem; font-variant-numeric: tabular-nums; }
 
     @@media (max-width: 900px) {
-        .sched-top .sched-controls, .view, .bt-rail { display: none !important; }
+        .sched-bar, .view, .bt-rail { display: none !important; }
         .sched-mobile { display: block; }
     }
 

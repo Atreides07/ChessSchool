@@ -524,8 +524,10 @@ else
     .bt-rcta { font-size: .82rem; font-weight: 700; color: var(--accent); white-space: nowrap; text-decoration: none; }
     .bt-rcta:hover { text-decoration: underline; }
 
-    /* Бренд-блок таймлайна — отдельная верхняя дорожка, акцентный вид */
-    .tlb.brand { background: #e7eeff; border-color: var(--accent); color: var(--accent-hover); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); opacity: 1; filter: none; }
+    /* Бренд-блок таймлайна — «премиальный» золотой вид, НЕ синий: синий зарезервирован за «свой»
+       (tlb-mine), иначе бренд читается как «уже присоединился». tlb-mine объявлен ниже и перебивает
+       (если бренд реально твой — он станет синим). */
+    .tlb.brand { background: #fff3cf; border-color: #e0ad00; color: #6e5200; box-shadow: 0 0 0 1px #e0ad00, var(--shadow-sm); opacity: 1; filter: none; }
     .tlb.brand .tlb-title { font-weight: 760; }
     .lcard.brand { border-left-color: var(--accent); }
     .up-item.brand { border-left-color: var(--accent); }

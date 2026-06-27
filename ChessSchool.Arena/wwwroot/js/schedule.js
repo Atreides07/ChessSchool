@@ -37,11 +37,17 @@
         }
     }
 
+    // hours > 0 — показать столько часов; hours <= 0 — «Всё» (вписать всё окно расписания).
+    // Колонка никогда не уже fit-all: иначе сетка (фикс. 9ч данных) окажется уже вьюпорта и
+    // справа появится пустота — раньше так «ломался» зум шире, чем есть данных (12ч на 9ч окне).
     function applyZoom(grid, area, hours) {
         currentZoom = hours;
+        const cols = parseInt(getComputedStyle(grid).getPropertyValue('--cols'), 10) || 18;
         const avail = area.clientWidth - gutterWidth(grid);
-        let colw = avail / (hours * 2);
-        colw = Math.max(34, Math.min(360, colw)); // в разумных пределах
+        const fitAll = avail / cols; // ширина колонки, при которой всё окно ровно влезает без пустот
+        let colw = hours > 0 ? avail / (hours * 2) : fitAll;
+        colw = Math.max(fitAll, colw);             // не уже, чем нужно для заполнения вьюпорта
+        colw = Math.max(34, Math.min(360, colw));  // в разумных пределах
         grid.style.setProperty('--colw', colw + 'px');
         positionNow(grid);
     }

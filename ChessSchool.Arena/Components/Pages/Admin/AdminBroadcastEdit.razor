@@ -1,6 +1,8 @@
 @page "/admin/broadcasts/new"
 @page "/admin/broadcasts/{Slug}/edit"
-@rendermode InteractiveServer
+@* prerender:false — форма существует только в интерактивном контуре и отправляется через него,
+   а не обычным HTTP-POST (иначе SSR-эндпоинт требует имя формы). SEO админке не нужен. *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Microsoft.AspNetCore.Authorization
 @using ChessSchool.Arena
 @using ChessSchool.Arena.Services
@@ -28,7 +30,7 @@
 else
 {
     <div class="adm-form-grid">
-        <EditForm Model="_model" OnValidSubmit="SaveAsync" class="adm-form">
+        <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="broadcast-edit" class="adm-form">
             @if (_error is not null)
             {
                 <div class="adm-error" role="alert">@_error</div>

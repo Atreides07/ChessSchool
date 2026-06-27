@@ -351,7 +351,23 @@
         return L.participant_many;
     }
 
+    // Мгновенный старт при появлении #t-root в DOM. Blazor enhanced-navigation НЕ исполняет вставленный
+    // <script> и не всегда шлёт enhancedload на document — поэтому ловим именно вставку узла (как
+    // schedule.js ловит сетку). Скрипт подключён глобально в App.razor, так что наблюдатель жив всегда.
+    function watchForRoot() {
+        if (window.__tRootObserver) return;
+        const relevant = (n) => n.nodeType === 1 && (n.matches?.('#t-root') || n.querySelector?.('#t-root'));
+        window.__tRootObserver = new MutationObserver((records) => {
+            if (!records.some(r => Array.from(r.addedNodes).some(relevant))) return;
+            if (window.__tBootRaf) return;                 // дебаунс: один setup на пачку мутаций
+            window.__tBootRaf = requestAnimationFrame(() => { window.__tBootRaf = 0; setup(); });
+        });
+        window.__tRootObserver.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
     window.arenaTournamentSetup = setup;
-    document.addEventListener('DOMContentLoaded', setup);
-    document.addEventListener('enhancedload', setup);
+    watchForRoot();                                        // переживает enhanced-навигацию
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup);
+    else setup();                                          // прямой заход: DOM уже готов
+    document.addEventListener('enhancedload', setup);      // запасной путь
 })();

@@ -31,6 +31,13 @@
     <Routes />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
+    @* Скрипты-улучшения страниц грузим ГЛОБАЛЬНО один раз: при enhanced-навигации Blazor вставленный
+       в новую страницу <script> НЕ исполняется, поэтому подключение на самой странице не запускалось
+       (отсюда «пропала» кнопка/доска на /t/{id} при переходе с Home). Здесь скрипты живут постоянно и
+       по событию enhancedload инициализируют свою страницу; на чужих страницах их setup() — no-op. *@
+    <script src="js/schedule.js"></script>
+    <script src="js/tournament.js"></script>
+    <script src="js/games.js"></script>
 </body>
 
 </html>

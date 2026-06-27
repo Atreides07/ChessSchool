@@ -285,8 +285,8 @@ else
     </div>
 }
 
-@* Прогрессивное улучшение таймлайна (now-линия, зум, скролл) *@
-<script src="js/schedule.js"></script>
+@* Прогрессивное улучшение таймлайна (now-линия, зум, скролл): schedule.js подключён глобально
+   в App.razor — исполняется и при enhanced-навигации на эту страницу. *@
 
 @code {
     private const int WindowBackHours = 3;

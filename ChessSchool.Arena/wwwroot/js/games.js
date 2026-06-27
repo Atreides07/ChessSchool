@@ -14,7 +14,24 @@
         sentinel._io = io;
     }
 
+    // Старт при появлении сентинела в DOM: enhanced-навигация Blazor не исполняет вставленный <script>
+    // и не всегда шлёт enhancedload — поэтому ловим вставку узла. Скрипт глобальный (App.razor).
+    function watchForRoot() {
+        if (window.__gRootObserver) return;
+        var relevant = function (n) {
+            return n.nodeType === 1 && (n.matches && n.matches('#games-sentinel') || n.querySelector && n.querySelector('#games-sentinel'));
+        };
+        window.__gRootObserver = new MutationObserver(function (records) {
+            if (!records.some(function (r) { return Array.from(r.addedNodes).some(relevant); })) return;
+            if (window.__gBootRaf) return;
+            window.__gBootRaf = requestAnimationFrame(function () { window.__gBootRaf = 0; setup(); });
+        });
+        window.__gRootObserver.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
     window.arenaGamesSetup = setup;
-    document.addEventListener('DOMContentLoaded', setup);
+    watchForRoot();
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup);
+    else setup();
     document.addEventListener('enhancedload', setup);
 })();

@@ -4,6 +4,8 @@
 @using ChessSchool.Contracts
 @inject IHttpContextAccessor Http
 @inject IGrainFactory Grains
+@inject NavigationManager Nav
+@inject ChessSchool.Arena.Services.IBrandTournaments Brand
 
 @* Страница турнира на «тонком» клиенте: статический SSR-каркас без серверной Blazor-цепи и без
    ре-рендеров по таймеру. Шапку/таблицу/доски/свою партию рендерит браузерный JS (tournament.js),
@@ -11,7 +13,19 @@
    Это снимает «состояние на зрителя» с веб-сервера (масштаб) и переживает плохую сеть (reconnect → ресинк). *@
 
 <PageTitle>@Loc.T("t.fallback") — ChessArena</PageTitle>
-<HeadContent><meta name="robots" content="noindex" /></HeadContent>
+<HeadContent>
+    @* Регулярные турниры расписания эфемерны → noindex. Бренд-турниры (кураторские, стабильный slug)
+       индексируются. Признак — из IBrandTournaments (пока брендов нет → всё noindex). *@
+    @if (_indexable)
+    {
+        <meta name="robots" content="index,follow" />
+        <link rel="canonical" href="@($"{Nav.BaseUri}t/{Id}")" />
+    }
+    else
+    {
+        <meta name="robots" content="noindex" />
+    }
+</HeadContent>
 
 @{
     var authed = Http.HttpContext?.User?.Identity?.IsAuthenticated == true;
@@ -123,11 +137,13 @@
     [Parameter] public string Id { get; set; } = "";
 
     private ArenaStateDto? _initial;
+    private bool _indexable;
 
     // Начальное состояние для SSR — один stateless-запрос к грейну (контент сразу и без JS, для SEO).
     // Грейн недоступен/неизвестный id → каркас «Загрузка…», дальше JS дорисует по SignalR.
     protected override async Task OnInitializedAsync()
     {
+        _indexable = await Brand.IsBrandAsync(Id); // бренд-турнир индексируется, регулярный — нет
         try
         {
             var sub = Http.HttpContext?.User?.FindFirst("sub")?.Value ?? "";

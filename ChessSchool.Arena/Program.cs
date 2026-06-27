@@ -60,6 +60,10 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaNotifier>();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaBroadcaster>();
 
+// Решение индексации турниров: бренд-турниры индексируются, регулярные (расписание) — нет.
+// Пока брендов нет (NoBrandTournaments) → все /t/{id} остаются noindex. Точка расширения под каталог.
+builder.Services.AddSingleton<ChessSchool.Arena.Services.IBrandTournaments, ChessSchool.Arena.Services.NoBrandTournaments>();
+
 // Каталог трансляций: источник истины — грейн (Redis grain storage), на ноде — кэш с TTL поверх него.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();
 
@@ -134,12 +138,15 @@ app.MapGet("/robots.txt", (HttpRequest r) =>
         $"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /signin\nDisallow: /signout\nSitemap: {b}/sitemap.xml\n",
         "text/plain");
 });
-app.MapGet("/sitemap.xml", async (HttpRequest r, ChessSchool.Arena.Services.BroadcastsCatalog catalog) =>
+app.MapGet("/sitemap.xml", async (HttpRequest r, ChessSchool.Arena.Services.BroadcastsCatalog catalog,
+    ChessSchool.Arena.Services.IBrandTournaments brand) =>
 {
     var b = $"{r.Scheme}://{r.Host}";
     var paths = new List<string> { "", "broadcasts" };
     // Только видимые трансляции — скрытые не должны попадать в индекс.
     paths.AddRange((await catalog.PublicAsync()).Select(m => $"broadcasts/{m.Slug}"));
+    // Бренд-турниры (индексируемые); регулярные турниры расписания в sitemap не попадают.
+    paths.AddRange((await brand.ListIndexableAsync()).Select(t => $"t/{t.Slug}"));
     var locs = string.Join("\n", paths.Select(u => $"  <url><loc>{b}/{u}</loc></url>"));
     return Results.Text(
         $"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n{locs}\n</urlset>\n",

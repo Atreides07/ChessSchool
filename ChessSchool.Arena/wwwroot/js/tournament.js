@@ -12,6 +12,7 @@
     let state = null, stateAt = 0, currentId = null, clockTimer = null;
     let authed = false, loginUrl = '/signin', L = {}, isEn = false;
     let sel = null, pendingPromo = null, myColor = 'w', flip = false, lastPersonalFetch = 0;
+    let connecting = false, setupGen = 0; // защита от повторного входа в setup (иначе дубли соединений/таймеров)
 
     async function ensureLibs() {
         if (!ChessLib) ChessLib = (await import('https://esm.sh/chess.js@1')).Chess;
@@ -19,6 +20,8 @@
     }
 
     function teardown() {
+        setupGen++;                                   // инвалидируем любой setup «в полёте»
+        connecting = false;
         if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
         if (conn) { try { conn.stop(); } catch (e) { } conn = null; }
         currentId = null; state = null; chess = null; sel = null; pendingPromo = null;
@@ -28,30 +31,39 @@
         const root = document.getElementById('t-root');
         if (!root) { teardown(); return; }            // ушли со страницы турнира → закрыть соединение
         const id = root.dataset.id;
-        if (conn && currentId === id) return;          // уже инициализировано для этого турнира
+        // Уже инициализировано ИЛИ инициализируется для этого турнира — выходим. Проверяем connecting,
+        // т.к. conn присваивается только после await (иначе два почти одновременных set() создали бы
+        // два соединения и два таймера — старый таймер утекал бы → тормоза).
+        if (currentId === id && (conn || connecting)) return;
         teardown();
+        const gen = ++setupGen;                       // токен этого запуска
         currentId = id;
+        connecting = true;
         authed = root.dataset.authed === '1';
         loginUrl = root.dataset.loginurl || '/signin';
         try { const cfg = JSON.parse(document.getElementById('t-loc').textContent); L = cfg.l; isEn = cfg.isEn; }
         catch (e) { L = {}; }
 
-        await ensureLibs();
-        chess = new ChessLib();
-
-        conn = new signalR.HubConnectionBuilder().withUrl('/arenahub').withAutomaticReconnect().build();
-        conn.on('ArenaState', s => onShared(s));
-        conn.onreconnected(async () => { try { applyState(await conn.invoke('GetState', id)); } catch (e) { } });
-
         try {
-            await conn.start();
-            applyState(await conn.invoke('JoinTournament', id));
+            await ensureLibs();
+            if (gen !== setupGen) return;             // нас вытеснил teardown/новый setup
+            chess = new ChessLib();
+
+            const c = new signalR.HubConnectionBuilder().withUrl('/arenahub').withAutomaticReconnect().build();
+            c.on('ArenaState', s => { if (gen === setupGen) onShared(s); });
+            c.onreconnected(async () => { try { applyState(await c.invoke('GetState', id)); } catch (e) { } });
+
+            await c.start();
+            if (gen !== setupGen) { try { c.stop(); } catch (e) { } return; } // ушли/перезапустились за время старта
+            conn = c;
+            applyState(await c.invoke('JoinTournament', id));
+            clockTimer = setInterval(tickClocks, 250);
         } catch (e) {
             const m = document.getElementById('t-main');
             if (m) m.innerHTML = `<p class="text-muted">${esc(L.loading || '…')}</p>`;
-            return;
+        } finally {
+            if (gen === setupGen) connecting = false;
         }
-        clockTimer = setInterval(tickClocks, 250);
     }
 
     // Общий пуш (без своей партии): зрителю — применяем как есть; участнику — берём свежее персональное
@@ -60,7 +72,7 @@
         if (state && state.joined) {
             const { myGame, joined, myScore } = state;
             state = s; state.myGame = myGame; state.joined = joined; state.myScore = myScore;
-            stateAt = Date.now(); render();
+            stateAt = Date.now(); scheduleRender();
             if (Date.now() - lastPersonalFetch > 700) {
                 lastPersonalFetch = Date.now();
                 conn.invoke('GetState', currentId).then(applyState).catch(() => { });
@@ -75,7 +87,16 @@
         state = s; stateAt = Date.now();
         if (s.name) document.title = s.name + ' — ChessArena';
         syncMyGame();
-        render();
+        scheduleRender();
+    }
+
+    // Коалесцируем перерисовки в один кадр: частые пуши с сервера не вызывают многократный
+    // пересбор всех досок за один фрейм (тяжёлый innerHTML). Действия пользователя рисуют сразу.
+    let renderQueued = false;
+    function scheduleRender() {
+        if (renderQueued) return;
+        renderQueued = true;
+        requestAnimationFrame(() => { renderQueued = false; render(); });
     }
 
     function syncMyGame() {

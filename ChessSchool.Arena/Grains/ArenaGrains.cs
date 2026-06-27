@@ -37,9 +37,19 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
 
 public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDirectoryGrain
 {
+    // Короткий кэш листинга по sub. Грейн не-реентрантный → даже при наплыве заходов веер грейн-вызовов
+    // выполняется один раз на окно TTL (первый ждёт, остальные queue → попадают в готовый кэш). Анонимные
+    // landing-заходы делят запись sub="" (горячий путь); счётчики на главной устаревают максимум на TTL — ок.
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(3);
+    private readonly Dictionary<string, (DateTimeOffset Exp, IReadOnlyList<TournamentSummaryDto> List)> _cache = new();
+
     public async Task<IReadOnlyList<TournamentSummaryDto>> ListAsync(string? sub = null)
     {
         var now = DateTimeOffset.Now;
+
+        var key = sub ?? "";
+        if (_cache.TryGetValue(key, out var hit) && now < hit.Exp) return hit.List;
+
         var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset)
             .AddHours(-ArenaSchedule.WindowBackHours);
         var windowEnd = windowStart.AddHours(ArenaSchedule.WindowBackHours + ArenaSchedule.WindowAheadHours);
@@ -66,7 +76,13 @@ public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDir
         var live = await Task.WhenAll(liveIds.Select(id =>
             grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync(sub)));
 
-        return future.Concat(live).OrderBy(t => t.StartsAt).ToList();
+        var list = future.Concat(live).OrderBy(t => t.StartsAt).ToList();
+
+        _cache[key] = (now + CacheTtl, list);
+        if (_cache.Count > 64) // чистим протухшие, чтобы кэш не рос по числу разных sub
+            foreach (var k in _cache.Where(kv => kv.Value.Exp <= now).Select(kv => kv.Key).ToList())
+                _cache.Remove(k);
+        return list;
     }
 }
 

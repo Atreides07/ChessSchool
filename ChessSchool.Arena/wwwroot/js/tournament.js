@@ -246,14 +246,20 @@
                <span class="ds-spacer"></span>
                ${g.myBerserkAvailable ? `<button class="btn btn-warn btn-sm" id="t-berserk" title="${esc(L.berserktip)}">⚡ Berserk</button>` : ''}
                <button class="btn btn-outline-danger btn-sm" id="t-resign">${esc(L.resign)}</button>`;
+        // Соперник — над доской, я — под доской (как на реальной доске; доска уже развёрнута под мой цвет).
+        const iAmWhite = g.myColor === 0; // PieceColor.White = 0
+        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive);
+        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive);
         return `<div class="card my-game">
-            <div class="players">
-                <span>${g.blackBerserk ? '⚡ ' : ''}${esc(g.blackName)} <span class="clock js-clock ${bActive ? 'active' : ''}" data-ms="${g.blackMs}" data-active="${bActive ? 1 : 0}">${mmss(g.blackMs)}</span></span>
-                <span>${g.whiteBerserk ? '⚡ ' : ''}${esc(g.whiteName)} <span class="clock js-clock ${wActive ? 'active' : ''}" data-ms="${g.whiteMs}" data-active="${wActive ? 1 : 0}">${mmss(g.whiteMs)}</span></span>
-            </div>
+            <div class="players players-top">${iAmWhite ? blackRow : whiteRow}</div>
             <div class="board-wrap"><div class="board" id="t-board"></div><div class="promo" id="t-promo" hidden></div></div>
+            <div class="players players-bottom">${iAmWhite ? whiteRow : blackRow}</div>
             <div class="gstatus">${gstatus}</div>
         </div>`;
+    }
+
+    function playerRow(name, berserk, ms, active) {
+        return `<span>${berserk ? '⚡ ' : ''}${esc(name)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-active="${active ? 1 : 0}">${mmss(ms)}</span></span>`;
     }
 
     function boardsHtml() {

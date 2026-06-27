@@ -13,6 +13,7 @@
     let authed = false, loginUrl = '/signin', L = {}, isEn = false;
     let sel = null, pendingPromo = null, myColor = 'w', flip = false, lastPersonalFetch = 0;
     let connecting = false, setupGen = 0; // защита от повторного входа в setup (иначе дубли соединений/таймеров)
+    let lastHeroSig = null, lastPlayKey = null; // устойчивые секции: не пересобирать шапку/ожидание на каждый пуш
     let chessUrl = '/lib/chess.js', signalrUrl = '/lib/signalr.js'; // переопределяются fingerprinted-URL из #t-root
 
     async function ensureLibs() {
@@ -30,6 +31,7 @@
         if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
         if (conn) { try { conn.stop(); } catch (e) { } conn = null; }
         currentId = null; state = null; chess = null; sel = null; pendingPromo = null;
+        lastHeroSig = null; lastPlayKey = null; // следующий setup перестроит каркас заново
     }
 
     async function setup() {
@@ -121,17 +123,54 @@
     function render() {
         const main = document.getElementById('t-main');
         if (!main || !state) return;
+        // Устойчивый каркас: пересборка всего #t-main на каждый пуш пересоздавала бы DOM-узлы и
+        // перезапускала их CSS-анимации (кольцо «ищем соперника», пульс Live-точки) — на ход в любой
+        // транслируемой доске прилетает пуш, и анимация дёргалась. Поэтому секции разделены и
+        // обновляются независимо: анимированные не трогаем, пока их содержимое не изменилось.
+        if (!document.getElementById('t-play')) {
+            main.innerHTML = '<div id="t-hero"></div><div id="t-play"></div><div id="t-boards"></div><div id="t-standings"></div>';
+            lastHeroSig = null; lastPlayKey = null;
+        }
         const crumb = document.getElementById('t-crumb');
         if (crumb) crumb.textContent = state.name;
-        const running = state.status === 1;
-        main.innerHTML =
-            heroHtml() +
-            ((running && state.joined) ? myGameHtml() : '') +
-            boardsHtml() +
-            standingsHtml();
-        wireBoardHandlers();
-        wireActionHandlers();
+
+        // Шапка: пересобираем только при смене значимых данных (счётчик участников/статус/состав топ-3),
+        // иначе пульс Live-точки перезапускался бы каждый пуш. Обратный отсчёт идёт отдельно (tickClocks).
+        const top3 = state.standings.slice(0, 3).map(s => s.name).join(',');
+        const heroSig = `${state.status}|${state.joined}|${authed}|${state.standings.length}|${top3}`;
+        if (heroSig !== lastHeroSig) {
+            document.getElementById('t-hero').innerHTML = heroHtml();
+            lastHeroSig = heroSig;
+        }
+
+        renderPlay();
+        document.getElementById('t-boards').innerHTML = boardsHtml();
+        document.getElementById('t-standings').innerHTML = standingsHtml();
+
+        wireActionHandlers();   // перевесить обработчики на актуальные элементы (join/berserk/resign)
         tickClocks();
+    }
+
+    // Секция «своя партия / ожидание соперника». Ключ режима (lastPlayKey) защищает анимацию ожидания:
+    // пока игрок ждёт, узел .search-anim НЕ пересоздаётся (обновляем лишь счёт очков) → анимация плавная.
+    function renderPlay() {
+        const el = document.getElementById('t-play');
+        if (!el) return;
+        const running = state.status === 1;
+        const g = (running && state.joined) ? state.myGame : undefined;
+
+        if (running && state.joined && !g) {              // ждём соперника
+            if (lastPlayKey !== 'waiting') { el.innerHTML = waitingHtml(); lastPlayKey = 'waiting'; }
+            else { const sc = el.querySelector('.js-myscore'); if (sc) sc.textContent = state.myScore; }
+            return;
+        }
+        if (g) {                                          // идёт своя партия
+            el.innerHTML = myGameHtml();
+            lastPlayKey = 'game';
+            wireBoardHandlers();
+            return;
+        }
+        if (lastPlayKey !== null) { el.innerHTML = ''; lastPlayKey = null; } // нечего показывать
     }
 
     function heroHtml() {
@@ -172,16 +211,20 @@
         return '';
     }
 
+    // Карточка ожидания соперника (с анимацией поиска). Счёт очков помечен .js-myscore — его можно
+    // обновлять, не пересоздавая узел анимации (см. renderPlay).
+    function waitingHtml() {
+        return `<div class="card waiting">
+            <div class="search-anim" aria-hidden="true"><span class="search-ring"></span>
+                <span class="search-piece">${pieceImg('b', 'n', 'cp')}</span></div>
+            <div class="search-text">${esc(L.search)}<span class="dots"><i></i><i></i><i></i></span></div>
+            <div class="text-muted mt-1">${esc(L.score)} <strong class="js-myscore">${state.myScore}</strong></div>
+        </div>`;
+    }
+
     function myGameHtml() {
         const g = state.myGame;
-        if (!g) {
-            return `<div class="card waiting">
-                <div class="search-anim" aria-hidden="true"><span class="search-ring"></span>
-                    <span class="search-piece">${pieceImg('b', 'n', 'cp')}</span></div>
-                <div class="search-text">${esc(L.search)}<span class="dots"><i></i><i></i><i></i></span></div>
-                <div class="text-muted mt-1">${esc(L.score)} <strong>${state.myScore}</strong></div>
-            </div>`;
-        }
+        if (!g) return '';
         const fin = g.status === 2;
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
         const gstatus = fin

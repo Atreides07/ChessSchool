@@ -126,6 +126,17 @@
     </div>
 
     <aside class="t-side">
+        @* «Напомнить» для предстоящего бренд-турнира — добавить в календарь (.ics). Вне #t-main → переживает JS. *@
+        @if (_brand is not null && _initial?.Status == TournamentStatus.Created)
+        {
+            <a class="card bt-remind" href="/t/@Id/calendar.ics">
+                <span class="bt-remind-ic">🔔</span>
+                <span class="bt-remind-tx">
+                    <strong>@Loc.T("bt.remind")</strong>
+                    <span>@Loc.T("bt.remind.hint")</span>
+                </span>
+            </a>
+        }
         <div class="card score-rules">
             <h3 class="card-title">@Loc.T("rules.title")</h3>
             <div class="sr-sub">@Loc.T("rules.sub")</div>
@@ -393,6 +404,13 @@
     .chip.c-loss { color: var(--muted); }
 
     /* ----- Правила начисления (правая колонка) ----- */
+    .bt-remind { display: flex; align-items: center; gap: .7rem; text-decoration: none; color: var(--ink); margin-bottom: 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); }
+    .bt-remind:hover { box-shadow: var(--shadow-md); color: var(--ink); }
+    .bt-remind-ic { font-size: 1.4rem; line-height: 1; }
+    .bt-remind-tx { display: flex; flex-direction: column; }
+    .bt-remind-tx strong { font-weight: 720; color: var(--accent); }
+    .bt-remind-tx span { font-size: .82rem; color: var(--ink-2); }
+
     .score-rules .card-title { font-size: 1.3rem; margin: 0 0 1rem; }
     .sr-sub { font-weight: 700; color: var(--ink); margin-bottom: .6rem; }
     .sr-row { display: flex; justify-content: space-between; padding: .55rem 0; border-bottom: 1px solid var(--line); }

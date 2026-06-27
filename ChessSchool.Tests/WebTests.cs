@@ -60,5 +60,9 @@ public class WebTests
         // Хаб турнира смапплен и доступен анонимно (зрители подключаются без входа).
         var negotiate = await arena.PostAsync("/arenahub/negotiate?negotiateVersion=1", null, cancellationToken);
         Assert.NotEqual(HttpStatusCode.NotFound, negotiate.StatusCode);
+
+        // «Напомнить» (.ics) смапплен и гейтит небрендовые турниры (test-tournament — не бренд → 404).
+        var ics = await arena.GetAsync("/t/test-tournament/calendar.ics", cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, ics.StatusCode);
     }
 }

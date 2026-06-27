@@ -74,8 +74,15 @@ else
                 @foreach (var v in _brand.Take(4))
                 {
                     var pill = BrandPill(v);
-                    <a class="bt-rcard" href="/t/@v.Brand.Slug">
-                        <div class="bt-rbanner bt-@pill.Cls">
+                    var slug = v.Brand.Slug;
+                    var (ctaHref, ctaLabel) = v.Summary.Status switch
+                    {
+                        TournamentStatus.Running => ($"/t/{slug}", Loc.T("bt.watch")),
+                        TournamentStatus.Created => ($"/t/{slug}/calendar.ics", Loc.T("bt.remind")),
+                        _ => ($"/t/{slug}", Loc.T("bt.results")),
+                    };
+                    <div class="bt-rcard">
+                        <a class="bt-rbanner bt-@pill.Cls" href="/t/@slug" aria-label="@v.Brand.Name">
                             @if (!string.IsNullOrWhiteSpace(v.Brand.ImageUrl))
                             {
                                 <img class="bt-rimg" src="@v.Brand.ImageUrl" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
@@ -85,16 +92,16 @@ else
                                 <span class="bt-rstar">★</span>
                             }
                             <span class="bt-rpill bt-@pill.Cls">@pill.Label</span>
-                        </div>
+                        </a>
                         <div class="bt-rbody">
-                            <span class="bt-rname">@v.Brand.Name</span>
+                            <a class="bt-rname" href="/t/@slug">@v.Brand.Name</a>
                             <span class="bt-rdesc">@v.Brand.Description</span>
                             <span class="bt-rfoot">
                                 <span class="bt-rwhen">@(v.Summary.Status == TournamentStatus.Running ? Loc.MinutesLeft(v.Summary.SecondsLeft / 60) : v.Brand.StartsAt.ToLocalTime().ToString("dd.MM HH:mm"))</span>
-                                <span class="bt-rcta">@(v.Summary.Status == TournamentStatus.Running ? Loc.T("bt.watch") : Loc.T("bt.details")) →</span>
+                                <a class="bt-rcta" href="@ctaHref">@ctaLabel →</a>
                             </span>
                         </div>
-                    </a>
+                    </div>
                 }
             </div>
         }
@@ -453,7 +460,7 @@ else
     .bt-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 18px; }
     .bt-rcard { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); transition: box-shadow .12s, transform .12s; }
     .bt-rcard:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); color: var(--ink); }
-    .bt-rbanner { position: relative; aspect-ratio: 16 / 7; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+    .bt-rbanner { position: relative; aspect-ratio: 16 / 7; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); text-decoration: none; }
     .bt-rbanner.bt-live { background: #ffe3e0; }
     .bt-rbanner.bt-done { background: var(--surface-2); }
     .bt-rimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -462,11 +469,13 @@ else
     .bt-rpill.bt-live { background: var(--danger); color: #fff; }
     .bt-rpill.bt-soon { background: var(--accent); color: #fff; }
     .bt-rbody { padding: .7rem .85rem; display: flex; flex-direction: column; gap: .2rem; }
-    .bt-rname { font-weight: 720; font-size: 1rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bt-rname { display: block; font-weight: 720; font-size: 1rem; color: var(--ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bt-rname:hover { color: var(--accent); }
     .bt-rdesc { font-size: .85rem; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; }
     .bt-rfoot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .35rem; }
     .bt-rwhen { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .bt-rcta { font-size: .82rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+    .bt-rcta { font-size: .82rem; font-weight: 700; color: var(--accent); white-space: nowrap; text-decoration: none; }
+    .bt-rcta:hover { text-decoration: underline; }
 
     /* Бренд-блок таймлайна — отдельная верхняя дорожка, акцентный вид */
     .tlb.brand { background: #e7eeff; border-color: var(--accent); color: var(--accent-hover); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); opacity: 1; filter: none; }

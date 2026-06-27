@@ -171,6 +171,31 @@ app.MapGet("/media/broadcasts/{key}", async (string key, HttpContext ctx,
     return Results.Stream(img.Content, img.ContentType);
 });
 
+// «Напомнить» для бренд-турнира — iCalendar (.ics): браузер добавит событие в календарь.
+// Без PII, без серверных напоминалок и логина; stateless (мультисервер). Только видимые бренды.
+app.MapGet("/t/{slug}/calendar.ics", async (string slug, HttpRequest r,
+    ChessSchool.Arena.Services.BrandTournamentCatalog catalog) =>
+{
+    var b = await catalog.BySlugAsync(slug);
+    if (b is null || !b.Visible) return Results.NotFound();
+
+    static string Esc(string s) => s.Replace("\\", "\\\\").Replace(";", "\\;").Replace(",", "\\,")
+        .Replace("\r\n", "\\n").Replace("\n", "\\n");
+    var url = $"{r.Scheme}://{r.Host}/t/{slug}";
+    var ics = string.Join("\r\n",
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ChessArena//Brand Tournament//EN", "CALSCALE:GREGORIAN",
+        "BEGIN:VEVENT",
+        $"UID:{slug}@chessarena",
+        $"DTSTAMP:{DateTimeOffset.UtcNow.UtcDateTime:yyyyMMddTHHmmssZ}",
+        $"DTSTART:{b.StartsAt.UtcDateTime:yyyyMMddTHHmmssZ}",
+        $"DTEND:{b.StartsAt.AddSeconds(b.DurationSeconds).UtcDateTime:yyyyMMddTHHmmssZ}",
+        $"SUMMARY:{Esc(b.Name)}",
+        $"DESCRIPTION:{Esc(b.Description)}",
+        $"URL:{url}",
+        "END:VEVENT", "END:VCALENDAR") + "\r\n";
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8", $"{slug}.ics");
+});
+
 // Хаб страницы турнира (тонкий браузерный клиент подключается по тому же origin → cookie-auth).
 app.MapHub<ChessSchool.Arena.Hubs.ArenaHub>("/arenahub");
 

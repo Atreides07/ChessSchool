@@ -43,7 +43,9 @@ public class ArenaGrainTests
             await t.ConfigureAsync("Тест", TimeControl.Bullet, DateTimeOffset.UtcNow.AddSeconds(-1), 300);
 
             await t.JoinAsync("user-a", "Игрок A");
-            await t.JoinAsync("user-b", "Игрок B"); // турнир идёт → мгновенный пейринг
+            await t.JoinAsync("user-b", "Игрок B");
+            await t.SeekAsync("user-a");
+            await t.SeekAsync("user-b"); // оба нажали «подобрать соперника» → мгновенный пейринг
 
             var state = await t.GetStateAsync("user-a");
 
@@ -92,10 +94,12 @@ public class ArenaGrainTests
             var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("wait-arena");
             await t.ConfigureAsync("Ожидание", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
             await t.JoinAsync("solo", "Один");
+            await t.SeekAsync("solo"); // нажал «подобрать соперника» → вошёл в пул, ищем человека
 
-            // Сразу после входа соперника-бота ещё нет — даём время найти человека.
+            // Сразу после нажатия соперника-бота ещё нет — даём время найти человека.
             var immediate = await t.GetStateAsync("solo");
             Assert.True(immediate.Joined);
+            Assert.True(immediate.Seeking);
             Assert.Null(immediate.MyGame);
 
             // Спустя время ожидания (10с) к человеку подключается бот и начинается партия.
@@ -162,6 +166,37 @@ public class ArenaGrainTests
         {
             await cluster.StopAllSilosAsync();
         }
+    }
+
+    [Fact]
+    public async Task JoinedHumans_AreNotAutoMatched_UntilSeek()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("seek-arena");
+            await t.ConfigureAsync("Подбор", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+
+            await t.JoinAsync("u1", "Игрок 1");
+            await t.JoinAsync("u2", "Игрок 2");
+
+            // Оба записаны, но «подобрать соперника» не нажимали — партий нет даже спустя грейс бота (10с):
+            // соперник (ни человек, ни бот) автоматически не назначается.
+            await Task.Delay(TimeSpan.FromSeconds(12));
+            var idle = await t.GetStateAsync("u1");
+            Assert.True(idle.Joined);
+            Assert.False(idle.Seeking);
+            Assert.Null(idle.MyGame);
+
+            // Нажали оба — два ищущих человека спариваются сразу.
+            await t.SeekAsync("u1");
+            await t.SeekAsync("u2");
+            var paired = await t.GetStateAsync("u1");
+            Assert.NotNull(paired.MyGame);
+            Assert.False(paired.Seeking); // уже играет — в пуле подбора больше нет
+        }
+        finally { await cluster.StopAllSilosAsync(); }
     }
 
     [Fact]

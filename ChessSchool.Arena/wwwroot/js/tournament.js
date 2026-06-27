@@ -81,8 +81,8 @@
     // состояние (троттлинг), а общие части (доски/таблица/часы) обновляем сразу, не дожидаясь round-trip.
     function onShared(s) {
         if (state && state.joined) {
-            const { myGame, joined, myScore } = state;
-            state = s; state.myGame = myGame; state.joined = joined; state.myScore = myScore;
+            const { myGame, joined, myScore, seeking } = state;
+            state = s; state.myGame = myGame; state.joined = joined; state.myScore = myScore; state.seeking = seeking;
             stateAt = Date.now(); scheduleRender();
             if (Date.now() - lastPersonalFetch > 700) {
                 lastPersonalFetch = Date.now();
@@ -159,8 +159,12 @@
         const running = state.status === 1;
         const g = (running && state.joined) ? state.myGame : undefined;
 
-        if (running && state.joined && !g) {              // ждём соперника
-            if (lastPlayKey !== 'waiting') { el.innerHTML = waitingHtml(); lastPlayKey = 'waiting'; }
+        if (running && state.joined && !g) {
+            // Подбор не автоматический: пока игрок не нажал «подобрать соперника» (state.seeking=false) —
+            // показываем кнопку; после нажатия — анимацию поиска. Узлы не пересоздаём между пушами
+            // (ключ режима), обновляем лишь счёт очков, чтобы анимация/кнопка не дёргались.
+            const mode = state.seeking ? 'waiting' : 'seek';
+            if (lastPlayKey !== mode) { el.innerHTML = mode === 'waiting' ? waitingHtml() : seekHtml(); lastPlayKey = mode; }
             else { const sc = el.querySelector('.js-myscore'); if (sc) sc.textContent = state.myScore; }
             return;
         }
@@ -218,6 +222,14 @@
             <div class="search-anim" aria-hidden="true"><span class="search-ring"></span>
                 <span class="search-piece">${pieceImg('b', 'n', 'cp')}</span></div>
             <div class="search-text">${esc(L.search)}<span class="dots"><i></i><i></i><i></i></span></div>
+            <div class="text-muted mt-1">${esc(L.score)} <strong class="js-myscore">${state.myScore}</strong></div>
+        </div>`;
+    }
+
+    // Карточка «подобрать соперника»: до нажатия игрок просто записан и соперника не ищет.
+    function seekHtml() {
+        return `<div class="card seek-card">
+            <button class="btn btn-join" id="t-seek">${esc(L.seek)}</button>
             <div class="text-muted mt-1">${esc(L.score)} <strong class="js-myscore">${state.myScore}</strong></div>
         </div>`;
     }
@@ -356,6 +368,8 @@
     function wireActionHandlers() {
         const act = document.getElementById('t-act');
         if (act) act.onclick = () => { act.disabled = true; conn.invoke('Register', currentId).then(applyState).catch(() => act.disabled = false); };
+        const seek = document.getElementById('t-seek');
+        if (seek) seek.onclick = () => { seek.disabled = true; conn.invoke('SeekOpponent', currentId).then(applyState).catch(() => seek.disabled = false); };
         const berserk = document.getElementById('t-berserk');
         if (berserk) berserk.onclick = () => conn.invoke('Berserk', currentId).then(applyState).catch(() => { });
         const resign = document.getElementById('t-resign');

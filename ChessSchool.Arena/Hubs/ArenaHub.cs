@@ -62,6 +62,14 @@ public sealed class ArenaHub(IGrainFactory grains, ArenaBroadcaster broadcaster)
         return await Grain(id).GetStateAsync(sub);
     }
 
+    /// <summary>Нажата кнопка «подобрать соперника» — войти в пул подбора (требует входа).</summary>
+    public async Task<ArenaStateDto> SeekOpponent(string id)
+    {
+        var sub = RequireSub();
+        await Grain(id).SeekAsync(sub);
+        return await Grain(id).GetStateAsync(sub);
+    }
+
     public async Task<ArenaStateDto> Berserk(string id)
     {
         var sub = RequireSub();

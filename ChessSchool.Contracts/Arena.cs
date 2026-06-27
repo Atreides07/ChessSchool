@@ -92,4 +92,7 @@ public sealed record ArenaStateDto(
     [property: Id(9)] DateTimeOffset StartedAt,
     [property: Id(10)] int DurationSeconds,
     [property: Id(11)] int BotCount,
-    [property: Id(12)] IReadOnlyList<ArenaBoardDto> Boards);
+    [property: Id(12)] IReadOnlyList<ArenaBoardDto> Boards,
+    // Игрок нажал «подобрать соперника» и ждёт пары (но партия ещё не началась). Подбор НЕ автоматический:
+    // до нажатия игрок просто записан и не ищет соперника. false для зрителей/анонимов.
+    [property: Id(13)] bool Seeking = false);

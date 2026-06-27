@@ -178,6 +178,7 @@ public static class Loc
         ["act.injoined"] = ("Вы в турнире ✓", "You're in ✓"),
         ["act.register"] = ("Записаться", "Register"),
         ["act.registered"] = ("Вы записаны ✓", "Registered ✓"),
+        ["act.seek"] = ("Подобрать соперника", "Find opponent"),
         ["res.white"] = ("Победили белые", "White won"),
         ["res.black"] = ("Победили чёрные", "Black won"),
         ["res.draw"] = ("Ничья", "Draw"),

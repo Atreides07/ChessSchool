@@ -25,6 +25,8 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
     /// <summary>Конфигурация бренд-турнира из каталога админки (можно переконфигурировать до старта).</summary>
     Task ConfigureBrandAsync(string name, TimeControl tc, DateTimeOffset startsAt, int durationSeconds);
     Task JoinAsync(string sub, string name);
+    /// <summary>Игрок нажал «подобрать соперника» — войти в пул подбора (подбор не автоматический).</summary>
+    Task SeekAsync(string sub);
     Task<ArenaStateDto> GetStateAsync(string sub);
     Task<TournamentSummaryDto> GetSummaryAsync(string? sub = null);
     Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync();
@@ -138,6 +140,9 @@ public sealed class ArenaTournamentGrain(
         public bool Playing;
         public string? GameId;
         public bool IsBot;
+        // Игрок нажал «подобрать соперника» и ждёт пары. Подбор НЕ автоматический: до нажатия (и после
+        // каждой партии) Seeking=false — игрок просто записан, в пул подбора не входит. Боты всегда «ищут».
+        public bool Seeking;
         public DateTimeOffset? WaitingSince;
         public int Games;
         public int Wins;
@@ -457,7 +462,9 @@ public sealed class ArenaTournamentGrain(
         if (Status() == TournamentStatus.Finished) return;
         if (!_players.ContainsKey(sub))
         {
-            _players[sub] = new Player { Name = name, WaitingSince = DateTimeOffset.UtcNow };
+            // Только запись в турнир. В пул подбора игрок войдёт сам по кнопке «подобрать соперника»
+            // (SeekAsync) — соперник (в т.ч. бот) автоматически не назначается.
+            _players[sub] = new Player { Name = name };
             _dirty = true;
             analytics.Capture("tournament_joined", sub, new Dictionary<string, object?>
             {
@@ -467,6 +474,26 @@ public sealed class ArenaTournamentGrain(
         }
         EnsureTimer();
         Tick();
+        await FlushAsync();
+        notifier.Notify(Id);
+    }
+
+    /// <summary>
+    /// Игрок нажал «подобрать соперника»: входит в пул подбора. Подбор не автоматический — пока флаг не
+    /// взведён, игрок просто записан. Сразу пробуем спарить (если есть другой ищущий человек); иначе он
+    /// ждёт, и через <see cref="WaitForBotSeconds"/> к нему подключится бот (как и раньше после нажатия).
+    /// </summary>
+    public async Task SeekAsync(string sub)
+    {
+        EnsureConfigured();
+        if (Status() != TournamentStatus.Running) return; // искать соперника можно только в идущем турнире
+        if (_players.TryGetValue(sub, out var p) && !p.IsBot && !p.Playing && !p.Seeking)
+        {
+            p.Seeking = true;
+            p.WaitingSince = DateTimeOffset.UtcNow;
+        }
+        EnsureTimer();
+        Tick();          // попытка мгновенного пейринга с другим ищущим
         await FlushAsync();
         notifier.Notify(Id);
     }
@@ -497,15 +524,17 @@ public sealed class ArenaTournamentGrain(
                 p.Value.OnFire, p.Value.Playing, p.Value.Games, p.Value.Wins, p.Value.Results.ToList()))
             .ToList();
 
+        _players.TryGetValue(sub, out var me);
         ArenaGameDto? myGame = null;
-        if (_players.TryGetValue(sub, out var me) && me.GameId is { } gid && _games.TryGetValue(gid, out var g))
+        if (me?.GameId is { } gid && _games.TryGetValue(gid, out var g))
             myGame = BuildGameDto(g, sub);
 
         return new ArenaStateDto(
-            Id, _name, Status(), SecondsLeft(), _players.ContainsKey(sub),
-            _players.TryGetValue(sub, out var p2) ? p2.Score : 0, standings, myGame,
+            Id, _name, Status(), SecondsLeft(), me is not null,
+            me?.Score ?? 0, standings, myGame,
             _tc, _startsAt, _durationSeconds, _players.Values.Count(p => p.IsBot),
-            BuildBoards(4)); // в шапке турнира — только 4 доски, остальное на /games
+            BuildBoards(4), // в шапке турнира — только 4 доски, остальное на /games
+            Seeking: me is { Seeking: true, Playing: false }); // ждёт пары (кнопка нажата, партии ещё нет)
     }
 
     public async Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync()
@@ -732,7 +761,10 @@ public sealed class ArenaTournamentGrain(
         {
             p.Playing = false;
             p.GameId = null;
-            p.WaitingSince = DateTimeOffset.UtcNow;
+            // После партии НЕ ищем следующего соперника автоматически: человек снова видит кнопку
+            // «подобрать соперника». Боты сразу снова в пуле (играют между собой / ждут людей).
+            p.Seeking = p.IsBot;
+            p.WaitingSince = p.IsBot ? DateTimeOffset.UtcNow : null;
         }
     }
 
@@ -740,7 +772,9 @@ public sealed class ArenaTournamentGrain(
     {
         var now = DateTimeOffset.UtcNow;
 
-        var idleHumans = _players.Where(kv => !kv.Value.IsBot && !kv.Value.Playing)
+        // В пул подбора входят только «ищущие» люди (нажавшие «подобрать соперника»). Записанные, но
+        // не нажавшие — не спариваются (ни с человеком, ни с ботом).
+        var idleHumans = _players.Where(kv => !kv.Value.IsBot && !kv.Value.Playing && kv.Value.Seeking)
             .OrderByDescending(kv => kv.Value.Score).Select(kv => kv.Key).ToList();
         var idleBots = _players.Where(kv => kv.Value.IsBot && !kv.Value.Playing)
             .Select(kv => kv.Key).ToList();
@@ -807,6 +841,7 @@ public sealed class ArenaTournamentGrain(
             }
             p.Playing = true;
             p.GameId = gid;
+            p.Seeking = false; // спарен — больше не в пуле подбора
             p.WaitingSince = null;
         }
     }

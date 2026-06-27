@@ -48,6 +48,7 @@ public class BroadcastsGrainTests
 
             Assert.Equal(BroadcastSeed.Initial.Count, all.Count);
             Assert.All(all, b => Assert.True(b.Visible));
+            Assert.All(all, b => Assert.False(string.IsNullOrWhiteSpace(b.ImageUrl))); // у стартовых трансляций заполнен фон
             Assert.Contains(all, b => b.Slug == "sinquefield-cup-2026");
         }
         finally { await cluster.StopAllSilosAsync(); }

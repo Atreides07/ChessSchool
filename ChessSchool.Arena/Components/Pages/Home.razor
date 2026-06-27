@@ -61,8 +61,9 @@ else
                     <div class="seg seg-range" role="group" aria-label="@Loc.T("ctl.scale")">
                         <button type="button" class="rng" data-tl-zoom="1">1ч</button>
                         <button type="button" class="rng is-active" data-tl-zoom="4">4ч</button>
-                        @* «Всё» = вписать всё окно расписания (9ч) во вьюпорт; зума шире данных нет. *@
-                        <button type="button" class="rng" data-tl-zoom="0">@Loc.T("ctl.all")</button>
+                        @* Окно расписания — 9ч (3 назад + 6 вперёд), столько планирует ArenaDirectoryGrain.
+                           «9ч» вписывает всё окно во вьюпорт; зума шире данных нет. *@
+                        <button type="button" class="rng" data-tl-zoom="9">9ч</button>
                     </div>
                 </div>
             </div>

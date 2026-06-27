@@ -129,7 +129,6 @@ public static class Loc
         ["ctl.back"] = ("Назад", "Back"),
         ["ctl.fwd"] = ("Вперёд", "Forward"),
         ["ctl.scale"] = ("Масштаб", "Scale"),
-        ["ctl.all"] = ("Всё", "All"),
         ["mine.title"] = ("Вы участвуете", "You're participating"),
         ["mine.badge"] = ("★ вы участвуете", "★ you're in"),
         ["mine.you"] = ("★ вы", "★ you"),

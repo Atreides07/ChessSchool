@@ -1,22 +1,23 @@
 @page "/t/{Id}"
 @rendermode InteractiveServer
+@using ChessSchool.Arena
 @using ChessSchool.Arena.Services
 @inject IGrainFactory Grains
 @inject ArenaNotifier Notifier
 @inject AuthenticationStateProvider AuthState
 @implements IAsyncDisposable
 
-<PageTitle>@(_state?.Name ?? "Турнир")</PageTitle>
+<PageTitle>@(_state?.Name ?? Loc.T("t.fallback"))</PageTitle>
 
 @if (_state is null)
 {
-    <p class="text-muted"><em>Загрузка…</em></p>
+    <p class="text-muted"><em>@Loc.T("loading")</em></p>
 }
 else
 {
     <nav class="crumbs">
-        <a href="/">Главная</a><span>›</span>
-        <a href="/">Турниры «Арена»</a><span>›</span>
+        <a href="/">@Loc.T("crumb.home")</a><span>›</span>
+        <a href="/">@Loc.T("nav.arena")</a><span>›</span>
         <span class="crumbs-cur">@_state.Name</span>
     </nav>
 
@@ -31,19 +32,19 @@ else
                     }
                     else if (_state.Status == TournamentStatus.Finished)
                     {
-                        <span class="t-live past">Завершён</span>
+                        <span class="t-live past">@Loc.T("t.finished")</span>
                     }
                     else
                     {
-                        <span class="t-live past">Скоро</span>
+                        <span class="t-live past">@Loc.T("t.soon")</span>
                     }
                 </div>
 
                 <div class="t-hero-mid">
                     <div class="t-meta">
                         <span>@_state.StartedAt.ToLocalTime().ToString("dd.MM.yyyy, HH:mm")</span><span class="sep">•</span>
-                        <span>@(_state.DurationSeconds / 60) минут</span><span class="sep">•</span>
-                        <span>Контроль @(_state.TimeControl.InitialSeconds / 60) + @_state.TimeControl.IncrementSeconds</span>
+                        <span>@(_state.DurationSeconds / 60) @Loc.T("t.minutes")</span><span class="sep">•</span>
+                        <span>@Loc.T("t.control") @(_state.TimeControl.InitialSeconds / 60) + @_state.TimeControl.IncrementSeconds</span>
                     </div>
                     <h1 class="t-title">@_state.Name</h1>
                 </div>
@@ -51,21 +52,21 @@ else
                 <div class="t-hero-side">
                     @if (_state.Status == TournamentStatus.Running)
                     {
-                        <div class="t-countdown">Окончание через: <strong>@Hms(Remaining())</strong></div>
+                        <div class="t-countdown">@Loc.T("t.endin") <strong>@Hms(Remaining())</strong></div>
                     }
                     else if (_state.Status == TournamentStatus.Created)
                     {
-                        <div class="t-countdown">Старт: <strong>@_state.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm")</strong></div>
+                        <div class="t-countdown">@Loc.T("t.start") <strong>@_state.StartedAt.ToLocalTime().ToString("dd.MM, HH:mm")</strong></div>
                     }
 
-                    <div class="t-parts" title="@HumanCount чел. · @_state.BotCount ботов">
+                    <div class="t-parts" title="@HumanCount @Loc.Participants(HumanCount) · @_state.BotCount @Loc.T("unit.bots")">
                         <span class="t-ava-row">
                             @foreach (var s in _state.Standings.Take(3))
                             {
                                 <span class="t-ava">@Avatar(s.Name)</span>
                             }
                         </span>
-                        <span>@_state.Standings.Count @Plural(_state.Standings.Count, "участник", "участника", "участников")</span>
+                        <span>@_state.Standings.Count @Loc.Participants(_state.Standings.Count)</span>
                     </div>
 
                     @ActionButton()
@@ -89,17 +90,17 @@ else
                         <div class="gstatus">
                             @if (g.Status == GameStatus.Finished)
                             {
-                                <strong>@ResultText(g)</strong> <span class="text-muted">— ждём следующего соперника…</span>
+                                <strong>@ResultText(g)</strong> <span class="text-muted">@Loc.T("game.waitnext")</span>
                             }
                             else
                             {
-                                <span class="text-secondary">@(g.Turn == g.MyColor ? "Ваш ход" : "Ход соперника — можно сделать предход")</span>
+                                <span class="text-secondary">@(g.Turn == g.MyColor ? Loc.T("game.yourmove") : Loc.T("game.oppmove"))</span>
                                 <span class="ds-spacer"></span>
                                 @if (g.MyBerserkAvailable)
                                 {
-                                    <button class="btn btn-warn btn-sm" @onclick="Berserk" title="Время пополам, без инкремента, +1 очко за победу">⚡ Berserk</button>
+                                    <button class="btn btn-warn btn-sm" @onclick="Berserk" title="@Loc.T("game.berserktip")">⚡ Berserk</button>
                                 }
-                                <button class="btn btn-outline-danger btn-sm" @onclick="Resign">Сдаться</button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="Resign">@Loc.T("game.resign")</button>
                             }
                         </div>
                     </div>
@@ -111,8 +112,8 @@ else
                             <span class="search-ring"></span>
                             <span class="search-piece">@((MarkupString)ChessPieces.Svg('n'))</span>
                         </div>
-                        <div class="search-text">Ищем соперника<span class="dots"><i></i><i></i><i></i></span></div>
-                        <div class="text-muted mt-1">Ваши очки: <strong>@_state.MyScore</strong></div>
+                        <div class="search-text">@Loc.T("waiting.search")<span class="dots"><i></i><i></i><i></i></span></div>
+                        <div class="text-muted mt-1">@Loc.T("waiting.score") <strong>@_state.MyScore</strong></div>
                     </div>
                 }
             }
@@ -121,8 +122,8 @@ else
             @if (Broadcast().Count > 0)
             {
                 <div class="sec-head">
-                    <h2 class="sec-title">Партии</h2>
-                    <a class="all-games" href="/t/@Id/games">Все игры</a>
+                    <h2 class="sec-title">@Loc.T("sec.games")</h2>
+                    <a class="all-games" href="/t/@Id/games">@Loc.T("link.allgames")</a>
                 </div>
                 <div class="boards-grid">
                     @foreach (var b in Broadcast().Take(4))
@@ -169,7 +170,7 @@ else
                         <div class="pod @PodClass(p.Rank)">
                             <div class="pod-cup">@Trophy(p.Rank)</div>
                             <div class="pod-name">@p.Name</div>
-                            <div class="pod-stat">@p.Games игр • @p.Wins побед • @p.Score очков</div>
+                            <div class="pod-stat">@p.Games @Loc.T("pod.games") • @p.Wins @Loc.T("pod.wins") • @p.Score @Loc.T("pod.pts")</div>
                         </div>
                     }
                 </div>
@@ -181,7 +182,7 @@ else
                         <div class="st-head">
                             <span class="st-ava">@Avatar(s.Name)</span>
                             <span class="st-name">@s.Name @if (s.OnFire) { <span class="fire">🔥 @s.Streak</span> }</span>
-                            <span class="st-place">@(s.Rank) Место</span>
+                            <span class="st-place">@(s.Rank) @Loc.T("st.place")</span>
                             <span class="st-score">@s.Score</span>
                         </div>
                         @if (s.Results.Count > 0)
@@ -201,12 +202,12 @@ else
         @* ----- Правая колонка: правила (на мобиле уезжает вниз страницы) ----- *@
         <aside class="t-side">
             <div class="card score-rules">
-                <h3 class="card-title">Порядок начисления очков</h3>
-                <div class="sr-sub">Результаты партий</div>
-                <div class="sr-row"><span>Победа</span><strong>+ 2</strong></div>
-                <div class="sr-row"><span>Ничья</span><strong>+ 1</strong></div>
-                <div class="sr-row"><span>Поражение</span><strong>0</strong></div>
-                <div class="sr-bonus"><span>🔥 2 победы подряд</span><strong>Бонус ×2</strong></div>
+                <h3 class="card-title">@Loc.T("rules.title")</h3>
+                <div class="sr-sub">@Loc.T("rules.sub")</div>
+                <div class="sr-row"><span>@Loc.T("rules.win")</span><strong>+ 2</strong></div>
+                <div class="sr-row"><span>@Loc.T("rules.draw")</span><strong>+ 1</strong></div>
+                <div class="sr-row"><span>@Loc.T("rules.loss")</span><strong>0</strong></div>
+                <div class="sr-bonus"><span>@Loc.T("rules.streak")</span><strong>@Loc.T("rules.bonus")</strong></div>
             </div>
         </aside>
     </div>
@@ -216,7 +217,7 @@ else
     [Parameter] public string Id { get; set; } = "";
 
     private bool _authenticated;
-    private string _sub = "", _name = "Игрок";
+    private string _sub = "", _name = "";
     private ArenaStateDto? _state;
     private DateTimeOffset _stateAt;
     private PeriodicTimer? _clock;
@@ -243,17 +244,17 @@ else
 
         if (!_authenticated && _state!.Status != TournamentStatus.Finished)
         {
-            label = _state.Status == TournamentStatus.Created ? "Войти и записаться" : "Войти";
+            label = _state.Status == TournamentStatus.Created ? Loc.T("act.loginreg") : Loc.T("act.login");
         }
         else if (_state!.Status == TournamentStatus.Running && _authenticated)
         {
-            if (_state.Joined) badge = "Вы в турнире ✓";
-            else { label = "Присоединиться"; onClick = () => _ = Join(); }
+            if (_state.Joined) badge = Loc.T("act.injoined");
+            else { label = Loc.T("act.join"); onClick = () => _ = Join(); }
         }
         else if (_state.Status == TournamentStatus.Created && _authenticated)
         {
-            if (_state.Joined) badge = "Вы записаны ✓";
-            else { label = "Записаться"; onClick = () => _ = Join(); }
+            if (_state.Joined) badge = Loc.T("act.registered");
+            else { label = Loc.T("act.register"); onClick = () => _ = Join(); }
         }
 
         if (badge is not null)
@@ -288,7 +289,7 @@ else
         if (_authenticated)
         {
             _sub = user.FindFirst("sub")?.Value ?? user.Identity!.Name ?? "anon";
-            _name = user.Identity!.Name ?? "Игрок";
+            _name = user.Identity!.Name ?? Loc.T("player.default");
         }
 
         await Refresh(); // состояние доступно и анонимам (просмотр результатов)
@@ -363,14 +364,6 @@ else
         return Avatars[h % Avatars.Length];
     }
 
-    private static string Plural(int n, string one, string few, string many)
-    {
-        int m10 = n % 10, m100 = n % 100;
-        if (m10 == 1 && m100 != 11) return one;
-        if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-        return many;
-    }
-
     private static string GResult(GameResult r, bool white) => r switch
     {
         GameResult.Draw => "½",
@@ -381,9 +374,9 @@ else
 
     private static string ResultText(ArenaGameDto g) => g.Result switch
     {
-        GameResult.WhiteWins => "Победили белые",
-        GameResult.BlackWins => "Победили чёрные",
-        GameResult.Draw => "Ничья",
+        GameResult.WhiteWins => Loc.T("res.white"),
+        GameResult.BlackWins => Loc.T("res.black"),
+        GameResult.Draw => Loc.T("res.draw"),
         _ => "—"
     };
 

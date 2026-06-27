@@ -1,4 +1,5 @@
 @* Доска из FEN. Клик по фигуре — выбор, клик по клетке — ход. Превращение пешки — выбор фигуры. *@
+@using ChessSchool.Arena
 
 <div class="board-wrap">
     <div class="board @(Disabled ? "disabled" : "")">
@@ -31,7 +32,7 @@
         var (pr, pc) = Index(_promotionFrom);
         var white = char.IsUpper(_grid[pr, pc]);
         <div class="promo">
-            <span>Превратить в:</span>
+            <span>@Loc.T("chess.promote")</span>
             @foreach (var (code, glyph) in new[] { ("q", 'Q'), ("r", 'R'), ("b", 'B'), ("n", 'N') })
             {
                 var ch = white ? glyph : char.ToLowerInvariant(glyph);

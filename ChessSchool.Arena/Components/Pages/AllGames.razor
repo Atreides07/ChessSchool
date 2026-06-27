@@ -1,27 +1,28 @@
 @page "/t/{Id}/games"
 @rendermode InteractiveServer
+@using ChessSchool.Arena
 @using ChessSchool.Arena.Services
 @inject IGrainFactory Grains
 @inject ArenaNotifier Notifier
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
-<PageTitle>Все игры — @Id</PageTitle>
+<PageTitle>@Loc.T("link.allgames") — @Id</PageTitle>
 
 <nav class="crumbs">
-    <a href="/">Главная</a><span>›</span>
-    <a href="/t/@Id">Турнир</a><span>›</span>
-    <span class="crumbs-cur">Все игры</span>
+    <a href="/">@Loc.T("crumb.home")</a><span>›</span>
+    <a href="/t/@Id">@Loc.T("ag.tournament")</a><span>›</span>
+    <span class="crumbs-cur">@Loc.T("link.allgames")</span>
 </nav>
 
 <div class="ag-head">
-    <h1 class="ag-title">Все партии</h1>
-    <span class="ag-count">@_boards.Count на доске</span>
+    <h1 class="ag-title">@Loc.T("ag.title")</h1>
+    <span class="ag-count">@_boards.Count @Loc.T("ag.onboard")</span>
 </div>
 
 @if (_boards.Count == 0)
 {
-    <div class="ag-empty">Сейчас нет активных партий. <a href="/t/@Id">Вернуться к турниру</a></div>
+    <div class="ag-empty">@Loc.T("ag.empty") <a href="/t/@Id">@Loc.T("ag.back")</a></div>
 }
 else
 {
@@ -59,7 +60,7 @@ else
     @* Скрытая кнопка + сентинел: games.js «кликает» её, когда сентинел появляется при скролле. *@
     @if (_visible < _boards.Count)
     {
-        <button id="games-more" class="ag-more" @onclick="LoadMore">Показать ещё (@(_boards.Count - _visible))</button>
+        <button id="games-more" class="ag-more" @onclick="LoadMore">@Loc.T("ag.more") (@(_boards.Count - _visible))</button>
         <div id="games-sentinel" class="ag-sentinel"></div>
     }
 }

@@ -1,4 +1,5 @@
 @page "/"
+@using ChessSchool.Arena
 @inject IGrainFactory Grains
 @inject AuthenticationStateProvider AuthState
 @inject IHttpContextAccessor Http
@@ -22,7 +23,7 @@
 
 @if (_tournaments is null)
 {
-    <p class="text-muted"><em>Загрузка…</em></p>
+    <p class="text-muted"><em>@Loc.T("loading")</em></p>
 }
 else
 {
@@ -35,28 +36,28 @@ else
         <div class="sched-top">
             <div>
                 <div class="sched-status">
-                    <span class="dot"></span>@_liveCount идёт сейчас · @_dateLabel
+                    <span class="dot"></span>@_liveCount @Loc.T("sched.livenow") · @_dateLabel
                 </div>
-                <h1>Расписание турниров</h1>
+                <h1>@Loc.T("sched.title")</h1>
             </div>
 
             <div class="sched-controls">
                 <div class="seg seg-view">
                     <label for="sv-tl">
-                        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h10" /></svg>Таймлайн
+                        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h10" /></svg>@Loc.T("view.timeline")
                     </label>
                     <label for="sv-list">
-                        <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>Список
+                        <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>@Loc.T("view.list")
                     </label>
                 </div>
 
                 <div class="sched-filters">
                     <span class="now-pill">
-                        <button type="button" class="chev" data-tl-scroll="-1" aria-label="Назад">‹</button>
-                        <button type="button" class="now-btn" data-tl-now>сейчас</button>
-                        <button type="button" class="chev" data-tl-scroll="1" aria-label="Вперёд">›</button>
+                        <button type="button" class="chev" data-tl-scroll="-1" aria-label="@Loc.T("ctl.back")">‹</button>
+                        <button type="button" class="now-btn" data-tl-now>@Loc.T("ctl.now")</button>
+                        <button type="button" class="chev" data-tl-scroll="1" aria-label="@Loc.T("ctl.fwd")">›</button>
                     </span>
-                    <div class="seg seg-range" role="group" aria-label="Масштаб">
+                    <div class="seg seg-range" role="group" aria-label="@Loc.T("ctl.scale")">
                         <button type="button" class="rng" data-tl-zoom="1">1ч</button>
                         <button type="button" class="rng is-active" data-tl-zoom="4">4ч</button>
                         <button type="button" class="rng" data-tl-zoom="12">12ч</button>
@@ -91,7 +92,7 @@ else
                                         <span class="tlb-ico">@Icon(b.Type)</span>@b.Title
                                         @if (b.Mine)
                                         {
-                                            <span class="mine-badge" title="Вы участвуете">★</span>
+                                            <span class="mine-badge" title="@Loc.T("mine.title")">★</span>
                                         }
                                     </span>
                                     <span class="tlb-tc">@b.Tc</span>
@@ -119,17 +120,17 @@ else
                             <span class="lcard-title">@t.Name</span>
                             @if (t.Joined)
                             {
-                                <span class="badge badge-mine">★ вы участвуете</span>
+                                <span class="badge badge-mine">@Loc.T("mine.badge")</span>
                             }
                             <span class="badge @StatusBadge(t.Status)">@StatusText(t.Status)</span>
                         </div>
                         <div class="lcard-meta">
                             <span>@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
-                            <span>@t.HumanCount 👤 игроков</span>
-                            <span>@t.BotCount 🤖 ботов</span>
+                            <span>@t.HumanCount 👤 @Loc.T("unit.players")</span>
+                            <span>@t.BotCount 🤖 @Loc.T("unit.bots")</span>
                             @if (t.Status == TournamentStatus.Running)
                             {
-                                <span>осталось ~@(t.SecondsLeft / 60) мин</span>
+                                <span>@Loc.MinutesLeft(t.SecondsLeft / 60)</span>
                             }
                         </div>
                     </a>;
@@ -137,27 +138,27 @@ else
 
             @if (_running.Count > 0)
             {
-                <div class="lcat"><span>Текущие</span></div>
+                <div class="lcat"><span>@Loc.T("cat.running")</span></div>
                 <div class="lgrid">@foreach (var t in _running) { @card(t) }</div>
             }
             @if (_next.Count > 0)
             {
-                <div class="lcat lcat-gap"><span>Следующие</span></div>
+                <div class="lcat lcat-gap"><span>@Loc.T("cat.next")</span></div>
                 <div class="lgrid">@foreach (var t in _next) { @card(t) }</div>
             }
             @if (_finished.Count > 0)
             {
-                <div class="lcat lcat-gap"><span>Завершённые</span></div>
+                <div class="lcat lcat-gap"><span>@Loc.T("cat.finished")</span></div>
                 <div class="lgrid">@foreach (var t in _finished) { @card(t) }</div>
             }
         </div>
 
         @* ---------------- Мобайл: только список предстоящих ---------------- *@
         <div class="sched-mobile">
-            <div class="lcat"><span>Предстоящие</span></div>
+            <div class="lcat"><span>@Loc.T("cat.upcoming")</span></div>
             @if (_upcoming.Count == 0)
             {
-                <p class="text-muted">Нет предстоящих турниров в ближайшие часы.</p>
+                <p class="text-muted">@Loc.T("empty.upcoming")</p>
             }
             else
             {
@@ -169,7 +170,7 @@ else
                             <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
                             <span class="up-title">@t.Name</span>
                             <span class="up-pop">@t.HumanCount 👤 @t.BotCount 🤖</span>
-                            <span class='badge @(t.Joined ? "badge-mine" : "badge-warn")'>@(t.Joined ? "★ вы" : "запись")</span>
+                            <span class='badge @(t.Joined ? "badge-mine" : "badge-warn")'>@(t.Joined ? Loc.T("mine.you") : Loc.T("reg.short"))</span>
                         </a>
                     }
                 </div>
@@ -215,7 +216,7 @@ else
         _liveCount = _tournaments.Count(t => t.Status == TournamentStatus.Running);
 
         var now = DateTimeOffset.Now;
-        _dateLabel = $"{Weekday[(int)now.DayOfWeek]} {now.Day} {Months[now.Month - 1]}";
+        _dateLabel = Loc.DateLabel(now);
 
         var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset)
             .AddHours(-WindowBackHours);
@@ -254,7 +255,7 @@ else
         }
     }
 
-    private static string BlockTitle(Block b) => (b.Mine ? "Вы участвуете · " : "") + StateHint(b.State);
+    private static string BlockTitle(Block b) => (b.Mine ? Loc.T("mine.title") + " · " : "") + StateHint(b.State);
 
     private static int LaneRow(string type) => type switch { "bullet" => 2, "blitz" => 3, _ => 4 };
 
@@ -267,9 +268,9 @@ else
 
     private static string StateHint(string state) => state switch
     {
-        "live" => "Идёт сейчас — можно играть",
-        "past" => "Завершён — результаты",
-        _ => "Регистрация открыта"
+        "live" => Loc.T("hint.live"),
+        "past" => Loc.T("hint.past"),
+        _ => Loc.T("hint.future")
     };
 
     private static string TypeOf(TimeControl tc) => tc.InitialSeconds switch
@@ -293,15 +294,11 @@ else
         _ => "🔥"
     };
 
-    private static readonly string[] Weekday = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
-    private static readonly string[] Months =
-        ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."];
-
     private static string StatusText(TournamentStatus s) => s switch
     {
-        TournamentStatus.Running => "идёт",
-        TournamentStatus.Finished => "завершён",
-        _ => "регистрация"
+        TournamentStatus.Running => Loc.T("status.live"),
+        TournamentStatus.Finished => Loc.T("status.finished"),
+        _ => Loc.T("status.reg")
     };
 
     private static string StatusBadge(TournamentStatus s) => s switch

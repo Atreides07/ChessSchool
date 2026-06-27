@@ -56,6 +56,7 @@ public static class Loc
         ["admin.btf.desc"] = ("Описание", "Description"),
         ["admin.btf.slug.hint"] = ("Генерируется из названия, можно изменить. Часть адреса /t/…",
                                    "Generated from the name, editable. Part of the /t/… URL"),
+        ["admin.btf.url.preview"] = ("Адрес страницы", "Page URL"),
         ["bt.readmore"] = ("Читать", "Read more"),
         ["bt.close"] = ("Закрыть", "Close"),
         ["admin.btf.start"] = ("Старт (дата и время)", "Start (date and time)"),

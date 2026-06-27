@@ -44,6 +44,8 @@ else
                 <span class="adm-lbl">@Loc.T("admin.f.slug")</span>
                 <input class="adm-in" value="@_model.Slug" @oninput="OnSlugInput" disabled="@(!IsNew)" />
                 <span class="adm-hint">@Loc.T("admin.btf.slug.hint")</span>
+                @* Живой предпросмотр итогового URL — что будет, даже если свой slug не вводить. *@
+                <span class="adm-url">@Loc.T("admin.btf.url.preview"): <code>/t/@(EffectiveSlug is { Length: > 0 } s ? s : "…")</code></span>
             </label>
 
             <label class="adm-field">
@@ -138,6 +140,10 @@ else
     private string? _uploadError;
     private bool _slugTouched;
     private bool IsNew => Slug is null;
+
+    // Итоговый slug для превью URL: введённый вручную, иначе сгенерированный из названия (как при сохранении).
+    private string EffectiveSlug => _model is null ? ""
+        : !string.IsNullOrWhiteSpace(_model.Slug) ? _model.Slug : BroadcastFormat.Slugify(_model.Name);
 
     // Живая генерация SEO-slug из названия, пока админ не правил slug вручную (только при создании).
     private void OnNameInput(ChangeEventArgs e)
@@ -241,6 +247,8 @@ else
     .adm-in:disabled { background: var(--surface-2); color: var(--muted); }
     .adm-area { min-height: 90px; resize: vertical; font: inherit; line-height: 1.5; }
     .adm-hint { font-size: .78rem; color: var(--muted); }
+    .adm-url { font-size: .8rem; color: var(--ink-2); }
+    .adm-url code { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .1rem .4rem; color: var(--accent); font-weight: 600; }
     .adm-check { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink); font-weight: 560; }
     .adm-form-actions { display: flex; align-items: center; gap: .8rem; margin-top: .4rem; }
     .adm-btn { font-size: .9rem; font-weight: 600; padding: .45rem .8rem; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; text-decoration: none; }

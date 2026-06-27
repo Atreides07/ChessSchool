@@ -113,6 +113,8 @@ builder.Services.AddHttpClient(ChessSchool.Arena.Services.ImageIngestor.HttpClie
         ConnectTimeout = TimeSpan.FromSeconds(5),
     });
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IImageIngestor, ChessSchool.Arena.Services.ImageIngestor>();
+// Разовый перенос уже сохранённых внешних URL изображений в S3 (для записей до появления переноса).
+builder.Services.AddHostedService<ChessSchool.Arena.Services.ImageIngestBackfill>();
 
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();

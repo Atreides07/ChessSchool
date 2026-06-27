@@ -15,6 +15,14 @@
     <link rel="alternate" hreflang="x-default" href="@Alt("ru")" />
     <ImportMap />
     <HeadOutlet />
+    @* Полоса прогресса навигации (заполняется JS из navprogress.js) — обратная связь на медленном канале. *@
+    <style>
+        #nav-progress {
+            position: fixed; top: 0; left: 0; height: 3px; width: 0; opacity: 0;
+            background: var(--accent, #2b6ef2); box-shadow: 0 0 8px var(--accent, #2b6ef2);
+            z-index: 9999; pointer-events: none;
+        }
+    </style>
 </head>
 
 @code {
@@ -35,6 +43,7 @@
        в новую страницу <script> НЕ исполняется, поэтому подключение на самой странице не запускалось
        (отсюда «пропала» кнопка/доска на /t/{id} при переходе с Home). Здесь скрипты живут постоянно и
        по событию enhancedload инициализируют свою страницу; на чужих страницах их setup() — no-op. *@
+    <script src="js/navprogress.js"></script>
     <script src="js/schedule.js"></script>
     <script src="js/tournament.js"></script>
     <script src="js/games.js"></script>

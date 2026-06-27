@@ -234,6 +234,8 @@ else
     .cp { width: 90%; height: 90%; display: block; }
 
     .promo { position: absolute; top: 35%; left: 50%; transform: translateX(-50%); display: flex; gap: .25rem; background: #fff; border: 1px solid var(--border, #d5d9e0); border-radius: 8px; padding: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    /* hidden иначе проигрывает .promo{display:flex} (author > user-agent) — иначе пустой поповер виден точкой. */
+    .promo[hidden] { display: none; }
     .promo-btn { width: 48px; height: 48px; padding: 4px; border: 1px solid var(--border, #d5d9e0); background: var(--surface-2, #f4f5f7); border-radius: 6px; cursor: pointer; }
     .promo-btn .cp { width: 100%; height: 100%; }
 

@@ -85,7 +85,8 @@
         });
     }
 
-    // Реальные локализованные цены в карточки (best-effort): Paddle PricePreview. Сбой — карточки без сумм.
+    // Реальные локализованные цены в карточки + авто-бейдж выгоды (best-effort): Paddle PricePreview.
+    // Сбой/неожиданная форма ответа — карточки без сумм/бейджа (амаунты просто не появятся), не падаем.
     function fillPrices(d) {
         if (!d.priceAnnual) return;
         var ids = {}; document.querySelectorAll('.prem-plan').forEach(function (p) { if (p.dataset.price) ids[p.dataset.price] = p; });
@@ -94,11 +95,22 @@
         window.Paddle.PricePreview({ items: items }).then(function (res) {
             var li = res && res.data && res.data.details && res.data.details.lineItems;
             if (!li) return;
+            var minor = {}; // период → сумма в минорных единицах (для расчёта выгоды)
             li.forEach(function (item) {
                 var card = ids[item.price && item.price.id];
-                var amtEl = card && card.querySelector('[data-amt]');
+                if (!card) return;
+                var amtEl = card.querySelector('[data-amt]');
                 if (amtEl && item.formattedTotals) amtEl.textContent = item.formattedTotals.total;
+                var raw = item.totals && item.totals.total;
+                var n = raw != null ? Number(raw) : NaN;
+                if (!isNaN(n)) minor[card.dataset.period] = n;
             });
+            // Бейдж «−N%»: годовая против 12× месячной (если обе цены известны и выгода положительна).
+            if (minor.month > 0 && minor.year > 0) {
+                var save = Math.round((minor.month * 12 - minor.year) / (minor.month * 12) * 100);
+                var badge = document.querySelector('.prem-plan[data-period="year"] .pp-badge[data-save]');
+                if (badge && save > 0) { badge.textContent = '−' + save + '%'; badge.hidden = false; }
+            }
         }).catch(function () { });
     }
 

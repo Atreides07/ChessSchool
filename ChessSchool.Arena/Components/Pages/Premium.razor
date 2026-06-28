@@ -54,7 +54,9 @@ else
                     <span class="pp-amt" data-amt></span>
                 </button>
                 <button type="button" class="prem-plan is-sel" data-price="@_priceAnnual" data-period="year">
-                    @if (!string.IsNullOrWhiteSpace(_annualNote)) { <span class="pp-badge">@_annualNote</span> }
+                    @* Бейдж выгоды: начальный текст из конфига (необязателен); premium.js заменит на
+                       вычисленный «−N%» из реальных цен PricePreview. Скрыт, пока нечего показать. *@
+                    <span class="pp-badge" data-save hidden>@_annualNote</span>
                     <span class="pp-name">@Loc.T("premium.plan.year")</span>
                     <span class="pp-amt" data-amt></span>
                 </button>

@@ -16,7 +16,11 @@
 
 - ✅ Ядро: модель `Subscription`/идемпотентность, `SubscriptionService`, entitlement-эндпоинт, dev-заглушка.
 - ✅ Paddle: `PaddleBillingProvider`, верификация вебхука, маппинг событий, `POST /webhooks/paddle`.
-- ⏳ Фаза 3: страница `/premium` + Paddle.js + Customer Portal + гейтинг премиума в Arena.
+- ✅ Фронт/гейтинг: страница `/premium` (Paddle.js v2 checkout или dev-активация), entitlement в Arena
+  ([PlayerEntitlements](../ChessSchool.Arena/Services/PlayerEntitlements.cs), кэш на ноду), бейдж
+  «Premium» у текущего игрока в навигации; хук `IsPremiumAsync(sub)` для гейтинга любых фич.
+- ⏳ Остаётся (follow-up): Customer Portal (отмена/смена карты — сессия портала через Paddle API);
+  бейдж Premium в таблице турнира по всем игрокам (нужен батч-запрос статусов в грейне).
 
 ## Настройка Paddle sandbox (то, что нужно сделать в дашборде)
 

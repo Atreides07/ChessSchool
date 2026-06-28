@@ -122,6 +122,19 @@ builder.AddChessSchoolAnalytics();
 // Доступ к cookie запроса (запоминание выбранного вида расписания при SSR-навигации).
 builder.Services.AddHttpContextAccessor();
 
+// Премиум-подписка игрока: статус берём из ApiService (источник истины) по внутреннему ключу,
+// кэшируем на ноду. Ключ инжектит AppHost (InternalApiKey); вне Development обязателен (fail-fast).
+builder.Services.AddMemoryCache();
+var internalApiKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
+builder.Services.AddHttpClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName,
+    c => c.BaseAddress = new("https+http://apiservice"));
+builder.Services.AddSingleton<ChessSchool.Arena.Services.IPlayerEntitlements>(sp =>
+    new ChessSchool.Arena.Services.PlayerEntitlements(
+        sp.GetRequiredService<IHttpClientFactory>(),
+        sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+        internalApiKey,
+        sp.GetRequiredService<ILogger<ChessSchool.Arena.Services.PlayerEntitlements>>()));
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
@@ -185,6 +198,22 @@ app.MapGet("/sitemap.xml", async (HttpRequest r, ChessSchool.Arena.Services.Broa
 });
 
 // Раздел переименован «Турниры» → «Трансляции»: старые пути 301-редиректятся на /broadcasts (без битых ссылок).
+// Dev-активация премиума без оплаты (только Development) — проксирует в ApiService dev-activate.
+if (app.Environment.IsDevelopment())
+{
+    app.MapPost("/premium/dev-activate", async (HttpContext ctx, IHttpClientFactory http, CancellationToken ct) =>
+    {
+        var sub = ctx.User.FindFirst("sub")?.Value;
+        if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
+        var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/internal/subscriptions/dev-activate");
+        req.Headers.Add("X-Internal-Key", internalApiKey);
+        req.Content = System.Net.Http.Json.JsonContent.Create(new ChessSchool.Contracts.DevActivateRequest(sub, "premium"));
+        await client.SendAsync(req, ct);
+        return Results.Ok();
+    }).RequireAuthorization().DisableAntiforgery();
+}
+
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
 app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));
 

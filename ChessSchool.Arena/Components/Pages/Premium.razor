@@ -1,0 +1,70 @@
+@page "/premium"
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@inject IHttpContextAccessor Http
+@inject IConfiguration Config
+@inject IPlayerEntitlements Entitlements
+@inject NavigationManager Nav
+
+@* Премиум-подписка игрока: статический SSR-каркас. Оплата — hosted Checkout Paddle (Paddle.js v2),
+   карты у нас не ходят. Премиум-статус — из ApiService (источник истины). premium.js (глобально в
+   App.razor) навешивает обработчик кнопки (Paddle или dev-активация), переживает enhanced-навигацию. *@
+
+<PageTitle>@Loc.T("premium.title") — ChessArena</PageTitle>
+<HeadContent>
+    <meta name="description" content="@Loc.T("premium.lead")" />
+    <link rel="canonical" href="@($"{Nav.BaseUri}premium")" />
+</HeadContent>
+
+<h1 class="prem-h1">@Loc.T("premium.title")</h1>
+<p class="text-secondary prem-lead">@Loc.T("premium.lead")</p>
+
+@if (!_authed)
+{
+    <div class="card prem-card">
+        <p class="text-secondary">@Loc.T("premium.login")</p>
+        <a class="btn btn-primary" href="/signin?returnUrl=/premium">@Loc.T("premium.loginbtn")</a>
+    </div>
+}
+else if (_isPremium)
+{
+    <div class="card prem-card"><p class="prem-have">@Loc.T("premium.have")</p></div>
+}
+else
+{
+    <div class="card prem-card">
+        <ul class="prem-perks"><li>@Loc.T("premium.perk")</li></ul>
+        <button id="prem-buy" class="btn btn-primary">@(_paddle ? Loc.T("premium.buy") : Loc.T("premium.dev"))</button>
+    </div>
+    @* Параметры для premium.js: режим (paddle/dev), client-токен/price/окружение и user_sub. *@
+    <div id="prem-root" hidden
+         data-mode="@(_paddle ? "paddle" : "dev")"
+         data-token="@_token" data-price="@_priceId" data-env="@_env"
+         data-sub="@_sub" data-success="@($"{Nav.BaseUri}premium")"></div>
+}
+
+@code {
+    private bool _authed, _isPremium, _paddle;
+    private string _sub = "", _token = "", _priceId = "", _env = "sandbox";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = Http.HttpContext?.User;
+        _authed = user?.Identity?.IsAuthenticated == true;
+        _sub = user?.FindFirst("sub")?.Value ?? "";
+        _token = Config["Paddle:ClientToken"] ?? "";
+        _priceId = Config["Paddle:PremiumPriceId"] ?? "";
+        _env = Config["Paddle:Environment"] ?? "sandbox";
+        _paddle = !string.IsNullOrWhiteSpace(_token) && !string.IsNullOrWhiteSpace(_priceId);
+        if (_authed) _isPremium = await Entitlements.IsPremiumAsync(_sub);
+    }
+}
+
+<style>
+    .prem-h1 { font-size: 1.8rem; margin: 0 0 .4rem; }
+    .prem-lead { margin: 0 0 1.4rem; }
+    .prem-card { max-width: 460px; }
+    .prem-have { font-weight: 700; color: var(--success); margin: 0; }
+    .prem-perks { margin: 0 0 1rem; padding-left: 1.1rem; color: var(--ink-2); }
+    .prem-perks li { margin: .2rem 0; }
+</style>

@@ -2,6 +2,8 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using ChessSchool.Arena
 @inject NavigationManager Nav
+@inject IHttpContextAccessor Http
+@inject ChessSchool.Arena.Services.IPlayerEntitlements Entitlements
 
 <input type="checkbox" id="ar-nav-toggle" class="ar-nav-toggle" />
 
@@ -23,6 +25,12 @@
             <NavLink class="ar-link" href="broadcasts">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5" /><path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7" /></svg>@Loc.T("nav.broadcasts")
             </NavLink>
+            <AuthorizeView>
+                <NavLink class="ar-link" href="premium">
+                    <svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6 .6-4.5 4 1.3 6L12 17l-5.4 2.8 1.3-6-4.5-4 6-.6z" /></svg>@Loc.T("nav.premium")
+                    @if (_isPremium) { <span class="ar-prem">@Loc.T("premium.badge")</span> }
+                </NavLink>
+            </AuthorizeView>
             <AuthorizeView Policy="Admin">
                 <NavLink class="ar-link" href="admin">
                     <svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9.5 12l1.8 1.8L15 10" /></svg>@Loc.T("nav.admin")
@@ -80,6 +88,15 @@
 </div>
 
 @code {
+    private bool _isPremium;
+
+    // Премиум-статус текущего игрока для бейджа в навигации (кэшируется в PlayerEntitlements).
+    protected override async Task OnInitializedAsync()
+    {
+        var sub = Http.HttpContext?.User?.FindFirst("sub")?.Value;
+        if (!string.IsNullOrEmpty(sub)) _isPremium = await Entitlements.IsPremiumAsync(sub);
+    }
+
     // Переключение языка: /lang ставит cookie и возвращает на текущую страницу (без query-мусора).
     private string LangHref(string culture)
     {
@@ -108,6 +125,7 @@
     .ar-link svg { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
     .ar-link:hover { background: var(--surface-2); color: var(--ink); }
     .ar-link.active { background: var(--surface-2); color: var(--ink); font-weight: 680; }
+    .ar-prem { margin-left: auto; font-size: .68rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #6e5200; background: #fff3cf; border: 1px solid #e0ad00; border-radius: var(--r-pill); padding: .05rem .4rem; }
 
     .ar-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 

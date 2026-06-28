@@ -82,7 +82,9 @@ var web = builder.AddProject<Projects.ChessSchool_Web>("webfrontend")
 var arena = builder.AddProject<Projects.ChessSchool_Arena>("arena")
     .WithExternalHttpEndpoints()
     .WithEnvironment("Sso__ClientId", "arena-web")
+    .WithEnvironment("InternalApiKey", internalKey) // entitlement подписки из ApiService (server-to-server)
     .WithReference(auth)
+    .WithReference(apiService) // проверка премиум-подписки игрока (/internal/subscriptions/{sub})
     .WithReference(redis) // Orleans clustering+persist турниров, DataProtection, ticket-store
     .WithReference(seq)
     // S3-хранилище фонов трансляций (локально — MinIO; в проде задаётся реальный S3 через конфиг).

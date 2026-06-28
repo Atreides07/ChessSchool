@@ -149,6 +149,8 @@
             <div class="sr-row"><span>@Loc.T("rules.draw")</span><strong>+ 1</strong></div>
             <div class="sr-row"><span>@Loc.T("rules.loss")</span><strong>0</strong></div>
             <div class="sr-bonus"><span>@Loc.T("rules.streak")</span><strong>@Loc.T("rules.bonus")</strong></div>
+            <div class="sr-bonus"><span>@Loc.T("rules.berserk")</span><strong>@Loc.T("rules.berserkbonus")</strong></div>
+            <div class="sr-hint">@Loc.T("rules.berserkhint")</div>
         </div>
     </aside>
 </div>
@@ -437,6 +439,7 @@
     .sr-row { display: flex; justify-content: space-between; padding: .55rem 0; border-bottom: 1px solid var(--line); }
     .sr-row strong { font-variant-numeric: tabular-nums; }
     .sr-bonus { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; background: var(--warn-weak); color: var(--warn); font-weight: 700; padding: .7rem 1rem; border-radius: var(--r-md); }
+    .sr-hint { margin-top: .6rem; font-size: .82rem; color: var(--ink-2); line-height: 1.35; }
 
     /* На узких экранах правая колонка уезжает вниз (после контента). */
     @@media (max-width: 900px) {

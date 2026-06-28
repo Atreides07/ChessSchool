@@ -913,8 +913,9 @@ public sealed class ArenaTournamentGrain(
         Award(white, g.Result == GameResult.WhiteWins ? 1.0 : g.Result == GameResult.Draw ? 0.5 : 0.0);
         Award(black, g.Result == GameResult.BlackWins ? 1.0 : g.Result == GameResult.Draw ? 0.5 : 0.0);
 
-        if (g.Result == GameResult.WhiteWins && g.WhiteBerserk) white.Score += 1;
-        if (g.Result == GameResult.BlackWins && g.BlackBerserk) black.Score += 1;
+        // Победа в берсерк-партии — бонус +2 сверх обычного начисления.
+        if (g.Result == GameResult.WhiteWins && g.WhiteBerserk) white.Score += 2;
+        if (g.Result == GameResult.BlackWins && g.BlackBerserk) black.Score += 2;
 
         // Событие по каждому игроку-человеку (ядро вовлечённости: сыгранные партии, исход, берсерк, бот-ли соперник).
         var durationSec = g.StartedAt == default ? null : (int?)(g.FinishedAt!.Value - g.StartedAt).TotalSeconds;

@@ -96,7 +96,7 @@
                     </div>
                     @if (!authed && s.Status != TournamentStatus.Finished)
                     {
-                        <a class="btn btn-join" href="/signin?returnUrl=/t/@Id">@(s.Status == TournamentStatus.Created ? Loc.T("act.loginreg") : Loc.T("act.login"))</a>
+                        <a class="btn btn-join" href="/signin?returnUrl=/t/@Id" data-enhance-nav="false">@(s.Status == TournamentStatus.Created ? Loc.T("act.loginreg") : Loc.T("act.login"))</a>
                     }
                 </div>
             </div>

@@ -28,7 +28,9 @@
                 }
             </div>
         </div>
-        <a class="um-item" href="@SignOutHref" role="menuitem">
+        @* Выход ведёт на внешний эндпоинт IdP (302 на чужой домен) — отключаем enhanced-nav,
+           иначе Blazor пытается fetch'ить и не следует за кросс-доменным редиректом. *@
+        <a class="um-item" href="@SignOutHref" role="menuitem" data-enhance-nav="false">
             <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M12 19H6a2 2 0 01-2-2V7a2 2 0 012-2h6" /></svg>
             Выйти
         </a>

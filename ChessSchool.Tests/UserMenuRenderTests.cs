@@ -22,6 +22,14 @@ public class UserMenuRenderTests : BunitContext
     }
 
     [Fact]
+    public void SignOut_DisablesEnhancedNav()
+    {
+        // Выход ведёт на внешний 302 (IdP) — enhanced-nav должен быть отключён, иначе ссылка «зависает».
+        var cut = Render<UserMenu>(p => p.Add(c => c.SignOutHref, "/signout"));
+        Assert.Contains("data-enhance-nav=\"false\"", cut.Markup);
+    }
+
+    [Fact]
     public void NonPremium_NoIndicator()
     {
         var cut = Render<UserMenu>(p => p

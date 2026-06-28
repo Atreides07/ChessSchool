@@ -23,14 +23,16 @@
 {
     <div class="card prem-card">
         <p class="text-secondary">@Loc.T("premium.login")</p>
-        <a class="btn btn-primary" href="/signin?returnUrl=/premium">@Loc.T("premium.loginbtn")</a>
+        <a class="btn btn-primary" href="/signin?returnUrl=/premium" data-enhance-nav="false">@Loc.T("premium.loginbtn")</a>
     </div>
 }
 else if (_isPremium)
 {
     <div class="card prem-card">
         <p class="prem-have">@Loc.T("premium.have")</p>
-        <a class="btn btn-sm btn-outline" href="/premium/portal">@Loc.T("premium.manage")</a>
+        @* Внешний редирект на Customer Portal Paddle: отключаем enhanced-nav, иначе Blazor делает fetch
+           и не может последовать за 302 на чужой домен (CORS) — ссылка «зависает». *@
+        <a class="btn btn-sm btn-outline" href="/premium/portal" data-enhance-nav="false">@Loc.T("premium.manage")</a>
     </div>
 }
 else

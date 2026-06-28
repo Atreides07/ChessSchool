@@ -204,6 +204,59 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task DrawOffer_BetweenHumans_AcceptEndsInDraw()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("draw-arena");
+            await t.ConfigureAsync("Ничья", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+
+            await t.JoinAsync("a", "Игрок A");
+            await t.JoinAsync("b", "Игрок B");
+            await t.SeekAsync("a");
+            await t.SeekAsync("b"); // спарились (оба люди)
+
+            // A предлагает ничью человеку → не мгновенно, ждём ответа.
+            Assert.Equal("offered", await t.OfferDrawAsync("a"));
+            var bState = await t.GetStateAsync("b");
+            Assert.True(bState.MyGame!.DrawOfferFromOpponent); // B видит предложение
+            Assert.False((await t.GetStateAsync("a")).MyGame!.DrawOfferFromOpponent); // у A — это своё предложение
+
+            // B принимает → партия завершена ничьёй.
+            await t.AcceptDrawAsync("b");
+            var done = await t.GetStateAsync("a");
+            Assert.Equal(GameStatus.Finished, done.MyGame!.Status);
+            Assert.Equal(GameResult.Draw, done.MyGame!.Result);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task DrawOffer_Declined_ClearsOffer_GameContinues()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("draw-decline-arena");
+            await t.ConfigureAsync("Отказ", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-1), 600);
+            await t.JoinAsync("a", "A");
+            await t.JoinAsync("b", "B");
+            await t.SeekAsync("a");
+            await t.SeekAsync("b");
+
+            await t.OfferDrawAsync("a");
+            await t.DeclineDrawAsync("b");
+            var state = await t.GetStateAsync("b");
+            Assert.False(state.MyGame!.DrawOfferFromOpponent);     // предложение снято
+            Assert.Equal(GameStatus.InProgress, state.MyGame!.Status); // партия продолжается
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
     public async Task FinishedGame_StaysForPlayerAndViewers_UntilSeekNext()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

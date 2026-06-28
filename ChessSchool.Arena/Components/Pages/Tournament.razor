@@ -263,6 +263,12 @@
             ["oppmove"] = Loc.T("game.oppmove"),
             ["berserktip"] = Loc.T("game.berserktip"),
             ["resign"] = Loc.T("game.resign"),
+            ["drawoffer"] = Loc.T("game.drawoffer"),
+            ["drawoffered"] = Loc.T("game.drawoffered"),
+            ["drawincoming"] = Loc.T("game.drawincoming"),
+            ["drawaccept"] = Loc.T("game.drawaccept"),
+            ["drawdecline"] = Loc.T("game.drawdecline"),
+            ["drawdeclined"] = Loc.T("game.drawdeclined"),
             ["games"] = Loc.T("sec.games"),
             ["allgames"] = Loc.T("link.allgames"),
             ["reswhite"] = Loc.T("res.white"),
@@ -365,6 +371,9 @@
     .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
+    .draw-declined { color: var(--muted); font-size: .85rem; }
+    .draw-incoming { margin-top: .6rem; display: flex; gap: .5rem; align-items: center; padding: .55rem .7rem;
+        background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); font-size: .92rem; }
     .waiting { text-align: center; padding: 2.5rem 1rem; font-size: 1.05rem; color: var(--ink-2); margin-top: 1.2rem; }
     .seek-card { text-align: center; padding: 2.2rem 1rem; margin-top: 1.2rem; }
     .seek-card .btn-join { font-size: 1.05rem; }

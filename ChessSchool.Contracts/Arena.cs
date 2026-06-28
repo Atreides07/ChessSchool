@@ -80,7 +80,9 @@ public sealed record ArenaGameDto(
     [property: Id(15)] string? LastTo = null,
     [property: Id(16)] string? CheckSquare = null,
     [property: Id(17)] bool WhiteIsBot = false,
-    [property: Id(18)] bool BlackIsBot = false);
+    [property: Id(18)] bool BlackIsBot = false,
+    [property: Id(19)] bool DrawOfferFromOpponent = false,
+    [property: Id(20)] bool DrawOfferByMe = false);
 
 /// <summary>Полное состояние турнира для игрока (доска лидеров + его партия).</summary>
 [GenerateSerializer]

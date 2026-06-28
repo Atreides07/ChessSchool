@@ -83,4 +83,21 @@ public sealed class ArenaHub(IGrainFactory grains, ArenaBroadcaster broadcaster)
         await Grain(id).ResignAsync(sub);
         return await Grain(id).GetStateAsync(sub);
     }
+
+    /// <summary>Предложить ничью. Возвращает исход ("accepted"/"declined"/"offered") — клиент покажет реакцию.</summary>
+    public Task<string> OfferDraw(string id) => Grain(id).OfferDrawAsync(RequireSub());
+
+    public async Task<ArenaStateDto> AcceptDraw(string id)
+    {
+        var sub = RequireSub();
+        await Grain(id).AcceptDrawAsync(sub);
+        return await Grain(id).GetStateAsync(sub);
+    }
+
+    public async Task<ArenaStateDto> DeclineDraw(string id)
+    {
+        var sub = RequireSub();
+        await Grain(id).DeclineDrawAsync(sub);
+        return await Grain(id).GetStateAsync(sub);
+    }
 }

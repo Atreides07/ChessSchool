@@ -17,6 +17,7 @@
     let premove = null; // отложенный ход на чужом ходу: { from, to, promo } — исполнится, когда наступит наш ход
     let connecting = false, setupGen = 0; // защита от повторного входа в setup (иначе дубли соединений/таймеров)
     let lastHeroSig = null, lastPlayKey = null; // устойчивые секции: не пересобирать шапку/ожидание на каждый пуш
+    let lastGameSig = null, drawDeclinedAt = 0;  // своя партия: не пересобирать доску на каждый пуш (иначе теряются клики)
     let chessUrl = '/lib/chess.js', signalrUrl = '/lib/signalr.js'; // переопределяются fingerprinted-URL из #t-root
 
     async function ensureLibs() {
@@ -34,7 +35,7 @@
         if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
         if (conn) { try { conn.stop(); } catch (e) { } conn = null; }
         currentId = null; state = null; chess = null; sel = null; pendingPromo = null; premove = null;
-        lastHeroSig = null; lastPlayKey = null; // следующий setup перестроит каркас заново
+        lastHeroSig = null; lastPlayKey = null; lastGameSig = null; // следующий setup перестроит каркас заново
     }
 
     async function setup() {
@@ -176,9 +177,17 @@
             return;
         }
         if (g) {                                          // идёт своя партия
-            el.innerHTML = myGameHtml();
-            lastPlayKey = 'game';
-            wireBoardHandlers();
+            // Полную пересборку (innerHTML + buildBoard) делаем ТОЛЬКО при смене партии/ориентации/статуса.
+            // На обычный пуш (ход в любой доске турнира, апдейт часов) — лёгкое обновление БЕЗ пересоздания
+            // клеток доски: иначе кнопка-клетка уничтожалась между нажатием и кликом и «клик не срабатывал».
+            const sig = `${g.gameId}|${g.status}|${g.myColor}`;
+            if (lastPlayKey !== 'game' || lastGameSig !== sig) {
+                el.innerHTML = myGameHtml();
+                lastPlayKey = 'game'; lastGameSig = sig;
+                wireBoardHandlers();
+            } else {
+                updateMyGameCard();                       // лёгкое обновление: фигуры/часы/контролы, без rebuild доски
+            }
             return;
         }
         if (lastPlayKey !== null) { el.innerHTML = ''; lastPlayKey = null; } // нечего показывать
@@ -257,13 +266,6 @@
             ? `<div class="gs-result"><strong>${esc(resultText(g.result))}</strong></div>
                <button class="btn btn-join" id="t-seek">${esc(L.seek)}</button>`
             : '';
-        // В активной партии управление — под доской (ход + берсерк/сдаться).
-        const controls = fin ? ''
-            : `<div class="gstatus"><span class="text-secondary">${esc(g.turn === g.myColor ? L.yourmove : L.oppmove)}</span>
-               <span class="ds-spacer"></span>
-               ${g.myBerserkAvailable ? `<button class="btn btn-warn btn-sm" id="t-berserk" title="${esc(L.berserktip)}">⚡ Berserk</button>` : ''}
-               <button class="btn btn-outline-danger btn-sm" id="t-resign">${esc(L.resign)}</button></div>`;
-
         return `<div class="card my-game">
             <div class="players players-top">${iAmWhite ? blackRow : whiteRow}</div>
             <div class="game-row">
@@ -271,8 +273,45 @@
                 ${side ? `<div class="game-side">${side}</div>` : ''}
             </div>
             <div class="players players-bottom">${iAmWhite ? whiteRow : blackRow}</div>
-            ${controls}
+            <div class="my-controls">${controlsHtml(g)}</div>
         </div>`;
+    }
+
+    // Управление под доской (ход + берсерк + ничья + сдаться) и баннер входящего предложения ничьи.
+    // Вынесено отдельно: обновляется на каждый пуш без пересоздания доски (см. updateMyGameCard).
+    function controlsHtml(g) {
+        if (g.status === 2) return '';                    // завершено — результат/«подобрать» в game-side
+        const turn = `<span class="text-secondary">${esc(g.turn === g.myColor ? L.yourmove : L.oppmove)}</span>`;
+        const berserk = g.myBerserkAvailable ? `<button class="btn btn-warn btn-sm" id="t-berserk" title="${esc(L.berserktip)}">⚡ Berserk</button>` : '';
+        let draw;
+        if (g.drawOfferByMe) draw = `<button class="btn btn-outline btn-sm" disabled>${esc(L.drawoffered)}</button>`;
+        else if (Date.now() - drawDeclinedAt < 3000) draw = `<span class="draw-declined">${esc(L.drawdeclined)}</span>`;
+        else draw = `<button class="btn btn-outline btn-sm" id="t-draw">${esc(L.drawoffer)}</button>`;
+        const main = `<div class="gstatus">${turn}<span class="ds-spacer"></span>${berserk}${draw}` +
+            `<button class="btn btn-outline-danger btn-sm" id="t-resign">${esc(L.resign)}</button></div>`;
+        const incoming = g.drawOfferFromOpponent
+            ? `<div class="draw-incoming"><span>🤝 ${esc(L.drawincoming)}</span><span class="ds-spacer"></span>` +
+              `<button class="btn btn-success btn-sm" id="t-draw-accept">${esc(L.drawaccept)}</button>` +
+              `<button class="btn btn-outline btn-sm" id="t-draw-decline">${esc(L.drawdecline)}</button></div>`
+            : '';
+        return main + incoming;
+    }
+
+    // Лёгкое обновление карточки своей партии без пересоздания клеток доски (клики не теряются):
+    // обновляем ряды игроков (часы/имена), контролы (ход/берсерк/ничья) и фигуры через renderBoard.
+    function updateMyGameCard() {
+        const g = state.myGame; if (!g) return;
+        const iAmWhite = g.myColor === 0;
+        const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
+        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot);
+        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot);
+        const top = document.querySelector('.my-game .players-top');
+        const bot = document.querySelector('.my-game .players-bottom');
+        if (top) top.innerHTML = iAmWhite ? blackRow : whiteRow;
+        if (bot) bot.innerHTML = iAmWhite ? whiteRow : blackRow;
+        const ctrl = document.querySelector('.my-game .my-controls');
+        if (ctrl) ctrl.innerHTML = controlsHtml(g);
+        renderBoard();
     }
 
     function playerRow(name, berserk, ms, active, isBot) {
@@ -439,6 +478,18 @@
         if (berserk) berserk.onclick = () => conn.invoke('Berserk', currentId).then(applyState).catch(() => { });
         const resign = document.getElementById('t-resign');
         if (resign) resign.onclick = () => conn.invoke('Resign', currentId).then(applyState).catch(() => { });
+        const draw = document.getElementById('t-draw');
+        if (draw) draw.onclick = () => {
+            draw.disabled = true;
+            conn.invoke('OfferDraw', currentId).then(outcome => {
+                if (outcome === 'declined') { drawDeclinedAt = Date.now(); scheduleRender(); setTimeout(scheduleRender, 3100); }
+                else conn.invoke('GetState', currentId).then(applyState).catch(() => { }); // accepted/offered → подтянуть состояние
+            }).catch(() => { draw.disabled = false; });
+        };
+        const accept = document.getElementById('t-draw-accept');
+        if (accept) accept.onclick = () => conn.invoke('AcceptDraw', currentId).then(applyState).catch(() => { });
+        const decline = document.getElementById('t-draw-decline');
+        if (decline) decline.onclick = () => conn.invoke('DeclineDraw', currentId).then(applyState).catch(() => { });
     }
 
     // ----------------------- мини-доска трансляции (без интерактива) -----------------------

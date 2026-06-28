@@ -34,6 +34,12 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
     Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move);
     Task BerserkAsync(string sub);
     Task ResignAsync(string sub);
+    /// <summary>Предложить ничью. Возвращает исход: "accepted" / "declined" (бот) / "offered" (ждём соперника) / "".</summary>
+    Task<string> OfferDrawAsync(string sub);
+    /// <summary>Принять предложение ничьи соперника.</summary>
+    Task AcceptDrawAsync(string sub);
+    /// <summary>Отклонить предложение ничьи соперника.</summary>
+    Task DeclineDrawAsync(string sub);
 }
 
 // ----------------------- Каталог / расписание -----------------------
@@ -187,6 +193,7 @@ public sealed class ArenaTournamentGrain(
         public DateTimeOffset? FinishedAt;
         public DateTimeOffset? BotThinkUntil; // до этого момента бот «думает» над ходом (неравномерно)
         public int BotPlannedMs;              // запланированное время обдумывания текущего хода
+        public string? DrawOfferBy;           // sub предложившего ничью (ждём ответа соперника-человека)
     }
 
     private bool _configured;
@@ -633,6 +640,7 @@ public sealed class ArenaTournamentGrain(
         if (mover == Color.White) { game.WhiteMoved = true; if (!game.WhiteBerserk) game.WhiteMs += _tc.IncrementSeconds * 1000L; }
         else { game.BlackMoved = true; if (!game.BlackBerserk) game.BlackMs += _tc.IncrementSeconds * 1000L; }
         game.LastMoveAt = DateTimeOffset.UtcNow;
+        game.DrawOfferBy = null; // любой ход снимает висящее предложение ничьи
 
         if (game.Board.IsEndGame)
         {
@@ -668,6 +676,87 @@ public sealed class ArenaTournamentGrain(
             await FlushAsync();
             notifier.Notify(Id);
         }
+    }
+
+    public async Task<string> OfferDrawAsync(string sub)
+    {
+        if (!_players.TryGetValue(sub, out var player) || player.GameId is not { } gid
+            || !_games.TryGetValue(gid, out var game) || game.Status != GameStatus.InProgress)
+            return "";
+
+        var opponentSub = sub == game.WhiteSub ? game.BlackSub : game.WhiteSub;
+
+        if (game.DrawOfferBy == opponentSub) // соперник уже предлагал → встречное предложение = согласие
+        {
+            AgreeDraw(game); await FlushAsync(); notifier.Notify(Id); return "accepted";
+        }
+        if (game.DrawOfferBy == sub) return "offered"; // уже предложено, ждём ответа
+
+        if (IsBotSub(opponentSub))
+        {
+            if (await BotAcceptsDrawAsync(game, opponentSub))
+            {
+                AgreeDraw(game); await FlushAsync(); notifier.Notify(Id); return "accepted";
+            }
+            return "declined";
+        }
+
+        game.DrawOfferBy = sub; // соперник-человек — ждём его ответа
+        notifier.Notify(Id);
+        return "offered";
+    }
+
+    public async Task AcceptDrawAsync(string sub)
+    {
+        if (_players.TryGetValue(sub, out var player) && player.GameId is { } gid
+            && _games.TryGetValue(gid, out var game) && game.Status == GameStatus.InProgress
+            && game.DrawOfferBy is { } by && by != sub)
+        {
+            AgreeDraw(game); await FlushAsync(); notifier.Notify(Id);
+        }
+    }
+
+    public Task DeclineDrawAsync(string sub)
+    {
+        if (_players.TryGetValue(sub, out var player) && player.GameId is { } gid
+            && _games.TryGetValue(gid, out var game) && game.Status == GameStatus.InProgress
+            && game.DrawOfferBy is { } by && by != sub)
+        {
+            game.DrawOfferBy = null; notifier.Notify(Id);
+        }
+        return Task.CompletedTask;
+    }
+
+    private void AgreeDraw(Game game)
+    {
+        game.DrawOfferBy = null;
+        game.Result = GameResult.Draw;
+        game.Reason = GameEndReason.DrawAgreed;
+        FinishGame(game);
+    }
+
+    // Бот соглашается на ничью, если НЕ выигрывает явно (по оценке движка) и партия вне дебюта;
+    // при заметном проигрыше — рад ничьей в любой момент. Нет движка → играет дальше (отклоняет).
+    private async Task<bool> BotAcceptsDrawAsync(Game game, string botSub)
+    {
+        var evaluator = services?.GetService<IPositionEvaluator>();
+        if (evaluator is null) return false;
+        EngineEval? eval;
+        try { eval = await evaluator.EvaluateAsync(game.Board.Fen, 250); }
+        catch { return false; }
+        if (eval is null) return false;
+
+        // EngineEval — со стороны игрока, чей ход (UCI). Приводим к точке зрения бота.
+        bool botIsWhite = botSub == game.WhiteSub;
+        bool botToMove = (game.Board.Turn == Color.White) == botIsWhite;
+        int stmCp = eval.Value.Mate is int m ? (m > 0 ? 100000 : -100000) : (eval.Value.Cp ?? 0);
+        int botCp = botToMove ? stmCp : -stmCp;
+
+        var parts = game.Board.Fen.Split(' ');
+        int fullmove = parts.Length >= 6 && int.TryParse(parts[5], out var n) ? n : 1;
+
+        if (botCp <= -150) return true;            // бот заметно хуже — согласен
+        return botCp <= 20 && fullmove >= 10;      // равная позиция вне дебюта
     }
 
     // ----------------------- Внутренняя логика -----------------------
@@ -1028,6 +1117,8 @@ public sealed class ArenaTournamentGrain(
             g.Status, g.Result, g.Board.LastSan,
             g.WhiteBerserk, g.BlackBerserk, canBerserk,
             g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare,
-            IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub));
+            IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub),
+            DrawOfferFromOpponent: g.Status == GameStatus.InProgress && g.DrawOfferBy is not null && g.DrawOfferBy != sub,
+            DrawOfferByMe: g.Status == GameStatus.InProgress && g.DrawOfferBy == sub);
     }
 }

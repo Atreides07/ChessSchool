@@ -237,6 +237,25 @@ if (app.Environment.IsDevelopment())
     }).RequireAuthorization().DisableAntiforgery();
 }
 
+// Разбор партии для тонкого клиента страницы /me/games/{id}: считается в обычном request-контексте
+// (Stockfish/HTTP к ApiService тут работают, в отличие от Blazor-рендерера), кэшируется в ApiService.
+// Премиум-фича → гейт по подписке; только участник (GetAsync вернёт null постороннему).
+app.MapGet("/api/me/games/{id:guid}/analysis", async (Guid id, HttpContext ctx,
+    ChessSchool.Arena.Services.ArenaReviewService review,
+    ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
+{
+    var sub = ctx.User.FindFirst("sub")?.Value;
+    if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
+    if (!await ents.IsPremiumAsync(sub, ct)) return Results.Forbid();
+    var detail = await review.GetAsync(id, sub, ct);
+    if (detail is null) return Results.NotFound();
+
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeout.CancelAfter(TimeSpan.FromSeconds(120)); // разбор не должен висеть бесконечно
+    var analysis = await review.ComputeAnalysisAsync(id, sub, detail.Pgn, timeout.Token);
+    return Results.Ok(analysis);
+}).RequireAuthorization();
+
 // Управление подпиской: редирект в hosted Customer Portal провайдера (URL берём у ApiService).
 app.MapGet("/premium/portal", async (HttpContext ctx, IHttpClientFactory http, CancellationToken ct) =>
 {

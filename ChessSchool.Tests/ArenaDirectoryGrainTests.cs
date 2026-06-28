@@ -67,4 +67,29 @@ public class ArenaDirectoryGrainTests
         }
         finally { await cluster.StopAllSilosAsync(); }
     }
+
+    [Fact]
+    public async Task Listing_HasDenseCadence_BulletHalfHour_BlitzAndRapidHourly()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var list = await cluster.GrainFactory.GetGrain<IArenaDirectoryGrain>(0).ListAsync();
+
+            void AssertCadence(int initialSeconds, double expectMinutes)
+            {
+                var starts = list.Where(t => t.TimeControl.InitialSeconds == initialSeconds)
+                    .Select(t => t.StartsAt).OrderBy(x => x).ToList();
+                Assert.True(starts.Count >= 3, $"ожидали несколько турниров с контролем {initialSeconds}с");
+                for (int i = 1; i < starts.Count; i++)
+                    Assert.Equal(expectMinutes, (starts[i] - starts[i - 1]).TotalMinutes, 0);
+            }
+
+            AssertCadence(60, 30);   // Bullet — каждые 30 минут
+            AssertCadence(180, 60);  // Blitz — каждый час
+            AssertCadence(600, 60);  // Rapid — каждый час
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
 }

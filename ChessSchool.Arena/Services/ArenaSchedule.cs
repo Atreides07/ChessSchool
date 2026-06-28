@@ -9,14 +9,16 @@ namespace ChessSchool.Arena.Services;
 /// </summary>
 public static class ArenaSchedule
 {
-    /// <summary>Повторяющаяся серия: тип, контроль, шаг (часы), длительность (сек), смещение старта (мин).</summary>
-    public sealed record Spec(string Type, TimeControl Tc, int StepHours, int DurationSec, int OffsetMin);
+    /// <summary>Повторяющаяся серия: тип, контроль, шаг (мин), длительность (сек), смещение старта (мин).</summary>
+    public sealed record Spec(string Type, TimeControl Tc, int StepMinutes, int DurationSec, int OffsetMin);
 
+    // Регулярные турниры идут плотно, встык: длительность ≈ шагу, поэтому турниры одного типа не
+    // перекрываются (важно и для таймлайна — карточки занимают столбцы по длительности).
     public static readonly Spec[] Series =
     [
-        new("Bullet", new TimeControl(60, 0), 3, 3600, 0),
-        new("Blitz", new TimeControl(180, 0), 1, 3600, 0),   // блиц каждый час — непрерывная лента
-        new("Rapid", new TimeControl(600, 0), 3, 5400, 30),
+        new("Bullet", new TimeControl(60, 0), 30, 1800, 0),   // каждые 30 мин, 30 мин
+        new("Blitz", new TimeControl(180, 0), 60, 3600, 0),   // каждый час, 60 мин
+        new("Rapid", new TimeControl(600, 0), 60, 3600, 30),  // каждый час, 60 мин, старт в :30
     ];
 
     public const int WindowBackHours = 3;

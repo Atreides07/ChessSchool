@@ -64,7 +64,7 @@ public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDir
         var future = new List<TournamentSummaryDto>();
         var liveIds = new List<string>();
         foreach (var spec in ArenaSchedule.Series)
-            for (var t = windowStart.AddMinutes(spec.OffsetMin); t < windowEnd; t = t.AddHours(spec.StepHours))
+            for (var t = windowStart.AddMinutes(spec.OffsetMin); t < windowEnd; t = t.AddMinutes(spec.StepMinutes))
             {
                 var id = ArenaSchedule.MakeId(spec.Type, t);
                 if (t > now)

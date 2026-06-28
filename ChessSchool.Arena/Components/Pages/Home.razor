@@ -197,7 +197,10 @@ else
                         <div class="lcard-meta">
                             <span>@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
                             <span>@t.HumanCount 👤 @Loc.T("unit.players")</span>
-                            <span>@t.BotCount 🤖 @Loc.T("unit.bots")</span>
+                            @if (t.BotCount > 0)
+                            {
+                                <span>@t.BotCount 🤖 @Loc.T("unit.bots")</span>
+                            }
                             @if (t.Status == TournamentStatus.Running)
                             {
                                 <span>@Loc.MinutesLeft(t.SecondsLeft / 60)</span>
@@ -221,7 +224,10 @@ else
                             <div class="lcard-meta">
                                 <span>@v.Brand.StartsAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
                                 <span>@v.Summary.HumanCount 👤 @Loc.T("unit.players")</span>
-                                <span>@v.Summary.BotCount 🤖 @Loc.T("unit.bots")</span>
+                                @if (v.Summary.BotCount > 0)
+                                {
+                                    <span>@v.Summary.BotCount 🤖 @Loc.T("unit.bots")</span>
+                                }
                             </div>
                         </a>
                     }
@@ -275,7 +281,7 @@ else
                             <span class="up-time">@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
                             <span class="tlb-ico">@Icon(TypeOf(t.TimeControl))</span>
                             <span class="up-title">@t.Name</span>
-                            <span class="up-pop">@t.HumanCount 👤 @t.BotCount 🤖</span>
+                            <span class="up-pop">@t.HumanCount 👤@(t.BotCount > 0 ? $" {t.BotCount} 🤖" : "")</span>
                             <span class='badge @(t.Joined ? "badge-mine" : "badge-warn")'>@(t.Joined ? Loc.T("mine.you") : Loc.T("reg.short"))</span>
                         </a>
                     }

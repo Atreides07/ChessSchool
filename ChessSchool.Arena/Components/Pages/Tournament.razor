@@ -340,6 +340,12 @@
     .my-game .players-top { margin-bottom: .5rem; }
     .my-game .players-bottom { margin-top: .5rem; }
     .my-game .board-wrap { position: relative; width: min(92vw, 448px); }
+    /* При завершении рядом с доской — панель «результат + подобрать соперника» (видно сразу). */
+    .my-game .game-row { display: flex; gap: 1rem; align-items: flex-start; }
+    .my-game .game-row .board-wrap { flex: 0 1 auto; }
+    .game-side { flex: 0 0 auto; display: flex; flex-direction: column; gap: .8rem; min-width: 150px; padding-top: .25rem; }
+    .game-side .btn-join { width: 100%; }
+    .gs-result { font-size: 1.15rem; font-weight: 700; text-align: center; }
     .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }
@@ -447,6 +453,8 @@
         .t-hero-side { align-items: stretch; }
         .t-hero-side .btn-join { width: 100%; }
         .t-parts { justify-content: center; }
+        .my-game .game-row { flex-direction: column; }
+        .game-side { order: -1; width: 100%; min-width: 0; padding-top: 0; margin-bottom: .4rem; } /* над доской */
         .boards-grid { grid-template-columns: 1fr; }
         .sec-head { flex-wrap: wrap; gap: .3rem; }
         .crumbs { font-size: .85rem; }

@@ -239,22 +239,32 @@
         if (!g) return '';
         const fin = g.status === 2;
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
-        const gstatus = fin
-            ? `<strong>${esc(resultText(g.result))}</strong><span class="ds-spacer"></span>
-               <button class="btn btn-join btn-sm" id="t-seek">${esc(L.seek)}</button>`
-            : `<span class="text-secondary">${esc(g.turn === (g.myColor) ? L.yourmove : L.oppmove)}</span>
-               <span class="ds-spacer"></span>
-               ${g.myBerserkAvailable ? `<button class="btn btn-warn btn-sm" id="t-berserk" title="${esc(L.berserktip)}">⚡ Berserk</button>` : ''}
-               <button class="btn btn-outline-danger btn-sm" id="t-resign">${esc(L.resign)}</button>`;
         // Соперник — над доской, я — под доской (как на реальной доске; доска уже развёрнута под мой цвет).
         const iAmWhite = g.myColor === 0; // PieceColor.White = 0
         const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive);
         const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive);
+
+        // При завершении — результат и «подобрать соперника» сбоку от доски (справа на десктопе, над
+        // доской на мобиле): видно сразу, а не внизу карточки. Результат — над кнопкой.
+        const side = fin
+            ? `<div class="gs-result"><strong>${esc(resultText(g.result))}</strong></div>
+               <button class="btn btn-join" id="t-seek">${esc(L.seek)}</button>`
+            : '';
+        // В активной партии управление — под доской (ход + берсерк/сдаться).
+        const controls = fin ? ''
+            : `<div class="gstatus"><span class="text-secondary">${esc(g.turn === g.myColor ? L.yourmove : L.oppmove)}</span>
+               <span class="ds-spacer"></span>
+               ${g.myBerserkAvailable ? `<button class="btn btn-warn btn-sm" id="t-berserk" title="${esc(L.berserktip)}">⚡ Berserk</button>` : ''}
+               <button class="btn btn-outline-danger btn-sm" id="t-resign">${esc(L.resign)}</button></div>`;
+
         return `<div class="card my-game">
             <div class="players players-top">${iAmWhite ? blackRow : whiteRow}</div>
-            <div class="board-wrap"><div class="board" id="t-board"></div><div class="promo" id="t-promo" hidden></div></div>
+            <div class="game-row">
+                <div class="board-wrap"><div class="board" id="t-board"></div><div class="promo" id="t-promo" hidden></div></div>
+                ${side ? `<div class="game-side">${side}</div>` : ''}
+            </div>
             <div class="players players-bottom">${iAmWhite ? whiteRow : blackRow}</div>
-            <div class="gstatus">${gstatus}</div>
+            ${controls}
         </div>`;
     }
 
@@ -337,6 +347,9 @@
         if (g.lastFrom && cells[g.lastFrom]) cells[g.lastFrom].classList.add('hl');
         if (g.lastTo && cells[g.lastTo]) cells[g.lastTo].classList.add('hl');
         if (g.checkSquare && cells[g.checkSquare]) cells[g.checkSquare].classList.add('chk');
+        // Сохраняем подсветку выбранной фигуры между перерисовками: доска пересобирается на каждый пуш
+        // (в т.ч. от ходов на чужих досках), и без этого выделение «слетало», пока игрок думает над ходом.
+        if (g.status === 1 && sel && cells[sel]) cells[sel].classList.add('sel');
     }
 
     function onCellClick(sq) {

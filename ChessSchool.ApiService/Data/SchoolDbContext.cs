@@ -12,9 +12,14 @@ public class SchoolDbContext(DbContextOptions<SchoolDbContext> options) : DbCont
     public DbSet<Game> Games => Set<Game>();
     public DbSet<RatingPoint> RatingPoints => Set<RatingPoint>();
     public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<ProcessedBillingEvent> ProcessedBillingEvents => Set<ProcessedBillingEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<Subscription>().HasIndex(s => s.UserSub).IsUnique();          // одна подписка на пользователя
+        b.Entity<Subscription>().HasIndex(s => s.ProviderSubscriptionId);     // поиск по id провайдера (вебхук)
+        b.Entity<ProcessedBillingEvent>().HasKey(p => p.EventId);             // идемпотентность по event id
         b.Entity<Student>().HasIndex(s => s.LinkedUserSub);
         b.Entity<Student>().HasIndex(s => s.GroupId);                 // листинг учеников школы по группам
         b.Entity<Game>().HasIndex(g => g.ExternalGameId).IsUnique();

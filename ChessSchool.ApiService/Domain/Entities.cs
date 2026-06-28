@@ -84,3 +84,26 @@ public class ShareLink
     public DateTimeOffset? ExpiresAt { get; set; }
     public bool Revoked { get; set; }
 }
+
+/// <summary>Подписка пользователя (B2C-премиум). Источник истины о статусе — этот стор (Postgres),
+/// обновляется вебхуками провайдера; клиенту в вопросе «оплачено ли» не доверяем.</summary>
+public class Subscription
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    /// <summary>Sub пользователя из IdP — владелец подписки.</summary>
+    public string UserSub { get; set; } = string.Empty;
+    public SubscriptionStatus Status { get; set; } = SubscriptionStatus.None;
+    public string? Plan { get; set; }
+    public string? ProviderCustomerId { get; set; }      // customer id у провайдера (Paddle)
+    public string? ProviderSubscriptionId { get; set; }  // subscription id у провайдера
+    public string? PriceId { get; set; }                 // price id у провайдера
+    public DateTimeOffset? CurrentPeriodEnd { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Обработанное событие биллинга — для идемпотентности вебхуков (повтор/несколько нод).</summary>
+public class ProcessedBillingEvent
+{
+    public string EventId { get; set; } = string.Empty; // = id события провайдера (PK)
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}

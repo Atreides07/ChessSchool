@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using ChessSchool.ApiService.Data;
 using ChessSchool.ApiService.Domain;
 using ChessSchool.ApiService.Services;
+using ChessSchool.ApiService.Services.Billing;
 using ChessSchool.Contracts;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,6 +17,9 @@ builder.Services.AddDbContext<SchoolDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("schooldb")));
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
+builder.Services.AddScoped<SubscriptionService>();
+// Провайдер эквайринга: dev-заглушка по умолчанию; Paddle подключается при наличии конфига (фаза 2).
+builder.Services.AddSingleton<IBillingProvider, DevStubBillingProvider>();
 builder.AddChessSchoolAnalytics();
 
 // Readiness-проверка доступности БД (попадает в /health, не в /alive). Без строки подключения
@@ -222,6 +226,28 @@ app.MapPost("/internal/games/archive", async (ArchiveGameRequest req, HttpReques
     var created = await archiver.ArchiveOnlineAsync(req, ct);
     return Results.Ok(new { archived = created });
 });
+
+// Entitlement подписки для потребителей (Arena/Web) — server-to-server по внутреннему ключу.
+app.MapGet("/internal/subscriptions/{sub}", async (string sub, HttpRequest http,
+    SubscriptionService subs, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    return Results.Ok(await subs.GetAsync(sub, ct));
+});
+
+// Dev-активация премиума без провайдера (только Development) — локальный тест гейтинга.
+if (app.Environment.IsDevelopment())
+{
+    app.MapPost("/internal/subscriptions/dev-activate", async (DevActivateRequest req, HttpRequest http,
+        SubscriptionService subs, CancellationToken ct) =>
+    {
+        if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+        await subs.ApplyAsync(new BillingEventDto($"dev-{Guid.NewGuid():N}", req.UserSub,
+            SubscriptionStatus.Active, req.Plan ?? "premium",
+            CurrentPeriodEnd: DateTimeOffset.UtcNow.AddMonths(1)), ct);
+        return Results.Ok(await subs.GetAsync(req.UserSub, ct));
+    });
+}
 
 app.MapGet("/", () => "ChessSchool API. ЛК: /schools/{id}/students");
 app.MapDefaultEndpoints();

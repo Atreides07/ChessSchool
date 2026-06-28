@@ -186,6 +186,10 @@ public static class Loc
         ["premium.plan.year"] = ("Год", "Annual"),
         ["premium.manage"] = ("Управление подпиской", "Manage subscription"),
         ["premium.refresh"] = ("Обновить статус", "Refresh status"),
+        // Пробный период (настраивается на цене в Paddle; Paddle:TrialDays — длина для текста на странице).
+        ["premium.trial.note"] = ("🎁 Первые {0} дн. — бесплатно, потом по тарифу. Отменить можно в любой момент.",
+                                  "🎁 First {0} days free, then standard price. Cancel anytime."),
+        ["premium.trial.cta"] = ("Попробовать {0} дн. бесплатно", "Start {0}-day free trial"),
         ["admin.bt.title"] = ("Бренд-турниры", "Brand tournaments"),
         ["admin.bt.new"] = ("Добавить бренд-турнир", "Add brand tournament"),
         ["admin.bt.edit"] = ("Редактирование бренд-турнира", "Edit brand tournament"),

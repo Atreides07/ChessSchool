@@ -44,6 +44,13 @@ else
     <div class="card prem-card">
         <ul class="prem-perks"><li>@Loc.T("premium.perk")</li></ul>
 
+        @* Пробный период: показываем, если задан Paddle:TrialDays. Сам триал настраивается на цене в Paddle
+           (карта привязывается, списание — после периода), статус trialing уже даёт премиум. *@
+        @if (_paddle && _trialDays > 0)
+        {
+            <p class="prem-trial">@string.Format(Loc.T("premium.trial.note"), _trialDays)</p>
+        }
+
         @* Выбор плана (месяц/год) — только в режиме Paddle и если задан годовой price_id. Годовой выбран
            по умолчанию: меньше «точек продления» = меньше оттока. Чекаут идёт по выбранному плану. *@
         @if (_paddle && _hasAnnual)
@@ -64,7 +71,7 @@ else
         }
 
         <div class="prem-actions">
-            <button id="prem-buy" class="btn btn-primary">@(_paddle ? Loc.T("premium.buy") : Loc.T("premium.dev"))</button>
+            <button id="prem-buy" class="btn btn-primary">@BuyLabel()</button>
             @if (_paddle)
             {
                 <button id="prem-refresh" class="btn btn-sm btn-outline">@Loc.T("premium.refresh")</button>
@@ -81,7 +88,13 @@ else
 
 @code {
     private bool _authed, _isPremium, _paddle, _hasAnnual;
+    private int _trialDays;
     private string _sub = "", _token = "", _priceId = "", _priceAnnual = "", _annualNote = "", _env = "sandbox";
+
+    // Подпись кнопки: с пробным периодом — «Попробовать N дней бесплатно», иначе обычная покупка/dev.
+    private string BuyLabel() => !_paddle
+        ? Loc.T("premium.dev")
+        : _trialDays > 0 ? string.Format(Loc.T("premium.trial.cta"), _trialDays) : Loc.T("premium.buy");
 
     protected override async Task OnInitializedAsync()
     {
@@ -92,6 +105,7 @@ else
         _priceId = Config["Paddle:PremiumPriceId"] ?? "";
         _priceAnnual = Config["Paddle:PremiumPriceIdAnnual"] ?? ""; // годовой план (необязателен)
         _annualNote = Config["Paddle:AnnualNote"] ?? "";            // бейдж выгоды, напр. «−17%» / «2 мес. в подарок»
+        _trialDays = int.TryParse(Config["Paddle:TrialDays"], out var td) && td > 0 ? td : 0; // длина триала для текста
         _env = Config["Paddle:Environment"] ?? "sandbox";
         _paddle = !string.IsNullOrWhiteSpace(_token) && !string.IsNullOrWhiteSpace(_priceId);
         _hasAnnual = !string.IsNullOrWhiteSpace(_priceAnnual);
@@ -105,6 +119,8 @@ else
     .prem-card { max-width: 460px; }
     .prem-have { font-weight: 700; color: var(--success); margin: 0; }
     .prem-perks { margin: 0 0 1rem; padding-left: 1.1rem; color: var(--ink-2); }
+    .prem-trial { margin: 0 0 1rem; padding: .55rem .7rem; font-size: .9rem; font-weight: 600; color: #0a7d33;
+        background: #d7f5e0; border: 1px solid #9fe3b6; border-radius: var(--r-md); }
     .prem-perks li { margin: .2rem 0; }
     .prem-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
     .prem-status { margin: .8rem 0 0; font-size: .88rem; color: var(--danger, #c0392b); }

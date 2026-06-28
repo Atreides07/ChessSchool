@@ -201,7 +201,8 @@ app.MapGet("/sitemap.xml", async (HttpRequest r, ChessSchool.Arena.Services.Broa
 // Dev-активация премиума без оплаты (только Development) — проксирует в ApiService dev-activate.
 if (app.Environment.IsDevelopment())
 {
-    app.MapPost("/premium/dev-activate", async (HttpContext ctx, IHttpClientFactory http, CancellationToken ct) =>
+    app.MapPost("/premium/dev-activate", async (HttpContext ctx, IHttpClientFactory http,
+        ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
     {
         var sub = ctx.User.FindFirst("sub")?.Value;
         if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
@@ -210,6 +211,7 @@ if (app.Environment.IsDevelopment())
         req.Headers.Add("X-Internal-Key", internalApiKey);
         req.Content = System.Net.Http.Json.JsonContent.Create(new ChessSchool.Contracts.DevActivateRequest(sub, "premium"));
         await client.SendAsync(req, ct);
+        ents.Invalidate(sub); // сбросить кэш — статус подхватится на ближайшем запросе/перезагрузке
         return Results.Ok();
     }).RequireAuthorization().DisableAntiforgery();
 }
@@ -233,7 +235,8 @@ app.MapGet("/premium/portal", async (HttpContext ctx, IHttpClientFactory http, C
 
 // Вытягивание статуса: после возврата с checkout (есть txn) reconcile по транзакции, иначе — refresh
 // по сохранённой подписке. Спасает, если вебхук Paddle не дошёл/опоздал.
-app.MapPost("/premium/reconcile", async (HttpContext ctx, string? txn, IHttpClientFactory http, CancellationToken ct) =>
+app.MapPost("/premium/reconcile", async (HttpContext ctx, string? txn, IHttpClientFactory http,
+    ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
 {
     var sub = ctx.User.FindFirst("sub")?.Value;
     if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
@@ -244,6 +247,7 @@ app.MapPost("/premium/reconcile", async (HttpContext ctx, string? txn, IHttpClie
         { Content = System.Net.Http.Json.JsonContent.Create(new ChessSchool.Contracts.ReconcileTxnRequest(txn)) };
     req.Headers.Add("X-Internal-Key", internalApiKey);
     try { await client.SendAsync(req, ct); } catch { /* недоступность ApiService — не падаем */ }
+    ents.Invalidate(sub); // статус мог измениться — сбросить кэш ноды, чтобы reload показал актуальное
     return Results.Ok();
 }).RequireAuthorization().DisableAntiforgery();
 

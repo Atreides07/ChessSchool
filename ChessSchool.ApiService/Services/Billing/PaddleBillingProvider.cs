@@ -56,7 +56,27 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
             using var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("data", out var data)) return null;
             var subId = PaddleWebhook.Field(data, "subscription_id");
-            return string.IsNullOrEmpty(subId) ? null : await FetchSubscriptionAsync(subId, ct);
+            if (!string.IsNullOrEmpty(subId)) return await FetchSubscriptionAsync(subId, ct);
+            // Подписка создаётся асинхронно — сразу после оплаты её id ещё не привязан к транзакции.
+            // Тогда ищем по клиенту транзакции (customer_id есть всегда) — берём его актуальную подписку.
+            var customerId = PaddleWebhook.Field(data, "customer_id");
+            return string.IsNullOrEmpty(customerId) ? null : await FetchLatestByCustomerAsync(customerId, ct);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>Актуальная подписка клиента (GET /subscriptions?customer_id=…) — предпочитаем «премиальную»
+    /// (активна/триал/просрочка) с самым поздним концом периода. Нужна, когда подписка ещё не привязана
+    /// к транзакции на момент возврата с checkout.</summary>
+    private async Task<BillingEventDto?> FetchLatestByCustomerAsync(string customerId, CancellationToken ct)
+    {
+        var json = await GetAsync($"/subscriptions?customer_id={Uri.EscapeDataString(customerId)}&per_page=50", ct);
+        if (json is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("data", out var arr)
+                ? PaddleWebhook.PickBestSubscription(arr, $"reconcile-cust-{customerId}") : null;
         }
         catch (JsonException) { return null; }
     }
@@ -196,6 +216,31 @@ public static class PaddleWebhook
             ProviderSubscriptionId: Str(data, "id"), ProviderCustomerId: Str(data, "customer_id"),
             PriceId: priceId, CurrentPeriodEnd: periodEnd);
         return true;
+    }
+
+    /// <summary>
+    /// Выбирает актуальную подписку из массива data ответа GET /subscriptions (по клиенту): предпочитаем
+    /// «премиальную» (активна/триал/просрочка), при равенстве — с самым поздним концом оплаченного периода.
+    /// Нужно для reconcile, когда подписка ещё не привязана к транзакции на момент возврата с checkout.
+    /// </summary>
+    public static BillingEventDto? PickBestSubscription(JsonElement subscriptionsData, string eventIdPrefix)
+    {
+        if (subscriptionsData.ValueKind != JsonValueKind.Array) return null;
+        BillingEventDto? best = null;
+        foreach (var s in subscriptionsData.EnumerateArray())
+        {
+            if (!TryMapSubscription(s, eventIdPrefix, out var ev) || ev is null) continue;
+            if (best is null || Better(ev, best)) best = ev;
+        }
+        return best;
+    }
+
+    private static bool Better(BillingEventDto a, BillingEventDto b)
+    {
+        bool ap = SubscriptionService.IsPremium(a.Status, a.CurrentPeriodEnd);
+        bool bp = SubscriptionService.IsPremium(b.Status, b.CurrentPeriodEnd);
+        if (ap != bp) return ap;
+        return (a.CurrentPeriodEnd ?? DateTimeOffset.MinValue) > (b.CurrentPeriodEnd ?? DateTimeOffset.MinValue);
     }
 
     /// <summary>Достаёт строковое поле верхнего уровня (для разбора ответов API).</summary>

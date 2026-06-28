@@ -72,13 +72,18 @@
         });
     }
 
+    var TXN_KEY = 'prem_txn';
+
     // После возврата с checkout Paddle добавляет ?_ptxn=... в URL. Сверяем статус из API (reconcile),
     // чтобы премиум активировался, даже если вебхук не дошёл; затем чистим URL и перечитываем страницу.
+    // Подписка у Paddle создаётся асинхронно — на момент возврата её может ещё не быть, поэтому txn
+    // запоминаем: «Обновить статус» повторит reconcile по нему (сервер найдёт подписку по клиенту).
     function reconcileOnReturn() {
         if (window.__premReconciled) return;
         var txn = new URLSearchParams(location.search).get('_ptxn');
         if (!txn) return;
         window.__premReconciled = true;
+        try { localStorage.setItem(TXN_KEY, txn); } catch (e) { }
         fetch('/premium/reconcile?txn=' + encodeURIComponent(txn), { method: 'POST' })
             .finally(function () { location.replace(location.pathname); });
     }
@@ -86,12 +91,18 @@
     function setup() {
         reconcileOnReturn();
 
+        // Уже премиум (видна карточка «есть подписка») — забываем запомненную транзакцию.
+        if (document.querySelector('.prem-have')) { try { localStorage.removeItem(TXN_KEY); } catch (e) { } return; }
+
         var refresh = document.getElementById('prem-refresh');
         if (refresh && !refresh.__wired) {
             refresh.__wired = true;
             refresh.onclick = async function () {
                 refresh.disabled = true;
-                try { await fetch('/premium/reconcile', { method: 'POST' }); } catch (e) { }
+                var saved = '';
+                try { saved = localStorage.getItem(TXN_KEY) || ''; } catch (e) { }
+                var url = saved ? '/premium/reconcile?txn=' + encodeURIComponent(saved) : '/premium/reconcile';
+                try { await fetch(url, { method: 'POST' }); } catch (e) { }
                 location.href = '/premium';
             };
         }

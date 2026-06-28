@@ -133,4 +133,32 @@ public class PaddleWebhookTests
         const string body = """{"event_id":"e","event_type":"subscription.activated","data":{"id":"s","status":"active"}}""";
         Assert.False(PaddleWebhook.TryParse(body, out _)); // нет user_sub — некого премировать
     }
+
+    [Fact]
+    public void PickBestSubscription_PrefersPremium_ThenLatestPeriod()
+    {
+        // Ответ GET /subscriptions?customer_id=… — несколько подписок клиента. Reconcile по клиенту
+        // (когда подписка ещё не привязана к транзакции на возврате с checkout) должен выбрать активную
+        // с самым поздним концом периода, а не отменённую.
+        using var doc = JsonDocument.Parse("""
+        [
+          {"id":"sub_old","status":"canceled","custom_data":{"user_sub":"u"}},
+          {"id":"sub_a","status":"active","current_billing_period":{"ends_at":"2030-01-01T00:00:00Z"},"custom_data":{"user_sub":"u"}},
+          {"id":"sub_b","status":"active","current_billing_period":{"ends_at":"2031-06-01T00:00:00Z"},"custom_data":{"user_sub":"u"}}
+        ]
+        """);
+        var ev = PaddleWebhook.PickBestSubscription(doc.RootElement, "reconcile-cust");
+        Assert.NotNull(ev);
+        Assert.Equal("sub_b", ev!.ProviderSubscriptionId);     // активная и самая «дальняя» по периоду
+        Assert.Equal(SubscriptionStatus.Active, ev.Status);
+    }
+
+    [Fact]
+    public void PickBestSubscription_EmptyOrNonArray_Null()
+    {
+        using var empty = JsonDocument.Parse("[]");
+        Assert.Null(PaddleWebhook.PickBestSubscription(empty.RootElement, "p"));
+        using var obj = JsonDocument.Parse("{}");
+        Assert.Null(PaddleWebhook.PickBestSubscription(obj.RootElement, "p"));
+    }
 }

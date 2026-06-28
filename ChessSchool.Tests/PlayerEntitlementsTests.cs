@@ -63,6 +63,18 @@ public class PlayerEntitlementsTests
     }
 
     [Fact]
+    public async Task Invalidate_DropsCache_Refetches()
+    {
+        // После reconcile/активации кэш сбрасывается — следующий запрос идёт в ApiService заново.
+        var h = new StubHandler(_ => Sub(true));
+        var svc = Make(h);
+        await svc.IsPremiumAsync("u");
+        svc.Invalidate("u");
+        await svc.IsPremiumAsync("u");
+        Assert.Equal(2, h.Calls);
+    }
+
+    [Fact]
     public async Task Degrades_ToFalse_OnErrorStatus()
         => Assert.False(await Make(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError))).IsPremiumAsync("u"));
 

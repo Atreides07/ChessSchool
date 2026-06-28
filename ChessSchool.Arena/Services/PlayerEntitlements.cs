@@ -8,6 +8,10 @@ namespace ChessSchool.Arena.Services;
 public interface IPlayerEntitlements
 {
     Task<bool> IsPremiumAsync(string? sub, CancellationToken ct = default);
+
+    /// <summary>Сбросить кэш для пользователя — после reconcile/активации, чтобы статус подхватился сразу
+    /// (на этой ноде; на других истечёт по TTL). Источник истины — ApiService, кэш лишь ускоритель.</summary>
+    void Invalidate(string? sub);
 }
 
 /// <summary>
@@ -24,10 +28,17 @@ public sealed class PlayerEntitlements(
     public const string HttpClientName = "apiservice";
     private static readonly TimeSpan Ttl = TimeSpan.FromSeconds(60);
 
+    private static string CacheKey(string sub) => $"premium:{sub}";
+
+    public void Invalidate(string? sub)
+    {
+        if (!string.IsNullOrEmpty(sub)) cache.Remove(CacheKey(sub));
+    }
+
     public async Task<bool> IsPremiumAsync(string? sub, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(sub)) return false;
-        var key = $"premium:{sub}";
+        var key = CacheKey(sub);
         if (cache.TryGetValue(key, out bool cached)) return cached;
 
         bool premium = false;

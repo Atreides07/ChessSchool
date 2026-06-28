@@ -165,16 +165,22 @@
     const qualityAt = (i) => (analysis && analysis.moves && i >= 1 && i <= analysis.moves.length)
         ? analysis.moves[i - 1].quality : null;
 
+    // Ячейка одного полухода (кликабельна, цвет по качеству, символ ?!/?/??, подсветка текущего).
+    function cell(i) {
+        if (i > total) return '<span class="rv-cell-empty"></span>';
+        const q = qualityAt(i);
+        const sym = (q != null && QSYM[q]) ? `<span class="rv-q">${QSYM[q]}</span>` : '';
+        return `<button class="rv-cell ${MCLS(q)} ${i === ply ? 'on' : ''}" data-ply="${i}">${esc(sans[i])}${sym}</button>`;
+    }
+
+    // Таблица: строка на полный ход — № | ход белых | ход чёрных (выровненные колонки, легко сканировать).
     function renderMoves() {
         let html = '';
-        for (let i = 1; i <= total; i++) {
-            if ((i % 2) === 1) html += `<span class="rv-num">${(i + 1) / 2 | 0}.</span>`;
-            const q = qualityAt(i);
-            const sym = (q != null && QSYM[q]) ? `<span class="rv-q ${QCLS[q] || ''}">${QSYM[q]}</span>` : '';
-            html += `<button class="rv-move ${MCLS(q)} ${i === ply ? 'on' : ''}" data-ply="${i}">${esc(sans[i])}${sym}</button>`;
+        for (let n = 1; n <= Math.ceil(total / 2); n++) {
+            html += `<span class="rv-rownum">${n}.</span>${cell(2 * n - 1)}${cell(2 * n)}`;
         }
         movesEl.innerHTML = html;
-        movesEl.querySelectorAll('.rv-move').forEach(b => b.onclick = () => go(+b.dataset.ply));
+        movesEl.querySelectorAll('.rv-cell').forEach(b => b.onclick = () => go(+b.dataset.ply));
     }
 
     // Баннер исхода партии: победа/поражение/ничья + причина (мат / время / пат / сдача …). Не зависит от хода.
@@ -302,20 +308,17 @@
     .rv-eval strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
     .rv-best { margin-left: .6rem; color: var(--ink-2); font-size: .85rem; }
     .rv-upsell { margin-bottom: 14px; }
-    .rv-moves { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; line-height: 1.9; }
-    .rv-num { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: .3rem; }
-    .rv-move { border: 0; background: transparent; cursor: pointer; padding: .05rem .3rem; border-radius: var(--r-sm); color: var(--ink); font-size: .92rem; font-weight: 560; }
-    .rv-move:hover { background: var(--surface-2); }
-    .rv-move.on { background: var(--accent); color: #fff; }
+    /* Таблица ходов: № | белые | чёрные — выровненные колонки, легко сканировать и искать ход */
+    .rv-moves { display: grid; grid-template-columns: auto 1fr 1fr; column-gap: 6px; row-gap: 1px; align-items: stretch; }
+    .rv-rownum { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; align-self: center; padding: .15rem .35rem .15rem 0; font-size: .9rem; }
+    .rv-cell { text-align: left; border: 0; background: transparent; cursor: pointer; padding: .22rem .5rem; border-radius: var(--r-sm); color: var(--ink); font-size: .95rem; font-weight: 560; }
+    .rv-cell:hover { background: var(--surface-2); }
+    .rv-cell.on { background: var(--accent); color: #fff; }
+    .rv-cell-empty { display: block; }
     /* Только проблемные ходы цветные (хорошие — нейтральные): жёлтый/оранжевый/красный по тяжести */
-    .rv-move.mv-inacc { color: #b58300; }
-    .rv-move.mv-mist { color: #d2691e; font-weight: 700; }
-    .rv-move.mv-blun { color: var(--danger); font-weight: 700; }
-    .rv-move.on { color: #fff; } /* выбранный ход — всегда белым поверх цвета качества */
+    .rv-cell.mv-inacc { color: #b58300; }
+    .rv-cell.mv-mist { color: #d2691e; font-weight: 700; }
+    .rv-cell.mv-blun { color: var(--danger); font-weight: 700; }
+    .rv-cell.on { color: #fff; } /* выбранный ход — всегда белым поверх цвета качества */
     .rv-q { font-weight: 800; margin-left: 1px; }
-    .q-best { color: var(--success); }
-    .q-inacc { color: #b58300; }
-    .q-mist { color: #d2691e; }
-    .q-blun { color: var(--danger); }
-    .rv-move.on .rv-q { color: #fff; }
 </style>

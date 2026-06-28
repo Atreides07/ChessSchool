@@ -329,16 +329,18 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
     `ArenaRuntimeOptions.RemindersEnabled` (есть Redis-сервис); тестовый силос — `UseInMemoryReminderService`.
     Push-обновления (`ArenaNotifier`) при Redis идут через pub/sub-канал `arena:notify` (зритель на любой
     ноде получает обновление турнира, чей грейн на другой ноде), иначе внутрипроцессно.
-12. **Исходящий HTTP из компонента `@rendermode InteractiveServer` зависает** (и в prerender, и в
-    контуре) — `await client.SendAsync(...)` к другому сервису не возвращается, причём НЕ упирается в
-    таймаут (поток рендерера заблокирован). Тот же вызов из обычного request-контекста (minimal-API,
-    статический SSR — напр. список `/me/games`) работает мгновенно. Подтверждено на разборе партии:
-    detail-эндпоинт 58 мс из пробника, но «вечный» хэнг из интерактивного `GameReview`. **Лечение —
-    тонкий клиент** (как `/play`, [GameReview.razor](ChessSchool.Arena/Components/Pages/GameReview.razor)):
-    страница статический SSR (данные грузятся на сервере в обычном контексте), интерактив (доска,
-    навигация) — браузерный JS, дорогое/доменное (разбор Stockfish) — обычный minimal-API эндпоинт
-    (`/api/me/games/{id}/analysis`), который браузер дёргает fetch'ем. НЕ делай исходящий HTTP в
-    `OnInitializedAsync`/`OnAfterRenderAsync` интерактивного серверного компонента.
+12. **Исходящий HTTP из рендера Blazor-компонента зависает** — `await client.SendAsync(...)` к другому
+    сервису из `OnInitializedAsync` НЕ возвращается и НЕ упирается в таймаут (поток рендерера
+    заблокирован). Воспроизводилось и в `@rendermode InteractiveServer` (prerender и контур), и
+    периодически даже в статическом SSR-компоненте (authed-документ не отдавался). Тот же вызов из
+    обычного request-контекста (minimal-API) — мгновенно (пробник: detail 58 мс). **Надёжное лечение —
+    чистый тонкий клиент**: страница ([GameReview.razor](ChessSchool.Arena/Components/Pages/GameReview.razor)) —
+    статический каркас БЕЗ серверного HTTP, все данные браузер тянет `fetch`'ем с обычных minimal-API
+    эндпоинтов (`GET /api/me/games/{id}` — позиции/мета, `…/analysis` — разбор Stockfish), доска рисуется
+    из FEN без внешних библиотек (НЕ грузить chess.js с esm.sh — внешний CDN падал → пустая доска).
+    Правило: НЕ делай исходящий HTTP в лайфсайкле Blazor-компонента; выноси в minimal-API + браузерный fetch.
+    Ссылку на такую страницу из списка помечай `data-enhance-nav="false"` — иначе enhanced-навигация не
+    исполнит её `<script>` (см. комментарий в [App.razor](ChessSchool.Arena/Components/App.razor)).
 
 ## Безопасность и конфигурация
 

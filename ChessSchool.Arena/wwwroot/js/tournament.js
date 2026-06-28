@@ -308,7 +308,7 @@
             const chips = s.results.length ? `<div class="st-chips">${s.results.map(x => `<span class="chip ${chipClass(x)}">${x}</span>`).join('')}</div>` : '';
             return `<div class="st-card"><div class="st-head">
                 <span class="st-ava">${avatar(s.name)}</span>
-                <span class="st-name">${esc(s.name)}${s.isPremium ? ` <span class="st-prem">${esc(L.badge || 'Premium')}</span>` : ''} ${s.onFire ? `<span class="fire">🔥 ${s.streak}</span>` : ''}</span>
+                <span class="st-name">${esc(s.name)} ${s.onFire ? `<span class="fire">🔥 ${s.streak}</span>` : ''}</span>
                 <span class="st-place">${s.rank} ${esc(L.place)}</span>
                 <span class="st-score">${s.score}</span></div>${chips}</div>`;
         }).join('');

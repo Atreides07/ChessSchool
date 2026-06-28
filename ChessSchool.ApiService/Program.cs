@@ -257,15 +257,6 @@ app.MapGet("/internal/subscriptions/{sub}/portal", async (string sub, HttpReques
     return Results.Ok(new PortalLinkDto(url));
 });
 
-// Батч-entitlement: премиум-подмножество из набора sub'ов (бейджи в таблице турнира) — один запрос.
-app.MapPost("/internal/subscriptions/batch", async (string[] subs, HttpRequest http,
-    SubscriptionService subs2, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    var premium = await subs2.PremiumSubsAsync(subs, ct);
-    return Results.Ok(premium);
-});
-
 // Dev-активация премиума без провайдера (только Development) — локальный тест гейтинга.
 if (app.Environment.IsDevelopment())
 {

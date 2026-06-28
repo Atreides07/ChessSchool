@@ -79,26 +79,6 @@ public class PlayerEntitlementsTests
     }
 
     [Fact]
-    public async Task Batch_ReturnsPremiumSubset_AndCaches()
-    {
-        var h = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        { Content = JsonContent.Create(new[] { "a", "c" }) });
-        var svc = Make(h);
-
-        var set = await svc.PremiumSubsAsync(new[] { "a", "b", "c" });
-        Assert.True(set.SetEquals(new[] { "a", "c" }));
-
-        var again = await svc.PremiumSubsAsync(new[] { "a", "b", "c" }); // из кэша
-        Assert.True(again.SetEquals(new[] { "a", "c" }));
-        Assert.Equal(1, h.Calls);
-    }
-
-    [Fact]
-    public async Task Batch_Degrades_ToEmpty_OnError()
-        => Assert.Empty(await Make(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)))
-            .PremiumSubsAsync(new[] { "a", "b" }));
-
-    [Fact]
     public async Task SendsInternalKey_AndSubPath()
     {
         HttpRequestMessage? seen = null;

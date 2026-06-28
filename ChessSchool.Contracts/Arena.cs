@@ -36,8 +36,7 @@ public sealed record ArenaStandingRow(
     [property: Id(5)] bool Playing,
     [property: Id(6)] int Games,
     [property: Id(7)] int Wins,
-    [property: Id(8)] IReadOnlyList<int> Results,
-    [property: Id(9)] bool IsPremium = false); // премиум-подписчик — бейдж в таблице
+    [property: Id(8)] IReadOnlyList<int> Results);
 
 /// <summary>Партия для трансляции «идёт сейчас» (ориентация доски — белые снизу, очки турнира у имён).</summary>
 [GenerateSerializer]

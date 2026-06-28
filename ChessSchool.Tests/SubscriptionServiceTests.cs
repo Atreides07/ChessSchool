@@ -71,19 +71,6 @@ public class SubscriptionServiceTests
         Assert.False(dto.IsPremium);
     }
 
-    [Fact]
-    public async Task PremiumSubs_ReturnsOnlyActiveFromSet()
-    {
-        using var db = NewDb();
-        var svc = Svc(db);
-        await svc.ApplyAsync(new BillingEventDto("e1", "a", SubscriptionStatus.Active, "premium",
-            CurrentPeriodEnd: DateTimeOffset.UtcNow.AddDays(10)));
-        await svc.ApplyAsync(new BillingEventDto("e2", "b", SubscriptionStatus.Canceled));
-
-        var set = await svc.PremiumSubsAsync(new[] { "a", "b", "c" });
-        Assert.True(set.SetEquals(new[] { "a" })); // b отменён, c без подписки
-    }
-
     [Theory]
     [InlineData(SubscriptionStatus.Active, 1, true)]
     [InlineData(SubscriptionStatus.Trialing, 1, true)]

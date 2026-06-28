@@ -140,6 +140,10 @@ public sealed class ArenaTournamentGrain(
         public bool Playing;
         public string? GameId;
         public bool IsBot;
+        // Сила/скорость бота (для людей не используются). Назначаются из BotPersona по ключу бота.
+        public int Rating;
+        public int Skill;            // уровень Stockfish 0..20
+        public double SpeedFactor = 1.0; // множитель времени на обдумывание (слабые ходят быстрее)
         // Игрок нажал «подобрать соперника» и ждёт пары. Подбор НЕ автоматический: до нажатия (и после
         // каждой партии) Seeking=false — игрок просто записан, в пул подбора не входит. Боты всегда «ищут».
         public bool Seeking;
@@ -152,7 +156,6 @@ public sealed class ArenaTournamentGrain(
 
     // Минимум участников в идущем турнире — добираем ботами; при достатке людей боты убираются.
     private const int MinParticipants = 6;
-    private const int BotSkill = 5; // уровень Stockfish (0..20)
     // Сколько секунд человек ждёт соперника-человека, прежде чем к нему подключат бота.
     private const int WaitForBotSeconds = 10;
     // Хвост показа завершённой партии БЕЗ живого участника (бот-vs-бот / человек уже ушёл): зрители
@@ -221,6 +224,11 @@ public sealed class ArenaTournamentGrain(
         {
             var pl = new Player { Name = p.Name, IsBot = p.IsBot, Score = p.Score, Streak = p.Streak, Games = p.Games, Wins = p.Wins };
             pl.Results.AddRange(p.Results);
+            if (pl.IsBot) // сила/скорость бота не хранятся — восстанавливаем детерминированно из ключа
+            {
+                var persona = BotPersona.For(p.Key);
+                pl.Rating = persona.Rating; pl.Skill = persona.Skill; pl.SpeedFactor = persona.Speed;
+            }
             _players[p.Key] = pl; // runtime-поля (Playing/GameId/WaitingSince) сбрасываются — игрок переспарится
         }
         EnsureTimer();
@@ -704,7 +712,6 @@ public sealed class ArenaTournamentGrain(
         }
     }
 
-    private static string BotName(int n) => $"🤖 {BotNames[(n - 1) % BotNames.Length]}";
 
     private async Task DriveBotsAsync()
     {
@@ -723,15 +730,16 @@ public sealed class ArenaTournamentGrain(
             // когда вариант один/вынужденный. Часы при этом тикают, как у человека.
             if (g.BotThinkUntil is null)
             {
-                g.BotPlannedMs = BotThinkMs(g);
+                g.BotPlannedMs = BotThinkMs(g, mp);
                 g.BotThinkUntil = now.AddMilliseconds(g.BotPlannedMs);
                 continue;
             }
             if (now < g.BotThinkUntil.Value) continue; // ещё думает
 
-            // Движку даём время, пропорциональное сложности (но без блокировки грейна надолго).
-            int engineMs = Math.Clamp(g.BotPlannedMs, 120, 500);
-            var uci = await engine.GetBestMoveAsync(g.Board.Fen, BotSkill, engineMs);
+            // Движку даём время, пропорциональное запланированному (но без блокировки грейна надолго);
+            // сила хода — по уровню Stockfish этого бота (разные рейтинги играют по-разному).
+            int engineMs = Math.Clamp(g.BotPlannedMs, 100, 450);
+            var uci = await engine.GetBestMoveAsync(g.Board.Fen, mp.Skill, engineMs);
             bool moved = uci is not null && ApplyUci(g, uci);
             if (!moved) moved = g.Board.TryMakeRandomMove();
             g.BotThinkUntil = null; // следующий ход — обдумываем заново
@@ -753,15 +761,19 @@ public sealed class ArenaTournamentGrain(
     /// Время обдумывания хода бота, зависящее от сложности позиции: единственный/вынужденный ход —
     /// мгновенно, много вариантов — дольше. Плюс «человеческий» джиттер, чтобы ходы не были ритмичными.
     /// </summary>
-    private static int BotThinkMs(Game g)
+    private static int BotThinkMs(Game g, Player bot)
     {
         int options = g.Board.LegalMoveCount;
-        if (options <= 1) return 150; // ходить нечем кроме одного — не думаем
+        if (options <= 1) return Random.Shared.Next(80, 200); // единственный/вынужденный ход — почти мгновенно
 
-        int baseMs = g.Board.InCheck ? 300 : 220 + options * 55; // больше выбора — дольше
-        baseMs = Math.Min(baseMs, 2400);
-        int jitter = Random.Shared.Next(-120, 350);
-        return Math.Clamp(baseMs + jitter, 150, 2800);
+        // Бюджет ~ оставшееся время на ~25 предстоящих ходов: под нехватку времени бот ускоряется.
+        long myMs = g.Board.Turn == Color.White ? g.WhiteMs : g.BlackMs;
+        double budget = Math.Max(150, myMs / 25.0);
+        // Сложность: шах и обилие вариантов → дольше; мало вариантов → быстро (доля бюджета).
+        double complexity = g.Board.InCheck ? 0.9 : Math.Min(1.0, 0.25 + options * 0.02);
+        // Личность: слабые ходят быстрее, сильные обстоятельнее; плюс джиттер, чтобы не «по метроному».
+        double t = budget * complexity * bot.SpeedFactor * (0.7 + Random.Shared.NextDouble() * 0.6);
+        return (int)Math.Clamp(t, 90, 2500);
     }
 
     private static bool ApplyUci(Game g, string uci)
@@ -825,7 +837,16 @@ public sealed class ArenaTournamentGrain(
     {
         _botCounter++;
         var key = $"bot-{Id}-{_botCounter}";
-        _players[key] = new Player { Name = BotName(_botCounter), IsBot = true, WaitingSince = DateTimeOffset.UtcNow };
+        var persona = BotPersona.For(key);
+        _players[key] = new Player
+        {
+            Name = $"🤖 {BotNames[(_botCounter - 1) % BotNames.Length]} ({persona.Rating})",
+            IsBot = true,
+            Rating = persona.Rating,
+            Skill = persona.Skill,
+            SpeedFactor = persona.Speed,
+            WaitingSince = DateTimeOffset.UtcNow,
+        };
         _dirty = true;
         return key;
     }

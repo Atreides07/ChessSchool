@@ -18,7 +18,8 @@ Docker). Онлайн-игра — **Microsoft Orleans** (грейн на пар
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Нагрузочная модель и железо под 100k/1M онлайн —
 [docs/CAPACITY_PLANNING.md](docs/CAPACITY_PLANNING.md). Продуктовые метрики — [docs/PRODUCT_METRICS.md](docs/PRODUCT_METRICS.md).
 Функциональные требования к игре на доске (ходы, часы, предходы, подбор, завершение) —
-[docs/BOARD_GAME_REQUIREMENTS.md](docs/BOARD_GAME_REQUIREMENTS.md).
+[docs/BOARD_GAME_REQUIREMENTS.md](docs/BOARD_GAME_REQUIREMENTS.md). Демо за dev tunnels (логин+игра,
+шаринг тестировщикам) — [docs/DEMO_TUNNELS.md](docs/DEMO_TUNNELS.md).
 
 ## Главный принцип: всё рассчитано на несколько серверов
 

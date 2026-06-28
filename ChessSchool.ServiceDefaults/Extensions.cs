@@ -153,6 +153,16 @@ public static class Extensions
         config.GetConnectionString("redis") is { Length: > 0 } c ? c : null;
 
     /// <summary>
+    /// URL сервиса авторизации (IdP) для OIDC/JWT-валидации. Приоритет: явный override
+    /// <c>Sso:Authority</c> (нужен, когда приложение за публичным адресом — напр. dev tunnel: и
+    /// front-channel редирект браузера, и issuer токена должны указывать на публичный auth-URL),
+    /// иначе — service discovery Aspire (внутренний адрес). Возвращает null, если ничего не задано.
+    /// </summary>
+    public static string? ResolveSsoAuthority(this IConfiguration config) =>
+        config["Sso:Authority"] is { Length: > 0 } a ? a
+        : config["services:auth:https:0"] ?? config["services:auth:http:0"];
+
+    /// <summary>
     /// То же, но с fail-fast: вне Development Redis обязателен (распределённые провайдеры — условие
     /// мультисервера), и отсутствие строки подключения роняет старт, а не уводит тихо в single-node
     /// in-memory. В Development допускается null (dev-фолбэк).

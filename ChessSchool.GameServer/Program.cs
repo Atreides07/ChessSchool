@@ -46,8 +46,9 @@ builder.Services.AddHttpClient<IGameArchiveClient, GameArchiveClient>(c =>
 builder.AddChessSchoolAnalytics();
 
 // --- Валидация JWT, выпущенных отдельным IdP (общий сервис авторизации) ---
-var authority = builder.Configuration["services:auth:https:0"]
-    ?? builder.Configuration["services:auth:http:0"];
+// За публичным адресом (dev tunnel/прод) authority берётся из Sso:Authority, иначе — внутренний адрес
+// service discovery. Issuer токена должен совпасть с этим authority (иначе 401, см. CAPACITY_PLANNING §1.1).
+var authority = builder.Configuration.ResolveSsoAuthority();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

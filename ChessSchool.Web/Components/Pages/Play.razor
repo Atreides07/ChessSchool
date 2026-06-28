@@ -11,7 +11,10 @@
 
 @{
     var authed = HttpContext?.User?.Identity?.IsAuthenticated == true;
-    var hub = Config["services:gameserver:https:0"] ?? Config["services:gameserver:http:0"] ?? "";
+    // За публичным адресом (dev tunnel) браузер должен бить в публичный URL gameserver, иначе —
+    // внутренний адрес из service discovery.
+    var hub = Config["GameServer:PublicUrl"] ?? Config["services:gameserver:https:0"]
+        ?? Config["services:gameserver:http:0"] ?? "";
 }
 
 <h1>@Loc.T("play.h1")</h1>

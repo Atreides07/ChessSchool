@@ -96,8 +96,33 @@ var arena = builder.AddProject<Projects.ChessSchool_Arena>("arena")
     .WaitFor(redis)
     .WaitFor(minio);
 
-// Регистрируем веб-клиентов в IdP: разрешённый redirect_uri = базовый адрес приложения.
-auth.WithEnvironment("Sso__Clients__chessschool-web", web.GetEndpoint("https"));
-auth.WithEnvironment("Sso__Clients__arena-web", arena.GetEndpoint("https"));
+// Демо за dev tunnels: если заданы публичные туннельные URL (DemoTunnels:* через user-secrets/env
+// AppHost'а), браузер-facing адреса ведут на туннели — redirect_uri клиентов, authority OIDC/JWT всех
+// сервисов и хаб /play. Без этих настроек — обычное поведение (внутренние адреса Aspire). См.
+// docs/DEMO_TUNNELS.md.
+var demoAuth = builder.Configuration["DemoTunnels:Auth"];
+var demoWeb = builder.Configuration["DemoTunnels:Web"];
+var demoArena = builder.Configuration["DemoTunnels:Arena"];
+var demoGame = builder.Configuration["DemoTunnels:GameServer"];
+
+if (!string.IsNullOrWhiteSpace(demoAuth))
+{
+    // redirect_uri клиентов IdP = публичные адреса приложений.
+    auth.WithEnvironment("Sso__Clients__chessschool-web", demoWeb ?? throw new InvalidOperationException("DemoTunnels:Web обязателен в демо-режиме."));
+    auth.WithEnvironment("Sso__Clients__arena-web", demoArena ?? throw new InvalidOperationException("DemoTunnels:Arena обязателен в демо-режиме."));
+    // authority OIDC (web/arena) и JWT (gameserver) = публичный auth-URL: туда идёт редирект браузера,
+    // и с ним должен совпасть issuer токена.
+    web.WithEnvironment("Sso__Authority", demoAuth);
+    arena.WithEnvironment("Sso__Authority", demoAuth);
+    gameServer.WithEnvironment("Sso__Authority", demoAuth);
+    // Тонкий клиент /play подключается к публичному хабу gameserver.
+    if (!string.IsNullOrWhiteSpace(demoGame)) web.WithEnvironment("GameServer__PublicUrl", demoGame);
+}
+else
+{
+    // Обычный режим: redirect_uri = внутренний адрес приложения (динамические порты Aspire).
+    auth.WithEnvironment("Sso__Clients__chessschool-web", web.GetEndpoint("https"));
+    auth.WithEnvironment("Sso__Clients__arena-web", arena.GetEndpoint("https"));
+}
 
 builder.Build().Run();

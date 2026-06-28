@@ -26,8 +26,9 @@ public static class SsoExtensions
     public static void AddChessSchoolSso(this WebApplicationBuilder builder)
     {
         var clientId = builder.Configuration["Sso:ClientId"] ?? "app";
-        var authority = builder.Configuration["services:auth:https:0"]
-            ?? builder.Configuration["services:auth:http:0"];
+        // За публичным адресом (dev tunnel/прод-домен) authority берётся из Sso:Authority, иначе —
+        // внутренний адрес из service discovery. И редирект браузера, и issuer токена должны вести сюда.
+        var authority = builder.Configuration.ResolveSsoAuthority();
 
         // Общий DataProtection-keyring (Redis при наличии): cookie/тикеты одной ноды читает любая другая.
         builder.AddChessSchoolDataProtection();

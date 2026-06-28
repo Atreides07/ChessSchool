@@ -40,6 +40,22 @@ public sealed class ArenaGamesApiClient(IHttpClientFactory httpFactory, string i
         }
     }
 
+    public async Task<ArenaPlayerStats> GetStatsAsync(string sub, CancellationToken ct)
+    {
+        try
+        {
+            using var req = Req(HttpMethod.Get, $"/internal/arena-games/stats?sub={Uri.EscapeDataString(sub)}");
+            using var resp = await Client().SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return new ArenaPlayerStats(0, 0, 0, 0);
+            return await resp.Content.ReadFromJsonAsync<ArenaPlayerStats>(ct) ?? new ArenaPlayerStats(0, 0, 0, 0);
+        }
+        catch (Exception ex) when (IsTransient(ex, ct))
+        {
+            log.LogWarning(ex, "ApiService недоступен при запросе статистики игрока.");
+            return new ArenaPlayerStats(0, 0, 0, 0);
+        }
+    }
+
     public async Task<ArenaGameDetail?> GetAsync(Guid id, string sub, CancellationToken ct)
     {
         try

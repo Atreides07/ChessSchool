@@ -85,6 +85,22 @@ public sealed class ArenaGameStore(SchoolDbContext db)
         return new ArenaGameListPage(items, total);
     }
 
+    /// <summary>Сводная статистика игрока (для профиля): всего/победы/поражения/ничьи. Счёт через
+    /// индексируемые Count-запросы (WhiteSub/BlackSub под индексом) — не тащим строки в память.</summary>
+    public async Task<ArenaPlayerStats> GetStatsAsync(string sub, CancellationToken ct)
+    {
+        var games = db.ArenaGames.AsNoTracking().Where(g => g.WhiteSub == sub || g.BlackSub == sub);
+        var total = await games.CountAsync(ct);
+        var wins = await games.CountAsync(g =>
+            (g.Result == GameResult.WhiteWins && g.WhiteSub == sub) ||
+            (g.Result == GameResult.BlackWins && g.BlackSub == sub), ct);
+        var draws = await games.CountAsync(g => g.Result == GameResult.Draw, ct);
+        var losses = await games.CountAsync(g =>
+            (g.Result == GameResult.WhiteWins && g.BlackSub == sub) ||
+            (g.Result == GameResult.BlackWins && g.WhiteSub == sub), ct);
+        return new ArenaPlayerStats(total, wins, losses, draws);
+    }
+
     /// <summary>Партия для воспроизведения. Возвращает null, если игрок не был её участником (приватность).</summary>
     public async Task<ArenaGameDetail?> GetForPlayerAsync(Guid id, string sub, CancellationToken ct)
     {

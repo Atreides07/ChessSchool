@@ -28,6 +28,13 @@
                 }
             </div>
         </div>
+        @if (!string.IsNullOrWhiteSpace(ProfileHref))
+        {
+            <a class="um-item" href="@ProfileHref" role="menuitem">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" /></svg>
+                Профиль
+            </a>
+        }
         @* Выход ведёт на внешний эндпоинт IdP (302 на чужой домен) — отключаем enhanced-nav,
            иначе Blazor пытается fetch'ить и не следует за кросс-доменным редиректом. *@
         <a class="um-item" href="@SignOutHref" role="menuitem" data-enhance-nav="false">
@@ -41,6 +48,8 @@
     [Parameter] public string? Name { get; set; }
     [Parameter] public string? Email { get; set; }
     [Parameter] public string SignOutHref { get; set; } = "/signout";
+    /// <summary>Ссылка на профиль игрока (необязательно). Задана → в меню появляется пункт «Профиль».</summary>
+    [Parameter] public string? ProfileHref { get; set; }
     /// <summary>Активна ли премиум-подписка у текущего пользователя — золотая корона на аватаре и метка в меню.</summary>
     [Parameter] public bool Premium { get; set; }
 

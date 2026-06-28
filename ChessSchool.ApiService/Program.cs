@@ -256,6 +256,13 @@ app.MapGet("/internal/arena-games", async (string sub, int? skip, int? take, Htt
     return Results.Ok(await store.ListForPlayerAsync(sub, Math.Max(0, skip ?? 0), t, ct));
 });
 
+app.MapGet("/internal/arena-games/stats", async (string sub, HttpRequest http,
+    ArenaGameStore store, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    return Results.Ok(await store.GetStatsAsync(sub, ct));
+});
+
 app.MapGet("/internal/arena-games/{id:guid}", async (Guid id, string sub, HttpRequest http,
     ArenaGameStore store, CancellationToken ct) =>
 {

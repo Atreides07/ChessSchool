@@ -20,8 +20,10 @@ public class ArenaGameStoreTests
     }
 
     private static ArenaGameArchiveRequest Req(string id = "g1", GameResult result = GameResult.WhiteWins) =>
+        // Свежий TimeControl на каждый запрос: общий статический инстанс (TimeControl.Blitz) как owned-entity
+        // нельзя привязывать к нескольким владельцам в одном контексте EF (в проде каждый запрос — свой инстанс).
         new("t1", id, "white-sub", "black-sub", "Alice", "Bob", WhiteIsBot: false, BlackIsBot: true,
-            "1. e4 e5 *", result, GameEndReason.Checkmate, TimeControl.Blitz, DateTimeOffset.UtcNow);
+            "1. e4 e5 *", result, GameEndReason.Checkmate, new TimeControl(300, 2), DateTimeOffset.UtcNow);
 
     [Fact]
     public async Task Archive_ThenList_FromEachPerspective()
@@ -53,6 +55,26 @@ public class ArenaGameStoreTests
         Assert.True(await store.ArchiveAsync(Req("dup"), default));
         Assert.False(await store.ArchiveAsync(Req("dup"), default)); // повтор — не дубль
         Assert.Equal(1, await db.ArenaGames.CountAsync());
+    }
+
+    [Fact]
+    public async Task GetStats_CountsWinsLossesDraws_FromPlayerPerspective()
+    {
+        using var db = NewDb();
+        var store = new ArenaGameStore(db);
+        // white-sub белыми: победа, поражение, ничья.
+        await store.ArchiveAsync(Req("g1", GameResult.WhiteWins), default);
+        await store.ArchiveAsync(Req("g2", GameResult.BlackWins), default);
+        await store.ArchiveAsync(Req("g3", GameResult.Draw), default);
+
+        var w = await store.GetStatsAsync("white-sub", default);
+        Assert.Equal((3, 1, 1, 1), (w.Total, w.Wins, w.Losses, w.Draws));
+
+        // black-sub видит те же партии зеркально: поражение, победа, ничья.
+        var b = await store.GetStatsAsync("black-sub", default);
+        Assert.Equal((3, 1, 1, 1), (b.Total, b.Wins, b.Losses, b.Draws));
+
+        Assert.Equal(0, (await store.GetStatsAsync("stranger", default)).Total); // не участник
     }
 
     [Fact]

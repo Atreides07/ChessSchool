@@ -1,0 +1,172 @@
+@page "/me"
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@using ChessSchool.Contracts
+@inject IHttpContextAccessor Http
+@inject ArenaReviewService Review
+@inject IPlayerEntitlements Entitlements
+
+@* Личный хаб игрока: имя/премиум, статистика по арена-партиям, управление подпиской и последние партии
+   (полная история — /me/games). Статический SSR (данные грузятся на сервере, как в списке партий).
+   Приватная страница → noindex. *@
+
+<PageTitle>@Loc.T("profile.title") — ChessArena</PageTitle>
+<HeadContent><meta name="robots" content="noindex" /></HeadContent>
+
+@if (!_authed)
+{
+    <div class="card pf-card">
+        <p class="text-secondary">@Loc.T("premium.login")</p>
+        <a class="btn btn-primary" href="/signin?returnUrl=/me" data-enhance-nav="false">@Loc.T("premium.loginbtn")</a>
+    </div>
+}
+else
+{
+    <header class="pf-head">
+        <div class="pf-ava">@_initial</div>
+        <div>
+            <h1 class="pf-name">@_name</h1>
+            @if (_premium)
+            {
+                <span class="pf-badge">@Loc.T("premium.badge")</span>
+            }
+        </div>
+    </header>
+
+    <div class="pf-stats">
+        <div class="pf-stat"><span class="pf-stat-num">@_stats.Total</span><span class="pf-stat-lbl">@Loc.T("profile.stats.games")</span></div>
+        <div class="pf-stat"><span class="pf-stat-num pf-win">@_stats.Wins</span><span class="pf-stat-lbl">@Loc.T("profile.stats.wins")</span></div>
+        <div class="pf-stat"><span class="pf-stat-num pf-loss">@_stats.Losses</span><span class="pf-stat-lbl">@Loc.T("profile.stats.losses")</span></div>
+        <div class="pf-stat"><span class="pf-stat-num pf-draw">@_stats.Draws</span><span class="pf-stat-lbl">@Loc.T("profile.stats.draws")</span></div>
+        <div class="pf-stat"><span class="pf-stat-num">@_winRate%</span><span class="pf-stat-lbl">@Loc.T("profile.stats.winrate")</span></div>
+    </div>
+
+    <div class="card pf-sub">
+        @if (_premium)
+        {
+            <div><span class="pf-sub-on">★ @Loc.T("profile.premium.active")</span></div>
+            <a class="btn btn-sm btn-outline" href="/premium/portal" data-enhance-nav="false">@Loc.T("profile.premium.manage")</a>
+        }
+        else
+        {
+            <div class="text-secondary">@Loc.T("profile.premium.none")</div>
+            <a class="btn btn-sm btn-primary" href="/premium">@Loc.T("profile.premium.get")</a>
+        }
+    </div>
+
+    <section class="pf-section">
+        <div class="pf-section-head">
+            <h2 class="pf-h2">@Loc.T("profile.recent")</h2>
+            @if (_recent.Count > 0)
+            {
+                <a class="pf-all" href="/me/games">@Loc.T("profile.allgames") →</a>
+            }
+        </div>
+
+        @if (_recent.Count == 0)
+        {
+            <div class="card pf-card">
+                <p class="text-secondary">@Loc.T("games.empty")</p>
+                <a class="btn btn-primary" href="/">@Loc.T("games.empty.cta")</a>
+            </div>
+        }
+        else
+        {
+            <div class="mg-list">
+                @foreach (var g in _recent)
+                {
+                    <a class="mg-row" href="@($"/me/games/{g.Id}")" data-enhance-nav="false">
+                        <span class="mg-outcome @OutcomeClass(g.Outcome)">@OutcomeText(g.Outcome)</span>
+                        <span class="mg-opp">
+                            <span class="text-secondary">@Loc.T("games.vs")</span> @g.OpponentName
+                            @if (g.OpponentIsBot) { <span class="bot-tag">@Loc.T("bot.tag")</span> }
+                        </span>
+                        <span class="mg-tc">@($"{g.TimeControl.InitialSeconds / 60}+{g.TimeControl.IncrementSeconds}")</span>
+                        <span class="mg-date">@g.PlayedAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                        @if (g.Analyzed) { <span class="mg-an" title="@Loc.T("games.analyzed")">📊</span> }
+                        else { <span class="mg-an"></span> }
+                    </a>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private bool _authed, _premium;
+    private string _name = "", _initial = "?";
+    private ArenaPlayerStats _stats = new(0, 0, 0, 0);
+    private int _winRate;
+    private IReadOnlyList<ArenaGameListItem> _recent = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = Http.HttpContext?.User;
+        _authed = user?.Identity?.IsAuthenticated == true;
+        if (!_authed) return;
+
+        _name = user!.Identity?.Name ?? "—";
+        _initial = string.IsNullOrWhiteSpace(_name) ? "?" : char.ToUpperInvariant(_name.TrimStart()[0]).ToString();
+        var sub = user.FindFirst("sub")?.Value ?? "";
+
+        _premium = await Entitlements.IsPremiumAsync(sub);
+        _stats = await Review.GetStatsAsync(sub, CancellationToken.None);
+        var decided = _stats.Wins + _stats.Losses + _stats.Draws;
+        _winRate = decided > 0 ? (int)Math.Round(100.0 * _stats.Wins / decided) : 0;
+        _recent = (await Review.ListAsync(sub, 0, 8, CancellationToken.None)).Items;
+    }
+
+    private string OutcomeText(PlayerOutcome o) => o switch
+    {
+        PlayerOutcome.Win => Loc.T("games.win"),
+        PlayerOutcome.Loss => Loc.T("games.loss"),
+        _ => Loc.T("games.draw"),
+    };
+
+    private static string OutcomeClass(PlayerOutcome o) => o switch
+    {
+        PlayerOutcome.Win => "win",
+        PlayerOutcome.Loss => "loss",
+        _ => "draw",
+    };
+}
+
+<style>
+    .pf-card { max-width: 460px; }
+    .pf-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+    .pf-ava { width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 1.6rem; font-weight: 800; flex: none; }
+    .pf-name { font-size: 1.6rem; margin: 0; }
+    .pf-badge { display: inline-block; margin-top: 4px; font-size: .68rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #6e5200; background: #fff3cf; border: 1px solid #e0ad00; border-radius: var(--r-pill); padding: .05rem .45rem; }
+
+    .pf-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-width: 680px; margin-bottom: 22px; }
+    .pf-stat { background: var(--surface-2); border-radius: var(--r-md); padding: .7rem .5rem; text-align: center; }
+    .pf-stat-num { display: block; font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .pf-stat-num.pf-win { color: var(--success); }
+    .pf-stat-num.pf-loss { color: var(--danger); }
+    .pf-stat-num.pf-draw { color: var(--muted); }
+    .pf-stat-lbl { color: var(--ink-2); font-size: .8rem; }
+
+    .pf-sub { max-width: 680px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 26px; }
+    .pf-sub-on { color: #6e5200; font-weight: 700; }
+
+    .pf-section-head { display: flex; align-items: baseline; justify-content: space-between; max-width: 680px; margin-bottom: 12px; }
+    .pf-h2 { font-size: 1.2rem; margin: 0; }
+    .pf-all { color: var(--accent); font-weight: 600; font-size: .9rem; }
+
+    .mg-list { display: flex; flex-direction: column; gap: 6px; max-width: 680px; }
+    .mg-row { display: grid; grid-template-columns: 92px 1fr auto auto 24px; align-items: center; gap: .7rem;
+        padding: .6rem .8rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); }
+    .mg-row:hover { background: var(--surface-2); }
+    .mg-outcome { font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+    .mg-outcome.win { color: var(--success); }
+    .mg-outcome.loss { color: var(--danger); }
+    .mg-outcome.draw { color: var(--muted); }
+    .mg-opp { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mg-tc { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+    .mg-date { color: var(--muted); font-size: .85rem; }
+    .mg-an { text-align: center; }
+
+    @@media (max-width: 560px) {
+        .pf-stats { grid-template-columns: repeat(3, 1fr); }
+    }
+</style>

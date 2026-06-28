@@ -44,6 +44,9 @@ public sealed class ArenaReviewService(
     public Task<ArenaGameListPage> ListAsync(string sub, int skip, int take, CancellationToken ct)
         => api.ListAsync(sub, skip, take, ct);
 
+    public Task<ArenaPlayerStats> GetStatsAsync(string sub, CancellationToken ct)
+        => api.GetStatsAsync(sub, ct);
+
     public Task<ArenaGameDetail?> GetAsync(Guid id, string sub, CancellationToken ct)
         => api.GetAsync(id, sub, ct);
 

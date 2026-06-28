@@ -37,6 +37,9 @@ public sealed record ArenaGameListPage(
     IReadOnlyList<ArenaGameListItem> Items,
     int Total);
 
+/// <summary>Сводная статистика игрока по арена-партиям (для профиля /me).</summary>
+public sealed record ArenaPlayerStats(int Total, int Wins, int Losses, int Draws);
+
 /// <summary>Партия для воспроизведения/разбора (полные данные обеих сторон).</summary>
 public sealed record ArenaGameDetail(
     Guid Id,

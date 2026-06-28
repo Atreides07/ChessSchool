@@ -67,6 +67,7 @@
                 <Authorized>
                     <ChessSchool.Design.UserMenu Name="@context.User.Identity?.Name"
                                                  Email='@(context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? context.User.FindFirst("email")?.Value)'
+                                                 Premium="_isPremium"
                                                  SignOutHref="/signout" />
                 </Authorized>
                 <NotAuthorized>

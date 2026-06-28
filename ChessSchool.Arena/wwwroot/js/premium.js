@@ -5,12 +5,71 @@
     if (window.__premium) return;
     window.__premium = true;
 
+    // Показать пользователю причину (вместо «кнопка не работает»): пишем в #prem-status и в консоль.
+    function status(msg) {
+        console.error('[premium] ' + msg);
+        var el = document.getElementById('prem-status');
+        if (el) { el.textContent = msg; el.hidden = false; }
+    }
+
+    var paddleState = 0; // 0=не загружали, 1=грузится, 2=готов, -1=ошибка загрузки
+    var paddleWaiters = [];
+
+    // Грузим Paddle.js один раз; колбэк зовётся с true (готов) или false (не удалось загрузить CDN).
     function loadPaddle(cb) {
-        if (window.Paddle) { cb(); return; }
+        if (paddleState === 2) { cb(true); return; }
+        if (paddleState === -1) { cb(false); return; }
+        paddleWaiters.push(cb);
+        if (paddleState === 1) return;
+        paddleState = 1;
+        if (window.Paddle) { paddleState = 2; flush(true); return; }
         var s = document.createElement('script');
         s.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
-        s.onload = cb;
+        s.onload = function () { paddleState = 2; flush(true); };
+        s.onerror = function () { paddleState = -1; flush(false); };
         document.head.appendChild(s);
+    }
+    function flush(ok) {
+        var w = paddleWaiters; paddleWaiters = [];
+        w.forEach(function (cb) { try { cb(ok); } catch (e) { } });
+    }
+
+    var paddleInited = false;
+    function initPaddle(d) {
+        if (paddleInited) return true;
+        try {
+            if (d.env) window.Paddle.Environment.set(d.env);
+            window.Paddle.Initialize({
+                token: d.token,
+                // Ловим ошибку самого checkout (например, неверный price/токен) и показываем её.
+                eventCallback: function (ev) {
+                    if (ev && ev.name === 'checkout.error') {
+                        status('Paddle: ' + ((ev.error && ev.error.detail) || 'не удалось открыть оплату.'));
+                    }
+                }
+            });
+            paddleInited = true;
+            return true;
+        } catch (e) {
+            status('Paddle не инициализировался: ' + (e && e.message ? e.message : e));
+            return false;
+        }
+    }
+
+    function openCheckout(d, btn) {
+        loadPaddle(function (ok) {
+            if (!ok) { status('Не удалось загрузить Paddle (проверь сеть/блокировщик рекламы).'); return; }
+            if (!initPaddle(d)) return;
+            try {
+                window.Paddle.Checkout.open({
+                    items: [{ priceId: d.price, quantity: 1 }],
+                    customData: { user_sub: d.sub },         // связь подписки с пользователем (в вебхуке)
+                    settings: { successUrl: d.success }
+                });
+            } catch (e) {
+                status('Не удалось открыть оплату: ' + (e && e.message ? e.message : e));
+            }
+        });
     }
 
     // После возврата с checkout Paddle добавляет ?_ptxn=... в URL. Сверяем статус из API (reconcile),
@@ -44,23 +103,18 @@
         var d = root.dataset;
 
         if (d.mode === 'paddle') {
-            loadPaddle(function () {
-                try {
-                    if (d.env) window.Paddle.Environment.set(d.env);
-                    window.Paddle.Initialize({ token: d.token });
-                } catch (e) { }
-                btn.onclick = function () {
-                    window.Paddle.Checkout.open({
-                        items: [{ priceId: d.price, quantity: 1 }],
-                        customData: { user_sub: d.sub },         // связь подписки с пользователем (в вебхуке)
-                        settings: { successUrl: d.success }
-                    });
-                };
-            });
+            if (!d.token || !d.price) { status('Не задан Paddle:ClientToken или PremiumPriceId.'); return; }
+            // Вешаем обработчик СРАЗУ — клик всегда реагирует; Paddle грузится лениво при первом клике.
+            btn.onclick = function () { openCheckout(d, btn); };
+            // Предзагрузка в фоне, чтобы первый клик открывался без паузы.
+            loadPaddle(function (ok) { if (ok) initPaddle(d); });
         } else {
             btn.onclick = async function () {
                 btn.disabled = true;
-                try { await fetch('/premium/dev-activate', { method: 'POST' }); } catch (e) { }
+                try {
+                    var r = await fetch('/premium/dev-activate', { method: 'POST' });
+                    if (!r.ok) { status('Не удалось активировать (HTTP ' + r.status + ').'); btn.disabled = false; return; }
+                } catch (e) { status('Сеть недоступна: ' + (e && e.message ? e.message : e)); btn.disabled = false; return; }
                 location.href = '/premium'; // перечитать статус (премиум активирован)
             };
         }

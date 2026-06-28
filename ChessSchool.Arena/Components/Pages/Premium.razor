@@ -44,6 +44,7 @@ else
                 <button id="prem-refresh" class="btn btn-sm btn-outline">@Loc.T("premium.refresh")</button>
             }
         </div>
+        <p id="prem-status" class="prem-status" role="alert" hidden></p>
     </div>
     @* Параметры для premium.js: режим (paddle/dev), client-токен/price/окружение и user_sub. *@
     <div id="prem-root" hidden
@@ -77,4 +78,5 @@ else
     .prem-perks { margin: 0 0 1rem; padding-left: 1.1rem; color: var(--ink-2); }
     .prem-perks li { margin: .2rem 0; }
     .prem-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+    .prem-status { margin: .8rem 0 0; font-size: .88rem; color: var(--danger, #c0392b); }
 </style>

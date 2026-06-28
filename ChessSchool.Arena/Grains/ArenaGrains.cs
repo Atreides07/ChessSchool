@@ -564,7 +564,7 @@ public sealed class ArenaTournamentGrain(
             .OrderByDescending(p => p.Value.Score)
             .ThenByDescending(p => p.Value.Streak)
             .Select((p, i) => new ArenaStandingRow(i + 1, p.Value.Name, p.Value.Score, p.Value.Streak,
-                p.Value.OnFire, p.Value.Playing, p.Value.Games, p.Value.Wins, p.Value.Results.ToList()))
+                p.Value.OnFire, p.Value.Playing, p.Value.Games, p.Value.Wins, p.Value.Results.ToList(), p.Value.IsBot))
             .ToList();
 
         _players.TryGetValue(sub, out var me);
@@ -604,11 +604,14 @@ public sealed class ArenaTournamentGrain(
                 g.Id, g.Board.Fen, g.WhiteName, g.BlackName,
                 ScoreOf(g.WhiteSub), ScoreOf(g.BlackSub),
                 g.WhiteMs, g.BlackMs, g.Board.Turn, g.Status, g.Result,
-                g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare))
+                g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare,
+                IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub)))
             .ToList();
     }
 
     private int ScoreOf(string sub) => _players.TryGetValue(sub, out var p) ? p.Score : 0;
+
+    private bool IsBotSub(string sub) => _players.TryGetValue(sub, out var p) && p.IsBot;
 
     public async Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move)
     {
@@ -864,7 +867,8 @@ public sealed class ArenaTournamentGrain(
         var persona = BotPersona.For(key);
         _players[key] = new Player
         {
-            Name = $"🤖 {BotNames[(_botCounter - 1) % BotNames.Length]} ({persona.Rating})",
+            // Имя без эмодзи-префикса — бот-ность несёт флаг IsBot (в UI рисуется тег «бот»).
+            Name = $"{BotNames[(_botCounter - 1) % BotNames.Length]} ({persona.Rating})",
             IsBot = true,
             Rating = persona.Rating,
             Skill = persona.Skill,
@@ -1006,6 +1010,7 @@ public sealed class ArenaTournamentGrain(
             g.Board.Turn, g.WhiteName, g.BlackName, g.WhiteMs, g.BlackMs,
             g.Status, g.Result, g.Board.LastSan,
             g.WhiteBerserk, g.BlackBerserk, canBerserk,
-            g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare);
+            g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare,
+            IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub));
     }
 }

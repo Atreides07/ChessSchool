@@ -107,8 +107,12 @@ public class ArenaGrainTests
             var after = await t.GetStateAsync("solo");
 
             Assert.NotNull(after.MyGame);
-            var opponent = after.MyGame!.MyColor == PieceColor.White ? after.MyGame.BlackName : after.MyGame.WhiteName;
-            Assert.Contains("🤖", opponent); // соперник — бот
+            // Соперник — бот: признак несёт флаг IsBot в DTO (имя без эмодзи-префикса, в UI рисуется тег).
+            var opponentIsBot = after.MyGame!.MyColor == PieceColor.White ? after.MyGame.BlackIsBot : after.MyGame.WhiteIsBot;
+            Assert.True(opponentIsBot);
+            // Тот же флаг проброшен в таблицу лидеров: человек — не бот, бот — помечен.
+            Assert.Contains(after.Standings, r => !r.IsBot);
+            Assert.Contains(after.Standings, r => r.IsBot);
         }
         finally
         {

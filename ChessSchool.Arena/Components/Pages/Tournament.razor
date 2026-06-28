@@ -108,7 +108,7 @@
                     {
                         <div class="pod @PodClass(p.Rank)">
                             <div class="pod-cup">@Trophy(p.Rank)</div>
-                            <div class="pod-name">@p.Name</div>
+                            <div class="pod-name">@p.Name@if (p.IsBot) { <span class="bot-tag">@Loc.T("bot.tag")</span> }</div>
                             <div class="pod-stat">@p.Games @Loc.T("pod.games") • @p.Wins @Loc.T("pod.wins") • @p.Score @Loc.T("pod.pts")</div>
                         </div>
                     }
@@ -119,7 +119,7 @@
                         <div class="st-card">
                             <div class="st-head">
                                 <span class="st-ava">@Avatar(st.Name)</span>
-                                <span class="st-name">@st.Name @if (st.OnFire) { <span class="fire">🔥 @st.Streak</span> }</span>
+                                <span class="st-name">@st.Name@if (st.IsBot) { <span class="bot-tag">@Loc.T("bot.tag")</span> } @if (st.OnFire) { <span class="fire">🔥 @st.Streak</span> }</span>
                                 <span class="st-place">@st.Rank @Loc.T("st.place")</span>
                                 <span class="st-score">@st.Score</span>
                             </div>
@@ -272,6 +272,7 @@
             ["podgames"] = Loc.T("pod.games"),
             ["podwins"] = Loc.T("pod.wins"),
             ["podpts"] = Loc.T("pod.pts"),
+            ["bottag"] = Loc.T("bot.tag"),
             // Формы множественного числа «участник(а/ов)» — переиспользуем серверную логику Loc.Participants.
             ["participant_one"] = Loc.Participants(1),
             ["participant_few"] = Loc.Participants(2),

@@ -5,6 +5,8 @@
     const PIECE = (color, type) => `_content/ChessSchool.Design/pieces/${color}${type.toUpperCase()}.svg`;
     const pieceImg = (color, type, cls) => `<img class="${cls || 'cp'}" draggable="false" alt="" src="${PIECE(color, type)}">`;
     const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    // Тег «бот» рядом с никнеймом (локализованная метка из L.bottag).
+    const botTag = (isBot) => isBot ? ` <span class="bot-tag">${esc(L.bottag || 'BOT')}</span>` : '';
     const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
     // --- состояние клиента ---
@@ -246,8 +248,8 @@
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
         // Соперник — над доской, я — под доской (как на реальной доске; доска уже развёрнута под мой цвет).
         const iAmWhite = g.myColor === 0; // PieceColor.White = 0
-        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive);
-        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive);
+        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot);
+        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot);
 
         // При завершении — результат и «подобрать соперника» сбоку от доски (справа на десктопе, над
         // доской на мобиле): видно сразу, а не внизу карточки. Результат — над кнопкой.
@@ -273,8 +275,8 @@
         </div>`;
     }
 
-    function playerRow(name, berserk, ms, active) {
-        return `<span>${berserk ? '⚡ ' : ''}${esc(name)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-active="${active ? 1 : 0}">${mmss(ms)}</span></span>`;
+    function playerRow(name, berserk, ms, active, isBot) {
+        return `<span>${berserk ? '⚡ ' : ''}${esc(name)}${botTag(isBot)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-active="${active ? 1 : 0}">${mmss(ms)}</span></span>`;
     }
 
     function boardsHtml() {
@@ -285,11 +287,11 @@
             const wActive = b.turn === 0 && b.status === 1, bActive = b.turn === 1 && b.status === 1;
             const res = b.status === 2 ? `<div class="bresult"><span class="rcell w">${gres(b.result, true)}</span><span class="rdash">–</span><span class="rcell b">${gres(b.result, false)}</span></div>` : '';
             return `<div class="bcard ${b.status === 2 ? 'done' : ''}">
-                <div class="bplayer"><span class="bava">${avatar(b.blackName)}</span><span class="bname">${esc(b.blackName)}</span><span class="bscore">${b.blackScore}</span></div>
+                <div class="bplayer"><span class="bava">${avatar(b.blackName)}</span><span class="bname">${esc(b.blackName)}${botTag(b.blackIsBot)}</span><span class="bscore">${b.blackScore}</span></div>
                 <div class="bclock js-clock ${bActive ? 'active' : ''}" data-ms="${b.blackMs}" data-active="${bActive ? 1 : 0}">${mmss(b.blackMs)}</div>
                 <div class="bboard">${miniBoard(b.fen, b.lastFrom, b.lastTo, b.checkSquare)}${res}</div>
                 <div class="bclock js-clock ${wActive ? 'active' : ''}" data-ms="${b.whiteMs}" data-active="${wActive ? 1 : 0}">${mmss(b.whiteMs)}</div>
-                <div class="bplayer"><span class="bava">${avatar(b.whiteName)}</span><span class="bname">${esc(b.whiteName)}</span><span class="bscore">${b.whiteScore}</span></div>
+                <div class="bplayer"><span class="bava">${avatar(b.whiteName)}</span><span class="bname">${esc(b.whiteName)}${botTag(b.whiteIsBot)}</span><span class="bscore">${b.whiteScore}</span></div>
             </div>`;
         }).join('');
         return `<div class="sec-head"><h2 class="sec-title">${esc(L.games)}</h2>
@@ -302,13 +304,13 @@
         if (r.length === 0) return '';
         const podium = r.slice(0, 3).map(p =>
             `<div class="pod ${podClass(p.rank)}"><div class="pod-cup">${trophy(p.rank)}</div>
-                <div class="pod-name">${esc(p.name)}</div>
+                <div class="pod-name">${esc(p.name)}${botTag(p.isBot)}</div>
                 <div class="pod-stat">${p.games} ${esc(L.podgames)} • ${p.wins} ${esc(L.podwins)} • ${p.score} ${esc(L.podpts)}</div></div>`).join('');
         const list = r.map(s => {
             const chips = s.results.length ? `<div class="st-chips">${s.results.map(x => `<span class="chip ${chipClass(x)}">${x}</span>`).join('')}</div>` : '';
             return `<div class="st-card"><div class="st-head">
                 <span class="st-ava">${avatar(s.name)}</span>
-                <span class="st-name">${esc(s.name)} ${s.onFire ? `<span class="fire">🔥 ${s.streak}</span>` : ''}</span>
+                <span class="st-name">${esc(s.name)}${botTag(s.isBot)} ${s.onFire ? `<span class="fire">🔥 ${s.streak}</span>` : ''}</span>
                 <span class="st-place">${s.rank} ${esc(L.place)}</span>
                 <span class="st-score">${s.score}</span></div>${chips}</div>`;
         }).join('');

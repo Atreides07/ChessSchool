@@ -7,6 +7,7 @@
     const PIECE = (color, type) => `_content/ChessSchool.Design/pieces/${color}${type.toUpperCase()}.svg`;
     const pieceImg = (color, type) => `<img class="piece-img" draggable="false" alt="" src="${PIECE(color, type)}">`;
     const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const botTag = (isBot) => isBot ? ` <span class="bot-tag">${esc(L.bottag || 'BOT')}</span>` : '';
     const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const PAGE = 12;
 
@@ -119,11 +120,11 @@
             ? `<div class="bresult"><span class="rcell w">${gres(b.result, true)}</span><span class="rdash">–</span><span class="rcell b">${gres(b.result, false)}</span></div>`
             : '';
         return `<div class="bcard ${b.status === 2 ? 'done' : ''}">
-            <div class="bplayer"><span class="bava">${avatar(b.blackName)}</span><span class="bname">${esc(b.blackName)}</span><span class="bscore">${b.blackScore}</span></div>
+            <div class="bplayer"><span class="bava">${avatar(b.blackName)}</span><span class="bname">${esc(b.blackName)}${botTag(b.blackIsBot)}</span><span class="bscore">${b.blackScore}</span></div>
             <div class="bclock js-clock ${bActive ? 'active' : ''}" data-ms="${b.blackMs}" data-active="${bActive ? 1 : 0}">${mmss(b.blackMs)}</div>
             <div class="bboard">${miniBoard(b.fen, b.lastFrom, b.lastTo, b.checkSquare)}${res}</div>
             <div class="bclock js-clock ${wActive ? 'active' : ''}" data-ms="${b.whiteMs}" data-active="${wActive ? 1 : 0}">${mmss(b.whiteMs)}</div>
-            <div class="bplayer"><span class="bava">${avatar(b.whiteName)}</span><span class="bname">${esc(b.whiteName)}</span><span class="bscore">${b.whiteScore}</span></div>
+            <div class="bplayer"><span class="bava">${avatar(b.whiteName)}</span><span class="bname">${esc(b.whiteName)}${botTag(b.whiteIsBot)}</span><span class="bscore">${b.whiteScore}</span></div>
         </div>`;
     }
 

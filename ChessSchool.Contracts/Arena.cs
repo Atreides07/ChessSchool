@@ -36,7 +36,8 @@ public sealed record ArenaStandingRow(
     [property: Id(5)] bool Playing,
     [property: Id(6)] int Games,
     [property: Id(7)] int Wins,
-    [property: Id(8)] IReadOnlyList<int> Results);
+    [property: Id(8)] IReadOnlyList<int> Results,
+    [property: Id(9)] bool IsBot = false);
 
 /// <summary>Партия для трансляции «идёт сейчас» (ориентация доски — белые снизу, очки турнира у имён).</summary>
 [GenerateSerializer]
@@ -54,7 +55,9 @@ public sealed record ArenaBoardDto(
     [property: Id(10)] GameResult Result,
     [property: Id(11)] string? LastFrom = null,
     [property: Id(12)] string? LastTo = null,
-    [property: Id(13)] string? CheckSquare = null);
+    [property: Id(13)] string? CheckSquare = null,
+    [property: Id(14)] bool WhiteIsBot = false,
+    [property: Id(15)] bool BlackIsBot = false);
 
 /// <summary>Текущая партия игрока внутри турнира.</summary>
 [GenerateSerializer]
@@ -75,7 +78,9 @@ public sealed record ArenaGameDto(
     [property: Id(13)] bool MyBerserkAvailable,
     [property: Id(14)] string? LastFrom = null,
     [property: Id(15)] string? LastTo = null,
-    [property: Id(16)] string? CheckSquare = null);
+    [property: Id(16)] string? CheckSquare = null,
+    [property: Id(17)] bool WhiteIsBot = false,
+    [property: Id(18)] bool BlackIsBot = false);
 
 /// <summary>Полное состояние турнира для игрока (доска лидеров + его партия).</summary>
 [GenerateSerializer]

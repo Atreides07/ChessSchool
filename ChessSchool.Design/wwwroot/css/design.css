@@ -180,6 +180,15 @@ label { font-size: .86rem; color: var(--ink-2); font-weight: 560; }
 .badge-warn { background: var(--warn-weak); color: var(--warn); }
 .badge-danger { background: var(--danger-weak); color: var(--danger); }
 
+/* Тег «бот» рядом с никнеймом — мелкий нейтральный чип, чтобы отличать ботов от людей. */
+.bot-tag {
+    display: inline-block; vertical-align: middle; margin-left: .3rem;
+    padding: 0 .32rem; border-radius: var(--r-sm);
+    font-size: .62rem; font-weight: 800; letter-spacing: .04em;
+    background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+    text-transform: uppercase; line-height: 1.45; white-space: nowrap;
+}
+
 /* ----------------------- Alert ----------------------- */
 .alert { padding: .8rem 1rem; border-radius: var(--r-md); font-size: .9rem; border: 1px solid var(--line); }
 .alert-info { background: var(--accent-weak); border-color: transparent; color: #1e4fb0; }

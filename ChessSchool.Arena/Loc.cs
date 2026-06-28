@@ -166,6 +166,7 @@ public static class Loc
         ["status.reg"] = ("регистрация", "registration"),
         ["unit.players"] = ("игроков", "players"),
         ["unit.bots"] = ("ботов", "bots"),
+        ["bot.tag"] = ("БОТ", "BOT"),
 
         // --- Турнир (Tournament) ---
         ["t.fallback"] = ("Турнир", "Tournament"),

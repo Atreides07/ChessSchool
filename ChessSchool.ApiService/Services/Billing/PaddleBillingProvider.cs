@@ -19,13 +19,53 @@ public sealed class PaddleOptions
 /// Paddle Billing: запуск hosted Checkout (Paddle.js v2) на клиенте — карты у нас не ходят. Разбор и
 /// верификацию вебхуков делает <see cref="PaddleWebhook"/>. Выбирается, когда задан Paddle:WebhookSecret/ApiKey.
 /// </summary>
-public sealed class PaddleBillingProvider(PaddleOptions options) : IBillingProvider
+public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFactory httpFactory,
+    ILogger<PaddleBillingProvider> logger) : IBillingProvider
 {
+    public const string HttpClientName = "paddle";
+
     public string Name => "paddle";
 
     public BillingCheckout CreateCheckout(string userSub, string plan) =>
         new(Name, DevAutoActivate: false, ClientToken: options.ClientToken, PriceId: options.PremiumPriceId,
             CustomData: userSub, Environment: options.Environment);
+
+    /// <summary>Создаёт сессию Customer Portal (Paddle API) и возвращает общий URL обзора подписки.</summary>
+    public async Task<string?> CreatePortalUrlAsync(string providerCustomerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(providerCustomerId) || string.IsNullOrWhiteSpace(options.ApiKey)) return null;
+        try
+        {
+            var client = httpFactory.CreateClient(HttpClientName);
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"/customers/{providerCustomerId}/portal-sessions");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);
+            req.Content = System.Net.Http.Json.JsonContent.Create(new { });
+            using var resp = await client.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            return ExtractOverviewUrl(await resp.Content.ReadAsStringAsync(ct));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Не удалось создать сессию Customer Portal для {Customer}.", providerCustomerId);
+            return null;
+        }
+    }
+
+    /// <summary>Достаёт data.urls.general.overview из ответа Paddle portal-sessions.</summary>
+    public static string? ExtractOverviewUrl(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("data", out var data)
+                && data.TryGetProperty("urls", out var urls)
+                && urls.TryGetProperty("general", out var general)
+                && general.TryGetProperty("overview", out var overview)
+                && overview.ValueKind == JsonValueKind.String
+                ? overview.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
 }
 
 /// <summary>

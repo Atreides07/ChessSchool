@@ -24,6 +24,8 @@ var paddleOptions = builder.Configuration.GetSection("Paddle").Get<PaddleOptions
 if (!string.IsNullOrWhiteSpace(paddleOptions.WebhookSecret) || !string.IsNullOrWhiteSpace(paddleOptions.ApiKey))
 {
     builder.Services.AddSingleton(paddleOptions);
+    builder.Services.AddHttpClient(PaddleBillingProvider.HttpClientName, c => c.BaseAddress =
+        new(paddleOptions.Environment == "production" ? "https://api.paddle.com" : "https://sandbox-api.paddle.com"));
     builder.Services.AddSingleton<IBillingProvider, PaddleBillingProvider>();
 }
 else
@@ -243,6 +245,16 @@ app.MapGet("/internal/subscriptions/{sub}", async (string sub, HttpRequest http,
 {
     if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     return Results.Ok(await subs.GetAsync(sub, ct));
+});
+
+// Customer Portal: сессия hosted-портала провайдера (отмена/смена карты) для пользователя.
+app.MapGet("/internal/subscriptions/{sub}/portal", async (string sub, HttpRequest http,
+    SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var customerId = await subsSvc.GetProviderCustomerIdAsync(sub, ct);
+    var url = string.IsNullOrEmpty(customerId) ? null : await billing.CreatePortalUrlAsync(customerId, ct);
+    return Results.Ok(new PortalLinkDto(url));
 });
 
 // Батч-entitlement: премиум-подмножество из набора sub'ов (бейджи в таблице турнира) — один запрос.

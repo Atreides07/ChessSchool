@@ -25,6 +25,9 @@ public sealed record SubscriptionDto(
 /// <summary>Запрос dev-активации премиума (только Development, для локального теста без провайдера).</summary>
 public sealed record DevActivateRequest(string UserSub, string? Plan = null);
 
+/// <summary>Ссылка на hosted Customer Portal провайдера (отмена/смена карты). Url=null — недоступно.</summary>
+public sealed record PortalLinkDto(string? Url);
+
 /// <summary>Нормализованное событие биллинга (из вебхука провайдера или dev-активации) → состояние.</summary>
 public sealed record BillingEventDto(
     string EventId,                       // id события провайдера — идемпотентность

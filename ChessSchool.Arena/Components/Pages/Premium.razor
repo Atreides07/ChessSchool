@@ -28,7 +28,10 @@
 }
 else if (_isPremium)
 {
-    <div class="card prem-card"><p class="prem-have">@Loc.T("premium.have")</p></div>
+    <div class="card prem-card">
+        <p class="prem-have">@Loc.T("premium.have")</p>
+        <a class="btn btn-sm btn-outline" href="/premium/portal">@Loc.T("premium.manage")</a>
+    </div>
 }
 else
 {

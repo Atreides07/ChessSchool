@@ -19,8 +19,10 @@
 - ✅ Фронт/гейтинг: страница `/premium` (Paddle.js v2 checkout или dev-активация), entitlement в Arena
   ([PlayerEntitlements](../ChessSchool.Arena/Services/PlayerEntitlements.cs), кэш на ноду), бейдж
   «Premium» у текущего игрока в навигации; хук `IsPremiumAsync(sub)` для гейтинга любых фич.
-- ⏳ Остаётся (follow-up): Customer Portal (отмена/смена карты — сессия портала через Paddle API);
-  бейдж Premium в таблице турнира по всем игрокам (нужен батч-запрос статусов в грейне).
+- ✅ Бейдж Premium в таблице турнира для всех игроков (батч-entitlement, без фан-аута из грейна).
+- ✅ Customer Portal: `/premium/portal` → сессия hosted-портала Paddle (отмена/смена карты).
+
+Открытие функционала под конкретные премиум-фичи — по мере продукта, через `IsPremiumAsync(sub)`.
 
 ## Настройка Paddle sandbox (то, что нужно сделать в дашборде)
 

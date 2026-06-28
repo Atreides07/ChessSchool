@@ -13,6 +13,10 @@ public interface IBillingProvider
     /// <summary>Данные для запуска оплаты на клиенте. Dev-заглушка отдаёт DevAutoActivate=true
     /// (премиум включается без реальной оплаты — локальный путь).</summary>
     BillingCheckout CreateCheckout(string userSub, string plan);
+
+    /// <summary>URL hosted Customer Portal (отмена/смена карты) для клиента провайдера. null — недоступно
+    /// (нет customer id / dev-заглушка / провайдер недоступен).</summary>
+    Task<string?> CreatePortalUrlAsync(string providerCustomerId, CancellationToken ct = default);
 }
 
 /// <summary>Параметры запуска checkout на клиенте (Paddle.js v2) либо dev-автоактивация.</summary>
@@ -31,4 +35,7 @@ public sealed class DevStubBillingProvider : IBillingProvider
 
     public BillingCheckout CreateCheckout(string userSub, string plan) =>
         new(Name, DevAutoActivate: true, CustomData: userSub);
+
+    public Task<string?> CreatePortalUrlAsync(string providerCustomerId, CancellationToken ct = default) =>
+        Task.FromResult<string?>(null); // dev: портала нет
 }

@@ -57,6 +57,11 @@ public sealed class SubscriptionService(SchoolDbContext db, ILogger<Subscription
             : new SubscriptionDto(userSub, s.Status, s.Plan, s.CurrentPeriodEnd, IsPremium(s.Status, s.CurrentPeriodEnd));
     }
 
+    /// <summary>Id клиента у провайдера (для создания сессии Customer Portal). null — нет подписки/клиента.</summary>
+    public Task<string?> GetProviderCustomerIdAsync(string userSub, CancellationToken ct = default) =>
+        db.Subscriptions.AsNoTracking().Where(s => s.UserSub == userSub)
+            .Select(s => s.ProviderCustomerId).FirstOrDefaultAsync(ct);
+
     /// <summary>Премиум-подмножество из набора sub'ов (для бейджей в таблице турнира) — один запрос к БД.</summary>
     public async Task<IReadOnlySet<string>> PremiumSubsAsync(IReadOnlyCollection<string> subs, CancellationToken ct = default)
     {

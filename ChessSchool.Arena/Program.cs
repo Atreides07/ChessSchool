@@ -214,6 +214,23 @@ if (app.Environment.IsDevelopment())
     }).RequireAuthorization().DisableAntiforgery();
 }
 
+// Управление подпиской: редирект в hosted Customer Portal провайдера (URL берём у ApiService).
+app.MapGet("/premium/portal", async (HttpContext ctx, IHttpClientFactory http, CancellationToken ct) =>
+{
+    var sub = ctx.User.FindFirst("sub")?.Value;
+    if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
+    var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+    using var req = new HttpRequestMessage(HttpMethod.Get, $"/internal/subscriptions/{Uri.EscapeDataString(sub)}/portal");
+    req.Headers.Add("X-Internal-Key", internalApiKey);
+    using var resp = await client.SendAsync(req, ct);
+    if (resp.IsSuccessStatusCode)
+    {
+        var link = await resp.Content.ReadFromJsonAsync<ChessSchool.Contracts.PortalLinkDto>(ct);
+        if (!string.IsNullOrEmpty(link?.Url)) return Results.Redirect(link.Url);
+    }
+    return Results.Redirect("/premium"); // портал недоступен (dev/нет клиента) — назад
+}).RequireAuthorization();
+
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
 app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));
 

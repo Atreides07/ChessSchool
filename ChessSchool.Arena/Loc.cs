@@ -123,6 +123,14 @@ public static class Loc
         ["review.reason.drawagreed"] = ("ничья по соглашению", "draw agreed"),
         ["review.reason.insufficient"] = ("недостаточно материала", "insufficient material"),
         ["review.reason.abandoned"] = ("партия покинута", "abandoned"),
+        // Короткие подписи причин для списка партий (компактно, легко сканировать).
+        ["review.rs.checkmate"] = ("мат", "mate"),
+        ["review.rs.timeout"] = ("время", "time"),
+        ["review.rs.resignation"] = ("сдача", "resign"),
+        ["review.rs.stalemate"] = ("пат", "stalemate"),
+        ["review.rs.drawagreed"] = ("соглашение", "agreed"),
+        ["review.rs.insufficient"] = ("материал", "material"),
+        ["review.rs.abandoned"] = ("покинута", "abandoned"),
         ["premium.buy"] = ("Оформить премиум", "Get premium"),
         ["premium.have"] = ("У вас активен премиум ✓", "Your premium is active ✓"),
         ["premium.login"] = ("Войдите, чтобы оформить премиум.", "Sign in to get premium."),
@@ -310,6 +318,19 @@ public static class Loc
 
     public static string Tr(string ruValue) =>
         IsEn && Data.TryGetValue(ruValue, out var en) ? en : ruValue;
+
+    /// <summary>Короткая подпись причины завершения партии для списка (мат/время/сдача/…). None → "".</summary>
+    public static string ReasonShort(ChessSchool.Contracts.GameEndReason r) => r switch
+    {
+        ChessSchool.Contracts.GameEndReason.Checkmate => T("review.rs.checkmate"),
+        ChessSchool.Contracts.GameEndReason.Timeout => T("review.rs.timeout"),
+        ChessSchool.Contracts.GameEndReason.Resignation => T("review.rs.resignation"),
+        ChessSchool.Contracts.GameEndReason.Stalemate => T("review.rs.stalemate"),
+        ChessSchool.Contracts.GameEndReason.DrawAgreed => T("review.rs.drawagreed"),
+        ChessSchool.Contracts.GameEndReason.InsufficientMaterial => T("review.rs.insufficient"),
+        ChessSchool.Contracts.GameEndReason.Abandoned => T("review.rs.abandoned"),
+        _ => "",
+    };
 
     private static readonly string[] WdRu = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
     private static readonly string[] WdEn = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

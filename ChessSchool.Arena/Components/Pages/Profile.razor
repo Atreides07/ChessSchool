@@ -76,7 +76,10 @@ else
                 @foreach (var g in _recent)
                 {
                     <a class="mg-row" href="@($"/me/games/{g.Id}")" data-enhance-nav="false">
-                        <span class="mg-outcome @OutcomeClass(g.Outcome)">@OutcomeText(g.Outcome)</span>
+                        <span class="mg-outcome @OutcomeClass(g.Outcome)">
+                            @OutcomeText(g.Outcome)
+                            @if (Loc.ReasonShort(g.EndReason) is { Length: > 0 } rs) { <span class="mg-reason">@rs</span> }
+                        </span>
                         <span class="mg-opp">
                             <span class="text-secondary">@Loc.T("games.vs")</span> @g.OpponentName
                             @if (g.OpponentIsBot) { <span class="bot-tag">@Loc.T("bot.tag")</span> }
@@ -154,10 +157,11 @@ else
     .pf-all { color: var(--accent); font-weight: 600; font-size: .9rem; }
 
     .mg-list { display: flex; flex-direction: column; gap: 6px; max-width: 680px; }
-    .mg-row { display: grid; grid-template-columns: 92px 1fr auto auto 24px; align-items: center; gap: .7rem;
+    .mg-row { display: grid; grid-template-columns: 108px 1fr auto auto 24px; align-items: center; gap: .7rem;
         padding: .6rem .8rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); }
     .mg-row:hover { background: var(--surface-2); }
-    .mg-outcome { font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+    .mg-outcome { display: flex; flex-direction: column; gap: 1px; font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+    .mg-reason { font-weight: 500; font-size: .72rem; text-transform: none; letter-spacing: 0; color: var(--muted); }
     .mg-outcome.win { color: var(--success); }
     .mg-outcome.loss { color: var(--danger); }
     .mg-outcome.draw { color: var(--muted); }

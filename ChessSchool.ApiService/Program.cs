@@ -18,8 +18,18 @@ builder.Services.AddDbContext<SchoolDbContext>(o =>
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
 builder.Services.AddScoped<SubscriptionService>();
-// Провайдер эквайринга: dev-заглушка по умолчанию; Paddle подключается при наличии конфига (фаза 2).
-builder.Services.AddSingleton<IBillingProvider, DevStubBillingProvider>();
+// Провайдер эквайринга: Paddle при наличии конфига (секрет вебхука/API-ключ), иначе dev-заглушка
+// (оплата проходит локально). Выбор по конфигу — как S3↔MinIO.
+var paddleOptions = builder.Configuration.GetSection("Paddle").Get<PaddleOptions>() ?? new PaddleOptions();
+if (!string.IsNullOrWhiteSpace(paddleOptions.WebhookSecret) || !string.IsNullOrWhiteSpace(paddleOptions.ApiKey))
+{
+    builder.Services.AddSingleton(paddleOptions);
+    builder.Services.AddSingleton<IBillingProvider, PaddleBillingProvider>();
+}
+else
+{
+    builder.Services.AddSingleton<IBillingProvider, DevStubBillingProvider>();
+}
 builder.AddChessSchoolAnalytics();
 
 // Readiness-проверка доступности БД (попадает в /health, не в /alive). Без строки подключения
@@ -248,6 +258,24 @@ if (app.Environment.IsDevelopment())
         return Results.Ok(await subs.GetAsync(req.UserSub, ct));
     });
 }
+
+// Вебхук Paddle: публичный (Paddle вызывает извне), защита — подпись Paddle-Signature, не ключ.
+// Идемпотентность — в SubscriptionService. На дубль/нерелевантное отвечаем 200, чтобы Paddle не ретраил.
+app.MapPost("/webhooks/paddle", async (HttpRequest http, SubscriptionService subs,
+    IConfiguration cfg, CancellationToken ct) =>
+{
+    var secret = cfg["Paddle:WebhookSecret"];
+    if (string.IsNullOrEmpty(secret)) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+    using var reader = new StreamReader(http.Body);
+    var body = await reader.ReadToEndAsync(ct);
+    if (!PaddleWebhook.VerifySignature(body, http.Headers["Paddle-Signature"], secret, DateTimeOffset.UtcNow))
+        return Results.BadRequest("invalid signature");
+
+    if (PaddleWebhook.TryParse(body, out var ev) && ev is not null)
+        await subs.ApplyAsync(ev, ct);
+    return Results.Ok();
+});
 
 app.MapGet("/", () => "ChessSchool API. ЛК: /schools/{id}/students");
 app.MapDefaultEndpoints();

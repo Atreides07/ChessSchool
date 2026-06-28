@@ -20,8 +20,11 @@ public interface IBillingProvider
     /// (нет customer id / dev-заглушка / провайдер недоступен).</summary>
     Task<string?> CreatePortalUrlAsync(string providerCustomerId, CancellationToken ct = default);
 
-    /// <summary>Вытягивает текущее состояние подписки из API провайдера (reconcile, если вебхук не дошёл).</summary>
-    Task<BillingEventDto?> FetchSubscriptionAsync(string providerSubscriptionId, CancellationToken ct = default);
+    /// <summary>Вытягивает текущее состояние подписки из API провайдера (reconcile, если вебхук не дошёл).
+    /// fallbackUserSub — известный sub пользователя (из транзакции/нашей строки), подставляется, если в
+    /// custom_data самой подписки его нет (Paddle хранит customData checkout-а на транзакции, не на подписке).</summary>
+    Task<BillingEventDto?> FetchSubscriptionAsync(string providerSubscriptionId, CancellationToken ct = default,
+        string? fallbackUserSub = null);
 
     /// <summary>Вытягивает состояние по transaction id из success-URL checkout (первичная активация без вебхука).</summary>
     Task<BillingEventDto?> FetchByTransactionAsync(string transactionId, CancellationToken ct = default);
@@ -47,7 +50,8 @@ public sealed class DevStubBillingProvider : IBillingProvider
     public Task<string?> CreatePortalUrlAsync(string providerCustomerId, CancellationToken ct = default) =>
         Task.FromResult<string?>(null); // dev: портала нет
 
-    public Task<BillingEventDto?> FetchSubscriptionAsync(string providerSubscriptionId, CancellationToken ct = default) =>
+    public Task<BillingEventDto?> FetchSubscriptionAsync(string providerSubscriptionId, CancellationToken ct = default,
+        string? fallbackUserSub = null) =>
         Task.FromResult<BillingEventDto?>(null); // dev: вытягивать нечего (активация — кнопкой dev-activate)
 
     public Task<BillingEventDto?> FetchByTransactionAsync(string transactionId, CancellationToken ct = default) =>

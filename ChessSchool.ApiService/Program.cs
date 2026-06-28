@@ -313,7 +313,7 @@ app.MapPost("/internal/subscriptions/{sub}/refresh", async (string sub, HttpRequ
 {
     if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var subId = await subsSvc.GetProviderSubscriptionIdAsync(sub, ct);
-    if (!string.IsNullOrEmpty(subId) && await billing.FetchSubscriptionAsync(subId, ct) is { } state)
+    if (!string.IsNullOrEmpty(subId) && await billing.FetchSubscriptionAsync(subId, ct, sub) is { } state)
         await subsSvc.ReconcileAsync(state, ct);
     return Results.Ok(await subsSvc.GetAsync(sub, ct));
 });

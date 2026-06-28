@@ -154,6 +154,45 @@ public class PaddleWebhookTests
     }
 
     [Fact]
+    public void TryMapSubscription_UsesFallbackUserSub_WhenSubscriptionLacksCustomData()
+    {
+        // Paddle хранит customData checkout-а на ТРАНЗАКЦИИ, не на подписке — у подписки custom_data
+        // может не быть. При reconcile подставляем известный sub (из транзакции/нашей строки) как fallback,
+        // иначе премиум молча не включится (это и была причина «премиум не появляется после оплаты»).
+        using var doc = JsonDocument.Parse("""
+        {"id":"sub_nc","status":"active","customer_id":"ctm_nc",
+         "current_billing_period":{"ends_at":"2031-05-01T00:00:00Z"},"items":[{"price":{"id":"pri_x"}}]}
+        """);
+        // Без fallback — не свяжем с пользователем.
+        Assert.False(PaddleWebhook.TryMapSubscription(doc.RootElement, "reconcile-sub_nc", out _));
+        // С fallback — связали и активировали.
+        Assert.True(PaddleWebhook.TryMapSubscription(doc.RootElement, "reconcile-sub_nc", out var ev, "user-77"));
+        Assert.Equal("user-77", ev!.UserSub);
+        Assert.Equal(SubscriptionStatus.Active, ev.Status);
+    }
+
+    [Fact]
+    public void TryMapSubscription_CustomDataWins_OverFallback()
+    {
+        using var doc = JsonDocument.Parse("""
+        {"id":"s","status":"active","custom_data":{"user_sub":"real"}}
+        """);
+        Assert.True(PaddleWebhook.TryMapSubscription(doc.RootElement, "p", out var ev, "fallback"));
+        Assert.Equal("real", ev!.UserSub); // custom_data приоритетнее fallback
+    }
+
+    [Fact]
+    public void PickBestSubscription_AppliesFallbackUserSub()
+    {
+        using var doc = JsonDocument.Parse("""
+        [{"id":"sub_a","status":"active","current_billing_period":{"ends_at":"2031-06-01T00:00:00Z"}}]
+        """);
+        var ev = PaddleWebhook.PickBestSubscription(doc.RootElement, "reconcile-cust", "user-9");
+        Assert.NotNull(ev);
+        Assert.Equal("user-9", ev!.UserSub);
+    }
+
+    [Fact]
     public void PickBestSubscription_EmptyOrNonArray_Null()
     {
         using var empty = JsonDocument.Parse("[]");

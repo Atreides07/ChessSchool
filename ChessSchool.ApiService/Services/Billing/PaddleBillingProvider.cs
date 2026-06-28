@@ -32,15 +32,20 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
 
     /// <summary>Вытягивает текущее состояние подписки из Paddle (GET /subscriptions/{id}) — reconcile,
     /// если вебхук не пришёл/опоздал. null — не нашли/нет ключа/ошибка.</summary>
-    public async Task<BillingEventDto?> FetchSubscriptionAsync(string subscriptionId, CancellationToken ct = default)
+    public async Task<BillingEventDto?> FetchSubscriptionAsync(string subscriptionId, CancellationToken ct = default,
+        string? fallbackUserSub = null)
     {
         var json = await GetAsync($"/subscriptions/{subscriptionId}", ct);
         if (json is null) return null;
         try
         {
             using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.TryGetProperty("data", out var data)
-                && PaddleWebhook.TryMapSubscription(data, $"reconcile-{subscriptionId}", out var ev) ? ev : null;
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return null;
+            if (PaddleWebhook.TryMapSubscription(data, $"reconcile-{subscriptionId}", out var ev, fallbackUserSub))
+                return ev;
+            // Статус есть, но user_sub связать не удалось — иначе премиум молча не включится: видно в логах.
+            logger.LogWarning("Reconcile подписки {SubId}: не удалось определить user_sub (нет custom_data и fallback).", subscriptionId);
+            return null;
         }
         catch (JsonException) { return null; }
     }
@@ -55,12 +60,18 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
         {
             using var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("data", out var data)) return null;
+            // user_sub лежит в custom_data ТРАНЗАКЦИИ (его задаёт checkout), а не подписки — берём отсюда
+            // и протягиваем как fallback в маппинг подписки (иначе reconcile не свяжет подписку с юзером).
+            string? txnUserSub = null;
+            if (data.TryGetProperty("custom_data", out var cd) && cd.ValueKind == JsonValueKind.Object)
+                txnUserSub = PaddleWebhook.Field(cd, "user_sub");
+
             var subId = PaddleWebhook.Field(data, "subscription_id");
-            if (!string.IsNullOrEmpty(subId)) return await FetchSubscriptionAsync(subId, ct);
+            if (!string.IsNullOrEmpty(subId)) return await FetchSubscriptionAsync(subId, ct, txnUserSub);
             // Подписка создаётся асинхронно — сразу после оплаты её id ещё не привязан к транзакции.
             // Тогда ищем по клиенту транзакции (customer_id есть всегда) — берём его актуальную подписку.
             var customerId = PaddleWebhook.Field(data, "customer_id");
-            return string.IsNullOrEmpty(customerId) ? null : await FetchLatestByCustomerAsync(customerId, ct);
+            return string.IsNullOrEmpty(customerId) ? null : await FetchLatestByCustomerAsync(customerId, ct, txnUserSub);
         }
         catch (JsonException) { return null; }
     }
@@ -68,7 +79,8 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
     /// <summary>Актуальная подписка клиента (GET /subscriptions?customer_id=…) — предпочитаем «премиальную»
     /// (активна/триал/просрочка) с самым поздним концом периода. Нужна, когда подписка ещё не привязана
     /// к транзакции на момент возврата с checkout.</summary>
-    private async Task<BillingEventDto?> FetchLatestByCustomerAsync(string customerId, CancellationToken ct)
+    private async Task<BillingEventDto?> FetchLatestByCustomerAsync(string customerId, CancellationToken ct,
+        string? fallbackUserSub = null)
     {
         var json = await GetAsync($"/subscriptions?customer_id={Uri.EscapeDataString(customerId)}&per_page=50", ct);
         if (json is null) return null;
@@ -76,7 +88,7 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
         {
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.TryGetProperty("data", out var arr)
-                ? PaddleWebhook.PickBestSubscription(arr, $"reconcile-cust-{customerId}") : null;
+                ? PaddleWebhook.PickBestSubscription(arr, $"reconcile-cust-{customerId}", fallbackUserSub) : null;
         }
         catch (JsonException) { return null; }
     }
@@ -190,16 +202,19 @@ public static class PaddleWebhook
     /// Маппит объект subscription (из вебхука или ответа GET /subscriptions/{id}) в BillingEventDto.
     /// Общий код для вебхука и «вытягивания» статуса из API (reconcile). false — нет статуса/user_sub.
     /// </summary>
-    public static bool TryMapSubscription(JsonElement data, string eventId, out BillingEventDto? ev)
+    public static bool TryMapSubscription(JsonElement data, string eventId, out BillingEventDto? ev,
+        string? fallbackUserSub = null)
     {
         ev = null;
         var mapped = MapStatus(Str(data, "status"));
         if (mapped is null) return false;
 
-        // user_sub передаём в custom_data при checkout — связывает подписку с пользователем.
+        // user_sub передаём в custom_data при checkout — связывает подписку с пользователем. Paddle хранит
+        // его на транзакции, а не на подписке, поэтому при reconcile подставляем известный sub (fallback).
         string? userSub = null;
         if (data.TryGetProperty("custom_data", out var cd) && cd.ValueKind == JsonValueKind.Object)
             userSub = Str(cd, "user_sub");
+        if (string.IsNullOrEmpty(userSub)) userSub = fallbackUserSub;
         if (string.IsNullOrEmpty(userSub)) return false;
 
         string? priceId = null;
@@ -223,13 +238,14 @@ public static class PaddleWebhook
     /// «премиальную» (активна/триал/просрочка), при равенстве — с самым поздним концом оплаченного периода.
     /// Нужно для reconcile, когда подписка ещё не привязана к транзакции на момент возврата с checkout.
     /// </summary>
-    public static BillingEventDto? PickBestSubscription(JsonElement subscriptionsData, string eventIdPrefix)
+    public static BillingEventDto? PickBestSubscription(JsonElement subscriptionsData, string eventIdPrefix,
+        string? fallbackUserSub = null)
     {
         if (subscriptionsData.ValueKind != JsonValueKind.Array) return null;
         BillingEventDto? best = null;
         foreach (var s in subscriptionsData.EnumerateArray())
         {
-            if (!TryMapSubscription(s, eventIdPrefix, out var ev) || ev is null) continue;
+            if (!TryMapSubscription(s, eventIdPrefix, out var ev, fallbackUserSub) || ev is null) continue;
             if (best is null || Better(ev, best)) best = ev;
         }
         return best;

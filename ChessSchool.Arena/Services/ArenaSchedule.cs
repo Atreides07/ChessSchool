@@ -18,7 +18,7 @@ public static class ArenaSchedule
     [
         new("Bullet", new TimeControl(60, 0), 30, 1800, 0),   // каждые 30 мин, 30 мин
         new("Blitz", new TimeControl(180, 0), 60, 3600, 0),   // каждый час, 60 мин
-        new("Rapid", new TimeControl(600, 0), 60, 3600, 30),  // каждый час, 60 мин, старт в :30
+        new("Rapid", new TimeControl(600, 0), 60, 3600, 0),   // каждый час, 60 мин, старт в :00
     ];
 
     public const int WindowBackHours = 3;

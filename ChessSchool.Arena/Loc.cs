@@ -83,6 +83,7 @@ public static class Loc
         ["review.mistakes"] = ("ошибки", "mistakes"),
         ["review.blunders"] = ("зевки", "blunders"),
         ["review.best"] = ("лучший ход", "best move"),
+        ["review.loading"] = ("Загружаю партию…", "Loading the game…"),
         ["review.analyzing"] = ("Анализирую партию…", "Analyzing the game…"),
         ["review.unavailable"] = ("Разбор сейчас недоступен (движок не запущен).",
                                   "Analysis is unavailable right now (engine is not running)."),

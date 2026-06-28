@@ -1,5 +1,8 @@
 @page "/me/games/{Id:guid}"
-@rendermode InteractiveServer
+@* prerender:false — приватная страница под [Authorize], уже noindex (SEO не нужно). При prerender=true
+   компонент пытается разрешить интерактивный Task<AuthenticationState> во время статического prerender —
+   а он приходит только с интерактивным контуром → запрос виснет. В контуре auth-state доступен сразу. *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @using ChessSchool.Arena
 @using ChessSchool.Arena.Services
@@ -20,7 +23,11 @@
 
 <a class="rv-back" href="/me/games">← @Loc.T("review.back")</a>
 
-@if (_detail is null)
+@if (!_loaded)
+{
+    <p class="text-secondary">@Loc.T("review.loading")</p>
+}
+else if (_detail is null)
 {
     <p class="text-secondary">@Loc.T("games.empty")</p>
 }
@@ -107,23 +114,27 @@ else
     private string _startFen = "";
     private IReadOnlyList<ReplayPly> _plies = [];
     private int _ply;
-    private bool _premium, _analyzing, _analysisStarted;
+    private bool _loaded, _premium, _analyzing, _analysisStarted;
     private GameAnalysisDto? _analysis;
     private string _sub = "";
     private readonly CancellationTokenSource _cts = new();
 
     protected override async Task OnInitializedAsync()
     {
-        if (AuthState is null) return;
-        _sub = (await AuthState).User.FindFirst("sub")?.Value ?? "";
-        if (string.IsNullOrEmpty(_sub)) return;
+        try
+        {
+            if (AuthState is null) return;
+            _sub = (await AuthState).User.FindFirst("sub")?.Value ?? "";
+            if (string.IsNullOrEmpty(_sub)) return;
 
-        _detail = await Review.GetAsync(Id, _sub, _cts.Token);
-        if (_detail is null) return;
+            _detail = await Review.GetAsync(Id, _sub, _cts.Token);
+            if (_detail is null) return;
 
-        (_startFen, _plies) = GameReplay.FromPgn(_detail.Pgn);
-        _ply = _plies.Count; // открываем на финальной позиции
-        _premium = await Entitlements.IsPremiumAsync(_sub, _cts.Token);
+            (_startFen, _plies) = GameReplay.FromPgn(_detail.Pgn);
+            _ply = _plies.Count; // открываем на финальной позиции
+            _premium = await Entitlements.IsPremiumAsync(_sub, _cts.Token);
+        }
+        finally { _loaded = true; }
     }
 
     // Разбор запускаем после первого рендера (реплей виден сразу, анализ догружается ~секунды).

@@ -368,8 +368,12 @@
         clearPremove();                                             // наш ход — обычная логика
         const p = chess.get(sq);
         if (sel === null) { if (p && p.color === myColor) { sel = sq; cells[sq].classList.add('sel'); } return; }
+        if (sq === sel) { cells[sel] && cells[sel].classList.remove('sel'); sel = null; return; } // повторный клик — снять выделение
+        if (p && p.color === myColor) { // клик по другой своей фигуре — сразу переключаем выделение (без второго клика)
+            cells[sel] && cells[sel].classList.remove('sel');
+            sel = sq; cells[sq].classList.add('sel'); return;
+        }
         const from = sel; cells[from] && cells[from].classList.remove('sel'); sel = null;
-        if (from === sq) return;
         const mover = chess.get(from);
         if (mover && mover.type === 'p' && (sq[1] === '8' || sq[1] === '1')) { askPromotion(from, sq); return; }
         commitMove(from, sq, null);
@@ -378,9 +382,11 @@
     // Клик на чужом ходу: задаём предход (выбрать свою фигуру, затем клетку). Предход-превращение —
     // по умолчанию ферзь (без всплывающего выбора на чужом ходу). Исполнится в maybeRunPremove.
     function premoveClick(sq) {
+        const p = chess.get(sq);
         if (sel !== null) {
-            const from = sel; cells[from] && cells[from].classList.remove('sel'); sel = null;
-            if (from === sq) { renderBoard(); return; } // повторный клик — отмена выбора
+            if (sq === sel) { sel = null; renderBoard(); return; }                 // повторный клик — отмена выбора
+            if (p && p.color === myColor) { sel = sq; renderBoard(); return; }     // другая своя фигура — сразу переключаем
+            const from = sel; sel = null;
             const mover = chess.get(from);
             const promo = mover && mover.type === 'p' && (sq[1] === '8' || sq[1] === '1') ? 'q' : null;
             premove = { from, to: sq, promo };
@@ -388,7 +394,6 @@
             return;
         }
         clearPremove();
-        const p = chess.get(sq);
         if (p && p.color === myColor) { sel = sq; }
         renderBoard();
     }

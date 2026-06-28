@@ -60,21 +60,36 @@ devtunnel host chess-webhook            # держать запущенным
 
 ## Секреты и конфиг (значения вводишь сам — мне не присылай; `.env` не читаю)
 
-Положи секреты в user-secrets `ChessSchool.ApiService` (имена — ниже):
+Настройки лежат в user-secrets **по проекту** (вне репозитория). Нужны два проекта: `ChessSchool.ApiService`
+(сервер: вебхук, портал, reconcile) и `ChessSchool.Arena` (браузерный checkout на `/premium`).
+
+**1) ApiService — серверные ключи** (API key, секрет вебхука):
 
 ```bash
 cd ChessSchool.ApiService
-dotnet user-secrets set "Paddle:ApiKey"        "<server-side API key>"
-dotnet user-secrets set "Paddle:WebhookSecret" "<webhook destination secret>"
+dotnet user-secrets set "Paddle:ApiKey"         "<server-side API key>"
+dotnet user-secrets set "Paddle:WebhookSecret"  "<webhook destination secret>"
 dotnet user-secrets set "Paddle:PremiumPriceId" "pri_01kw6rax9s5bfx03vyk5ccgnbz"
-dotnet user-secrets set "Paddle:Environment"   "sandbox"
+dotnet user-secrets set "Paddle:Environment"    "sandbox"
 ```
 
-Клиентский токен и price_id для страницы `/premium` (Arena/Web, фаза 3) — туда же по месту:
-`Paddle:ClientToken`, `Paddle:PremiumPriceId`, `Paddle:Environment=sandbox`.
+**2) Arena — клиентский токен и price_id** для страницы `/premium` (тут запускается Paddle.js Checkout):
 
-При заданном `Paddle:WebhookSecret`/`Paddle:ApiKey` ApiService выбирает Paddle-провайдер; без них —
-dev-заглушка (премиум включается локально через `POST /internal/subscriptions/dev-activate`).
+```bash
+cd ../ChessSchool.Arena
+dotnet user-secrets set "Paddle:ClientToken"    "<client-side token>"
+dotnet user-secrets set "Paddle:PremiumPriceId" "pri_01kw6rax9s5bfx03vyk5ccgnbz"
+dotnet user-secrets set "Paddle:Environment"    "sandbox"
+```
+
+Проверить: `dotnet user-secrets list --project ChessSchool.ApiService` и `--project ChessSchool.Arena`.
+
+- Ключ — через **двоеточие** (`Paddle:ClientToken`), это формат user-secrets (не `Paddle__…`, как в env).
+- `Paddle:ClientToken` не секрет (уходит в браузер), но удобно держать рядом в user-secrets Arena.
+- Страница `/premium` показывает Paddle-checkout, только когда у Arena заданы **и** `Paddle:ClientToken`,
+  **и** `Paddle:PremiumPriceId`; иначе — кнопка dev-активации (без оплаты).
+- При заданном `Paddle:WebhookSecret`/`Paddle:ApiKey` ApiService выбирает Paddle-провайдер; без них —
+  dev-заглушка (премиум включается локально через `POST /internal/subscriptions/dev-activate`).
 
 ## Тест sandbox (после фазы 3)
 

@@ -12,6 +12,7 @@
     let state = null, stateAt = 0, currentId = null, clockTimer = null;
     let authed = false, loginUrl = '/signin', L = {}, isEn = false;
     let sel = null, pendingPromo = null, myColor = 'w', flip = false, lastPersonalFetch = 0;
+    let premove = null; // отложенный ход на чужом ходу: { from, to, promo } — исполнится, когда наступит наш ход
     let connecting = false, setupGen = 0; // защита от повторного входа в setup (иначе дубли соединений/таймеров)
     let lastHeroSig = null, lastPlayKey = null; // устойчивые секции: не пересобирать шапку/ожидание на каждый пуш
     let chessUrl = '/lib/chess.js', signalrUrl = '/lib/signalr.js'; // переопределяются fingerprinted-URL из #t-root
@@ -30,7 +31,7 @@
         connecting = false;
         if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
         if (conn) { try { conn.stop(); } catch (e) { } conn = null; }
-        currentId = null; state = null; chess = null; sel = null; pendingPromo = null;
+        currentId = null; state = null; chess = null; sel = null; pendingPromo = null; premove = null;
         lastHeroSig = null; lastPlayKey = null; // следующий setup перестроит каркас заново
     }
 
@@ -116,6 +117,7 @@
             myColor = g.myColor === 1 ? 'b' : 'w';
             flip = myColor === 'b';
             try { chess.load(g.fen); } catch (e) { }
+            maybeRunPremove(g); // если наступил наш ход и есть отложенный предход — исполнить
         }
     }
 
@@ -144,7 +146,10 @@
         }
 
         renderPlay();
-        document.getElementById('t-boards').innerHTML = boardsHtml();
+        // Во время своей активной партии не транслируем чужие доски — не отвлекаем от игры (и меньше
+        // перерисовок). Завершённую партию/ожидание это не касается — там трансляция снова видна.
+        const playingNow = !!(state.myGame && state.myGame.status === 1);
+        document.getElementById('t-boards').innerHTML = playingNow ? '' : boardsHtml();
         document.getElementById('t-standings').innerHTML = standingsHtml();
 
         wireActionHandlers();   // перевесить обработчики на актуальные элементы (join/berserk/resign)
@@ -342,20 +347,25 @@
             const sq = f + r, el = cells[sq]; if (!el) continue;
             const p = chess.get(sq);
             el.innerHTML = coordHtml[sq] + (p ? pieceImg(p.color, p.type, 'piece-img') : '');
-            el.classList.remove('hl', 'chk', 'sel');
+            el.classList.remove('hl', 'chk', 'sel', 'premove');
         }
         if (g.lastFrom && cells[g.lastFrom]) cells[g.lastFrom].classList.add('hl');
         if (g.lastTo && cells[g.lastTo]) cells[g.lastTo].classList.add('hl');
         if (g.checkSquare && cells[g.checkSquare]) cells[g.checkSquare].classList.add('chk');
-        // Сохраняем подсветку выбранной фигуры между перерисовками: доска пересобирается на каждый пуш
-        // (в т.ч. от ходов на чужих досках), и без этого выделение «слетало», пока игрок думает над ходом.
+        // Подсветку выбора/предхода восстанавливаем между перерисовками: доска пересобирается на каждый
+        // пуш, и без этого выделение «слетало», пока игрок думает (выбор) или ждёт своего хода (предход).
+        if (g.status === 1 && premove) {
+            if (cells[premove.from]) cells[premove.from].classList.add('premove');
+            if (cells[premove.to]) cells[premove.to].classList.add('premove');
+        }
         if (g.status === 1 && sel && cells[sel]) cells[sel].classList.add('sel');
     }
 
     function onCellClick(sq) {
         const g = state.myGame;
         if (!g || g.status !== 1 || pendingPromo) return;
-        if (chess.turn() !== myColor) return;
+        if (chess.turn() !== myColor) { premoveClick(sq); return; } // ход соперника → копим предход
+        clearPremove();                                             // наш ход — обычная логика
         const p = chess.get(sq);
         if (sel === null) { if (p && p.color === myColor) { sel = sq; cells[sq].classList.add('sel'); } return; }
         const from = sel; cells[from] && cells[from].classList.remove('sel'); sel = null;
@@ -363,6 +373,34 @@
         const mover = chess.get(from);
         if (mover && mover.type === 'p' && (sq[1] === '8' || sq[1] === '1')) { askPromotion(from, sq); return; }
         commitMove(from, sq, null);
+    }
+
+    // Клик на чужом ходу: задаём предход (выбрать свою фигуру, затем клетку). Предход-превращение —
+    // по умолчанию ферзь (без всплывающего выбора на чужом ходу). Исполнится в maybeRunPremove.
+    function premoveClick(sq) {
+        if (sel !== null) {
+            const from = sel; cells[from] && cells[from].classList.remove('sel'); sel = null;
+            if (from === sq) { renderBoard(); return; } // повторный клик — отмена выбора
+            const mover = chess.get(from);
+            const promo = mover && mover.type === 'p' && (sq[1] === '8' || sq[1] === '1') ? 'q' : null;
+            premove = { from, to: sq, promo };
+            renderBoard();
+            return;
+        }
+        clearPremove();
+        const p = chess.get(sq);
+        if (p && p.color === myColor) { sel = sq; }
+        renderBoard();
+    }
+
+    function clearPremove() { premove = null; }
+
+    // Наступил наш ход и есть отложенный предход — пробуем исполнить (chess.js проверит легальность;
+    // нелегальный молча отменяется). Сервер подтвердит ход обычным путём.
+    function maybeRunPremove(g) {
+        if (!premove || !g || g.status !== 1 || chess.turn() !== myColor) return;
+        const mv = premove; premove = null;
+        commitMove(mv.from, mv.to, mv.promo);
     }
 
     function commitMove(from, to, promotion) {

@@ -67,11 +67,43 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
                 txnUserSub = PaddleWebhook.Field(cd, "user_sub");
 
             var subId = PaddleWebhook.Field(data, "subscription_id");
+            var customerId = PaddleWebhook.Field(data, "customer_id");
+            logger.LogInformation("Reconcile транзакции {Txn}: subscription_id={SubId}, customer_id={Cust}, user_sub={HasSub}.",
+                transactionId, subId ?? "(нет)", customerId ?? "(нет)", string.IsNullOrEmpty(txnUserSub) ? "(нет)" : "есть");
             if (!string.IsNullOrEmpty(subId)) return await FetchSubscriptionAsync(subId, ct, txnUserSub);
             // Подписка создаётся асинхронно — сразу после оплаты её id ещё не привязан к транзакции.
             // Тогда ищем по клиенту транзакции (customer_id есть всегда) — берём его актуальную подписку.
-            var customerId = PaddleWebhook.Field(data, "customer_id");
             return string.IsNullOrEmpty(customerId) ? null : await FetchLatestByCustomerAsync(customerId, ct, txnUserSub);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// Надёжное восстановление статуса по e-mail пользователя: находит клиента(ов) Paddle с этим e-mail
+    /// (GET /customers?email=…) и берёт его актуальную подписку. Работает, даже если у нас нет строки
+    /// подписки и не сохранён txn — нужно для кнопки «Обновить статус» после ручного снятия/потери данных.
+    /// </summary>
+    public async Task<BillingEventDto?> FetchByCustomerEmailAsync(string email, string userSub, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var json = await GetAsync($"/customers?email={Uri.EscapeDataString(email)}", ct);
+        if (json is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var arr) || arr.ValueKind != JsonValueKind.Array)
+                return null;
+            BillingEventDto? fallback = null;
+            foreach (var c in arr.EnumerateArray())
+            {
+                var custId = PaddleWebhook.Field(c, "id");
+                if (string.IsNullOrEmpty(custId)) continue;
+                var ev = await FetchLatestByCustomerAsync(custId, ct, userSub);
+                if (ev is null) continue;
+                if (SubscriptionService.IsPremium(ev.Status, ev.CurrentPeriodEnd)) return ev; // премиальную — сразу
+                fallback ??= ev;
+            }
+            return fallback;
         }
         catch (JsonException) { return null; }
     }
@@ -95,14 +127,25 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
 
     private async Task<string?> GetAsync(string path, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(options.ApiKey)) return null;
+        if (string.IsNullOrWhiteSpace(options.ApiKey))
+        {
+            logger.LogWarning("Paddle GET {Path}: не задан Paddle:ApiKey — reconcile не может вытянуть данные.", path);
+            return null;
+        }
         try
         {
             var client = httpFactory.CreateClient(HttpClientName);
             using var req = new HttpRequestMessage(HttpMethod.Get, path);
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);
             using var resp = await client.SendAsync(req, ct);
-            return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync(ct) : null;
+            if (resp.IsSuccessStatusCode) return await resp.Content.ReadAsStringAsync(ct);
+            // Не-2xx (неверный ключ/окружение/не та транзакция) — раньше глоталось молча. Логируем статус
+            // и тело ответа Paddle (без секретов — это ответ API), чтобы причина была видна.
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            logger.LogWarning("Paddle GET {Path} → {Status}. Окружение={Env}. Ответ: {Body}",
+                path, (int)resp.StatusCode, options.Environment,
+                body.Length > 500 ? body[..500] : body);
+            return null;
         }
         catch (Exception ex)
         {

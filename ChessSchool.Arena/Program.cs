@@ -314,20 +314,34 @@ app.MapGet("/premium/portal", async (HttpContext ctx, IHttpClientFactory http, C
     return Results.Redirect("/premium"); // портал недоступен (dev/нет клиента) — назад
 }).RequireAuthorization();
 
-// Вытягивание статуса: после возврата с checkout (есть txn) reconcile по транзакции, иначе — refresh
-// по сохранённой подписке. Спасает, если вебхук Paddle не дошёл/опоздал.
+// Вытягивание статуса (если вебхук Paddle не дошёл/опоздал). Сначала точный путь по транзакции (если
+// есть txn из success-URL), затем надёжное восстановление по e-mail пользователя — оно срабатывает,
+// даже когда у нас нет строки подписки и не сохранён txn (например, после ручного снятия в админке).
 app.MapPost("/premium/reconcile", async (HttpContext ctx, string? txn, IHttpClientFactory http,
     ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
 {
     var sub = ctx.User.FindFirst("sub")?.Value;
     if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
+    var email = ctx.User.FindFirst("email")?.Value
+        ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
     var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
-    using var req = string.IsNullOrEmpty(txn)
-        ? new HttpRequestMessage(HttpMethod.Post, $"/internal/subscriptions/{Uri.EscapeDataString(sub)}/refresh")
-        : new HttpRequestMessage(HttpMethod.Post, "/internal/subscriptions/reconcile-transaction")
+
+    // 1) Точный путь: по transaction id из возврата с checkout.
+    if (!string.IsNullOrEmpty(txn))
+    {
+        using var rt = new HttpRequestMessage(HttpMethod.Post, "/internal/subscriptions/reconcile-transaction")
         { Content = System.Net.Http.Json.JsonContent.Create(new ChessSchool.Contracts.ReconcileTxnRequest(txn)) };
-    req.Headers.Add("X-Internal-Key", internalApiKey);
-    try { await client.SendAsync(req, ct); } catch { /* недоступность ApiService — не падаем */ }
+        rt.Headers.Add("X-Internal-Key", internalApiKey);
+        try { await client.SendAsync(rt, ct); } catch { /* недоступность ApiService — не падаем */ }
+    }
+
+    // 2) Safety net: refresh по сохранённой подписке, а если её нет — по e-mail пользователя.
+    var refreshUrl = $"/internal/subscriptions/{Uri.EscapeDataString(sub)}/refresh"
+        + (string.IsNullOrEmpty(email) ? "" : $"?email={Uri.EscapeDataString(email)}");
+    using var rf = new HttpRequestMessage(HttpMethod.Post, refreshUrl);
+    rf.Headers.Add("X-Internal-Key", internalApiKey);
+    try { await client.SendAsync(rf, ct); } catch { /* недоступность ApiService — не падаем */ }
+
     ents.Invalidate(sub); // статус мог измениться — сбросить кэш ноды, чтобы reload показал актуальное
     return Results.Ok();
 }).RequireAuthorization().DisableAntiforgery();

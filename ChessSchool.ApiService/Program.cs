@@ -307,14 +307,19 @@ app.MapGet("/internal/subscriptions/{sub}/portal", async (string sub, HttpReques
     return Results.Ok(new PortalLinkDto(url));
 });
 
-// Вытягивание статуса (reconcile из API провайдера, если вебхук не дошёл) по сохранённой подписке.
-app.MapPost("/internal/subscriptions/{sub}/refresh", async (string sub, HttpRequest http,
+// Вытягивание статуса (reconcile из API провайдера, если вебхук не дошёл). Сначала по сохранённой
+// подписке; если её нет/не дала результата — по e-mail пользователя (надёжное восстановление: работает,
+// даже когда строки подписки у нас нет — например, после ручного снятия в админке).
+app.MapPost("/internal/subscriptions/{sub}/refresh", async (string sub, string? email, HttpRequest http,
     SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
 {
     if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    BillingEventDto? state = null;
     var subId = await subsSvc.GetProviderSubscriptionIdAsync(sub, ct);
-    if (!string.IsNullOrEmpty(subId) && await billing.FetchSubscriptionAsync(subId, ct, sub) is { } state)
-        await subsSvc.ReconcileAsync(state, ct);
+    if (!string.IsNullOrEmpty(subId)) state = await billing.FetchSubscriptionAsync(subId, ct, sub);
+    if (state is null && !string.IsNullOrWhiteSpace(email))
+        state = await billing.FetchByCustomerEmailAsync(email, sub, ct);
+    if (state is not null) await subsSvc.ReconcileAsync(state, ct);
     return Results.Ok(await subsSvc.GetAsync(sub, ct));
 });
 

@@ -28,6 +28,10 @@ public interface IBillingProvider
 
     /// <summary>Вытягивает состояние по transaction id из success-URL checkout (первичная активация без вебхука).</summary>
     Task<BillingEventDto?> FetchByTransactionAsync(string transactionId, CancellationToken ct = default);
+
+    /// <summary>Находит подписку клиента по его e-mail (надёжное восстановление статуса: работает, даже если
+    /// у нас нет строки подписки и не сохранён txn). userSub — связать найденную подписку с пользователем.</summary>
+    Task<BillingEventDto?> FetchByCustomerEmailAsync(string email, string userSub, CancellationToken ct = default);
 }
 
 /// <summary>Параметры запуска checkout на клиенте (Paddle.js v2) либо dev-автоактивация.</summary>
@@ -55,5 +59,8 @@ public sealed class DevStubBillingProvider : IBillingProvider
         Task.FromResult<BillingEventDto?>(null); // dev: вытягивать нечего (активация — кнопкой dev-activate)
 
     public Task<BillingEventDto?> FetchByTransactionAsync(string transactionId, CancellationToken ct = default) =>
+        Task.FromResult<BillingEventDto?>(null);
+
+    public Task<BillingEventDto?> FetchByCustomerEmailAsync(string email, string userSub, CancellationToken ct = default) =>
         Task.FromResult<BillingEventDto?>(null);
 }

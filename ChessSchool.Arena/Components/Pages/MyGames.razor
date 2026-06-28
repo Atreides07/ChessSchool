@@ -1,0 +1,132 @@
+@page "/me/games"
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@using ChessSchool.Contracts
+@inject IHttpContextAccessor Http
+@inject ArenaReviewService Review
+@inject IPlayerEntitlements Entitlements
+@inject NavigationManager Nav
+
+@* История партий игрока. Список и реплей — бесплатно (последние N), разбор движком — премиум.
+   Приватная страница → noindex. SSR-рендер: контент приходит сразу, без интерактива. *@
+
+<PageTitle>@Loc.T("games.title") — ChessArena</PageTitle>
+<HeadContent><meta name="robots" content="noindex" /></HeadContent>
+
+<h1 class="mg-h1">@Loc.T("games.title")</h1>
+<p class="text-secondary mg-lead">@Loc.T("games.lead")</p>
+
+@if (!_authed)
+{
+    <div class="card mg-card">
+        <p class="text-secondary">@Loc.T("premium.login")</p>
+        <a class="btn btn-primary" href="/signin?returnUrl=/me/games" data-enhance-nav="false">@Loc.T("premium.loginbtn")</a>
+    </div>
+}
+else if (_page is null || _page.Total == 0)
+{
+    <div class="card mg-card">
+        <p class="text-secondary">@Loc.T("games.empty")</p>
+        <a class="btn btn-primary" href="/">@Loc.T("games.empty.cta")</a>
+    </div>
+}
+else
+{
+    <div class="mg-list">
+        @foreach (var g in _page.Items)
+        {
+            <a class="mg-row" href="@($"/me/games/{g.Id}")">
+                <span class="mg-outcome @OutcomeClass(g.Outcome)">@OutcomeText(g.Outcome)</span>
+                <span class="mg-opp">
+                    <span class="text-secondary">@Loc.T("games.vs")</span> @g.OpponentName
+                    @if (g.OpponentIsBot) { <span class="bot-tag">@Loc.T("bot.tag")</span> }
+                </span>
+                <span class="mg-tc">@($"{g.TimeControl.InitialSeconds / 60}+{g.TimeControl.IncrementSeconds}")</span>
+                <span class="mg-date">@g.PlayedAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                @if (g.Analyzed) { <span class="mg-an" title="@Loc.T("games.analyzed")">📊</span> }
+                else { <span class="mg-an"></span> }
+            </a>
+        }
+    </div>
+
+    @if (!_premium && _page.Total > FreeLimit)
+    {
+        <div class="card mg-upsell">
+            <p>@string.Format(Loc.T("games.locked"), FreeLimit)</p>
+            <a class="btn btn-primary btn-sm" href="/premium">@Loc.T("games.getpremium")</a>
+        </div>
+    }
+    else if (_premium && (_from > 0 || _page.Total > _from + _page.Items.Count))
+    {
+        <div class="mg-pager">
+            @if (_from > 0)
+            {
+                <a class="btn btn-sm btn-outline" href="@PageHref(_from - PremiumPageSize)">←</a>
+            }
+            @if (_page.Total > _from + _page.Items.Count)
+            {
+                <a class="btn btn-sm btn-outline" href="@PageHref(_from + PremiumPageSize)">@Loc.T("games.more") →</a>
+            }
+        </div>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "from")] public int From { get; set; }
+
+    private const int FreeLimit = 10;
+    private const int PremiumPageSize = 30;
+
+    private bool _authed, _premium;
+    private int _from;
+    private ArenaGameListPage? _page;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = Http.HttpContext?.User;
+        _authed = user?.Identity?.IsAuthenticated == true;
+        if (!_authed) return;
+
+        var sub = user!.FindFirst("sub")?.Value ?? "";
+        _premium = await Entitlements.IsPremiumAsync(sub);
+        _from = _premium ? Math.Max(0, From) : 0;
+        var take = _premium ? PremiumPageSize : FreeLimit;
+        _page = await Review.ListAsync(sub, _from, take, CancellationToken.None);
+    }
+
+    private string OutcomeText(PlayerOutcome o) => o switch
+    {
+        PlayerOutcome.Win => Loc.T("games.win"),
+        PlayerOutcome.Loss => Loc.T("games.loss"),
+        _ => Loc.T("games.draw"),
+    };
+
+    private static string OutcomeClass(PlayerOutcome o) => o switch
+    {
+        PlayerOutcome.Win => "win",
+        PlayerOutcome.Loss => "loss",
+        _ => "draw",
+    };
+
+    private string PageHref(int from) => $"/me/games?from={Math.Max(0, from)}";
+}
+
+<style>
+    .mg-h1 { font-size: 1.8rem; margin: 0 0 .4rem; }
+    .mg-lead { margin: 0 0 1.4rem; }
+    .mg-card { max-width: 460px; }
+    .mg-list { display: flex; flex-direction: column; gap: 6px; max-width: 680px; }
+    .mg-row { display: grid; grid-template-columns: 92px 1fr auto auto 24px; align-items: center; gap: .7rem;
+        padding: .6rem .8rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); }
+    .mg-row:hover { background: var(--surface-2); }
+    .mg-outcome { font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+    .mg-outcome.win { color: var(--success); }
+    .mg-outcome.loss { color: var(--danger); }
+    .mg-outcome.draw { color: var(--muted); }
+    .mg-opp { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mg-tc { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+    .mg-date { color: var(--muted); font-size: .85rem; }
+    .mg-an { text-align: center; }
+    .mg-upsell { max-width: 460px; margin-top: 16px; }
+    .mg-pager { display: flex; gap: .6rem; margin-top: 14px; }
+</style>

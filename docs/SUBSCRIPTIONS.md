@@ -20,6 +20,14 @@
   ([PlayerEntitlements](../ChessSchool.Arena/Services/PlayerEntitlements.cs), кэш на ноду), бейдж
   «Premium» у текущего игрока в навигации; хук `IsPremiumAsync(sub)` для гейтинга любых фич.
 - ✅ Customer Portal: `/premium/portal` → сессия hosted-портала Paddle (отмена/смена карты).
+- ✅ Премиум-ценность: **разбор партий движком** + история. Завершённые арена-партии архивируются
+  (Arena `FinishGame` → `IArenaGameArchiveClient` → ApiService `ArenaGameStore`, таблица `ArenaGame`).
+  Страница `/me/games` (история, реплей — **бесплатно**, последние 10) и `/me/games/{id}` (реплей +
+  **разбор только премиуму**: точность сторон, классификация ходов `?!/?/??`, лучшие ходы, оценка по
+  ходам). Разбор считает отдельный инстанс Stockfish (`IPositionEvaluator`, чтобы не мешать ботам),
+  результат кэшируется (`AnalysisJson`) и считается лениво при первом открытии. Конфиг:
+  `Analysis:MoveTimeMs` (250), `Analysis:MaxPlies` (200), `Analysis:MaxConcurrent` (2). Нет бинаря
+  Stockfish → разбор помечается недоступным (история/реплей работают).
 - ✅ Reconcile (если вебхук не дошёл): авто-сверка после оплаты по `_ptxn` из success-URL
   (`GET /transactions` → `GET /subscriptions` → применить), кнопка «Обновить статус» и эндпоинт
   `POST /internal/subscriptions/{sub}/refresh` (по сохранённой подписке). Вытягивание не зависит от

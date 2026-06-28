@@ -1,0 +1,86 @@
+using ChessSchool.ApiService.Data;
+using ChessSchool.ApiService.Services;
+using ChessSchool.Contracts;
+using Microsoft.EntityFrameworkCore;
+
+namespace ChessSchool.Tests;
+
+/// <summary>
+/// Архив арена-партий: идемпотентная запись, история по игроку (исход с его точки зрения, соперник),
+/// выдача партии только участнику (приватность) и кэш разбора. Источник истины — БД.
+/// </summary>
+public class ArenaGameStoreTests
+{
+    private static SchoolDbContext NewDb()
+    {
+        var db = new SchoolDbContext(new DbContextOptionsBuilder<SchoolDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        db.Database.EnsureCreated();
+        return db;
+    }
+
+    private static ArenaGameArchiveRequest Req(string id = "g1", GameResult result = GameResult.WhiteWins) =>
+        new("t1", id, "white-sub", "black-sub", "Alice", "Bob", WhiteIsBot: false, BlackIsBot: true,
+            "1. e4 e5 *", result, GameEndReason.Checkmate, TimeControl.Blitz, DateTimeOffset.UtcNow);
+
+    [Fact]
+    public async Task Archive_ThenList_FromEachPerspective()
+    {
+        using var db = NewDb();
+        var store = new ArenaGameStore(db);
+        Assert.True(await store.ArchiveAsync(Req(), default));
+
+        var white = await store.ListForPlayerAsync("white-sub", 0, 20, default);
+        var w = Assert.Single(white.Items);
+        Assert.Equal(PlayerOutcome.Win, w.Outcome);
+        Assert.Equal("Bob", w.OpponentName);
+        Assert.True(w.OpponentIsBot);
+        Assert.Equal(PieceColor.White, w.MyColor);
+        Assert.False(w.Analyzed);
+
+        var black = await store.ListForPlayerAsync("black-sub", 0, 20, default);
+        var b = Assert.Single(black.Items);
+        Assert.Equal(PlayerOutcome.Loss, b.Outcome);
+        Assert.Equal("Alice", b.OpponentName);
+        Assert.Equal(PieceColor.Black, b.MyColor);
+    }
+
+    [Fact]
+    public async Task Archive_IsIdempotent_ByExternalId()
+    {
+        using var db = NewDb();
+        var store = new ArenaGameStore(db);
+        Assert.True(await store.ArchiveAsync(Req("dup"), default));
+        Assert.False(await store.ArchiveAsync(Req("dup"), default)); // повтор — не дубль
+        Assert.Equal(1, await db.ArenaGames.CountAsync());
+    }
+
+    [Fact]
+    public async Task Get_OnlyParticipant_SeesGame()
+    {
+        using var db = NewDb();
+        var store = new ArenaGameStore(db);
+        await store.ArchiveAsync(Req(), default);
+        var id = (await store.ListForPlayerAsync("white-sub", 0, 1, default)).Items[0].Id;
+
+        Assert.NotNull(await store.GetForPlayerAsync(id, "white-sub", default));
+        Assert.NotNull(await store.GetForPlayerAsync(id, "black-sub", default));
+        Assert.Null(await store.GetForPlayerAsync(id, "stranger", default)); // не участник — приватность
+    }
+
+    [Fact]
+    public async Task Analysis_CacheRoundTrip_ParticipantOnly()
+    {
+        using var db = NewDb();
+        var store = new ArenaGameStore(db);
+        await store.ArchiveAsync(Req(), default);
+        var id = (await store.ListForPlayerAsync("white-sub", 0, 1, default)).Items[0].Id;
+
+        Assert.Null(await store.GetAnalysisJsonAsync(id, "white-sub", default)); // ещё не считали
+        await store.SaveAnalysisJsonAsync(id, "{\"ok\":true}", default);
+
+        Assert.Equal("{\"ok\":true}", await store.GetAnalysisJsonAsync(id, "white-sub", default));
+        Assert.Null(await store.GetAnalysisJsonAsync(id, "stranger", default)); // не участник — не отдаём
+        Assert.True((await store.ListForPlayerAsync("white-sub", 0, 1, default)).Items[0].Analyzed);
+    }
+}

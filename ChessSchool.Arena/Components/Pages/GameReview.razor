@@ -1,0 +1,224 @@
+@page "/me/games/{Id:guid}"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Services
+@using ChessSchool.Contracts
+@using Microsoft.AspNetCore.Components.Authorization
+@using Color = ChessSchool.Contracts.PieceColor
+@inject ArenaReviewService Review
+@inject IPlayerEntitlements Entitlements
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Разбор/реплей партии. Реплей доступен всем участникам; разбор движком (точность, классификация,
+   лучшие ходы) — премиум. Холодный путь (просмотр своих партий) → серверный интерактив, без своего JS.
+   Приватная страница → noindex. *@
+
+<PageTitle>@Loc.T("review.title") — ChessArena</PageTitle>
+<HeadContent><meta name="robots" content="noindex" /></HeadContent>
+
+<a class="rv-back" href="/me/games">← @Loc.T("review.back")</a>
+
+@if (_detail is null)
+{
+    <p class="text-secondary">@Loc.T("games.empty")</p>
+}
+else
+{
+    <div class="rv">
+        <div class="rv-board-col">
+            <div class="rv-player">@PlayerName(opponentTop: true)</div>
+            <ChessSchool.Arena.Components.Chessboard Fen="@CurrentFen" Disabled="true"
+                                                     FlipForBlack="@(_detail.MyColor == Color.Black)"
+                                                     LastFrom="@CurrentFrom" LastTo="@CurrentTo" />
+            <div class="rv-player">@PlayerName(opponentTop: false)</div>
+
+            <div class="rv-controls">
+                <button class="btn btn-sm btn-outline" @onclick="() => Go(0)" disabled="@(_ply == 0)">⏮</button>
+                <button class="btn btn-sm btn-outline" @onclick="() => Go(_ply - 1)" disabled="@(_ply == 0)">◀</button>
+                <span class="rv-ply">@_ply / @_plies.Count</span>
+                <button class="btn btn-sm btn-outline" @onclick="() => Go(_ply + 1)" disabled="@(_ply >= _plies.Count)">▶</button>
+                <button class="btn btn-sm btn-outline" @onclick="() => Go(_plies.Count)" disabled="@(_ply >= _plies.Count)">⏭</button>
+            </div>
+        </div>
+
+        <div class="rv-side">
+            @if (_premium)
+            {
+                @if (_analyzing)
+                {
+                    <div class="rv-status">@Loc.T("review.analyzing")</div>
+                }
+                else if (_analysis is { EngineAvailable: false })
+                {
+                    <div class="rv-status">@Loc.T("review.unavailable")</div>
+                }
+                else if (_analysis is { Moves.Count: > 0 })
+                {
+                    <div class="rv-acc">
+                        <div class="rv-acc-cell"><span class="rv-acc-num">@_analysis.WhiteAccuracy%</span><span class="rv-acc-lbl">@_detail.WhiteName</span></div>
+                        <div class="rv-acc-cell"><span class="rv-acc-num">@_analysis.BlackAccuracy%</span><span class="rv-acc-lbl">@_detail.BlackName</span></div>
+                    </div>
+                    <div class="rv-counts">
+                        @CountsLine(_analysis.WhiteInaccuracies, _analysis.WhiteMistakes, _analysis.WhiteBlunders)
+                    </div>
+                    @if (_ply > 0 && _ply <= _analysis.Moves.Count)
+                    {
+                        var m = _analysis.Moves[_ply - 1];
+                        <div class="rv-eval @QualityClass(m.Quality)">
+                            <strong>@EvalText(m)</strong>
+                            @if (m.BestFrom is not null) { <span class="rv-best">@Loc.T("review.best"): @m.BestFrom–@m.BestTo</span> }
+                        </div>
+                    }
+                }
+            }
+            else
+            {
+                <div class="card rv-upsell">
+                    <p>@Loc.T("review.premiumonly")</p>
+                    <a class="btn btn-primary btn-sm" href="/premium">@Loc.T("review.premiumcta")</a>
+                </div>
+            }
+
+            <div class="rv-moves">
+                @for (int i = 0; i < _plies.Count; i++)
+                {
+                    var ply = _plies[i];
+                    var idx = i + 1;
+                    if (ply.Side == Color.White)
+                    {
+                        <span class="rv-num">@((idx + 1) / 2).</span>
+                    }
+                    <button class="rv-move @(idx == _ply ? "on" : "")" @onclick="() => Go(idx)">
+                        @ply.San<span class="rv-q @QualityClass(QualityAt(idx))">@QualitySym(QualityAt(idx))</span>
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private ArenaGameDetail? _detail;
+    private string _startFen = "";
+    private IReadOnlyList<ReplayPly> _plies = [];
+    private int _ply;
+    private bool _premium, _analyzing, _analysisStarted;
+    private GameAnalysisDto? _analysis;
+    private string _sub = "";
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is null) return;
+        _sub = (await AuthState).User.FindFirst("sub")?.Value ?? "";
+        if (string.IsNullOrEmpty(_sub)) return;
+
+        _detail = await Review.GetAsync(Id, _sub, _cts.Token);
+        if (_detail is null) return;
+
+        (_startFen, _plies) = GameReplay.FromPgn(_detail.Pgn);
+        _ply = _plies.Count; // открываем на финальной позиции
+        _premium = await Entitlements.IsPremiumAsync(_sub, _cts.Token);
+    }
+
+    // Разбор запускаем после первого рендера (реплей виден сразу, анализ догружается ~секунды).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_premium || _detail is null || _analysisStarted) return;
+        _analysisStarted = true;
+        _analyzing = true;
+        await InvokeAsync(StateHasChanged);
+        try { _analysis = await Review.GetOrComputeAnalysisAsync(Id, _sub, _cts.Token); }
+        catch (OperationCanceledException) { return; }
+        finally { _analyzing = false; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Go(int ply) => _ply = Math.Clamp(ply, 0, _plies.Count);
+
+    private string CurrentFen => _ply == 0 ? _startFen : _plies[_ply - 1].Fen;
+    private string? CurrentFrom => _ply == 0 ? null : _plies[_ply - 1].From;
+    private string? CurrentTo => _ply == 0 ? null : _plies[_ply - 1].To;
+
+    private MoveQuality? QualityAt(int ply)
+        => _analysis is { Moves.Count: > 0 } && ply >= 1 && ply <= _analysis.Moves.Count
+            ? _analysis.Moves[ply - 1].Quality : null;
+
+    private RenderFragment PlayerName(bool opponentTop) => builder =>
+    {
+        // Сверху — соперник, снизу — я (ориентация как на живой доске).
+        bool meWhite = _detail!.MyColor == Color.White;
+        bool showWhite = opponentTop ? !meWhite : meWhite;
+        var name = showWhite ? _detail.WhiteName : _detail.BlackName;
+        var isBot = showWhite ? _detail.WhiteIsBot : _detail.BlackIsBot;
+        builder.AddContent(0, name);
+        if (isBot)
+        {
+            builder.OpenElement(1, "span");
+            builder.AddAttribute(2, "class", "bot-tag");
+            builder.AddContent(3, Loc.T("bot.tag"));
+            builder.CloseElement();
+        }
+    };
+
+    private static string EvalText(MoveAnalysisDto m)
+        => m.MateIn is int n ? (n > 0 ? $"#{n}" : $"#-{Math.Abs(n)}")
+            : (m.ScoreCp / 100.0).ToString("+0.0;-0.0;0.0");
+
+    private RenderFragment CountsLine(int inacc, int mist, int blun) => builder =>
+        builder.AddContent(0, $"{inacc} {Loc.T("review.inaccuracies")} · {mist} {Loc.T("review.mistakes")} · {blun} {Loc.T("review.blunders")}");
+
+    private static string QualitySym(MoveQuality? q) => q switch
+    {
+        MoveQuality.Inaccuracy => "?!",
+        MoveQuality.Mistake => "?",
+        MoveQuality.Blunder => "??",
+        _ => "",
+    };
+
+    private static string QualityClass(MoveQuality? q) => q switch
+    {
+        MoveQuality.Inaccuracy => "q-inacc",
+        MoveQuality.Mistake => "q-mist",
+        MoveQuality.Blunder => "q-blun",
+        MoveQuality.Best => "q-best",
+        _ => "",
+    };
+
+    public void Dispose() => _cts.Cancel();
+}
+
+<style>
+    .rv-back { display: inline-block; margin-bottom: 14px; color: var(--ink-2); }
+    .rv { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+    .rv-board-col { width: min(440px, 92vw); }
+    .rv-player { font-weight: 600; padding: .35rem .2rem; }
+    .rv-controls { display: flex; align-items: center; gap: .4rem; margin-top: 10px; }
+    .rv-ply { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 56px; text-align: center; }
+    .rv-side { flex: 1; min-width: 240px; max-width: 360px; }
+    .rv-status { color: var(--ink-2); padding: .6rem 0; }
+    .rv-acc { display: flex; gap: 12px; margin-bottom: 8px; }
+    .rv-acc-cell { flex: 1; background: var(--surface-2); border-radius: var(--r-md); padding: .5rem .7rem; }
+    .rv-acc-num { display: block; font-size: 1.3rem; font-weight: 800; }
+    .rv-acc-lbl { color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+    .rv-counts { color: var(--ink-2); font-size: .85rem; margin-bottom: 10px; }
+    .rv-eval { padding: .5rem .7rem; border-radius: var(--r-md); background: var(--surface-2); margin-bottom: 12px; }
+    .rv-eval strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+    .rv-best { margin-left: .6rem; color: var(--ink-2); font-size: .85rem; }
+    .rv-upsell { margin-bottom: 14px; }
+    .rv-moves { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; line-height: 1.9; }
+    .rv-num { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: .4rem; }
+    .rv-move { border: 0; background: transparent; cursor: pointer; padding: .05rem .3rem; border-radius: var(--r-sm); color: var(--ink); font-weight: 560; }
+    .rv-move:hover { background: var(--surface-2); }
+    .rv-move.on { background: var(--accent-weak); color: var(--accent); font-weight: 700; }
+    .rv-q { margin-left: 1px; font-weight: 800; }
+    .q-inacc { color: #c47d09; }
+    .q-mist { color: #e07a00; }
+    .q-blun { color: var(--danger); }
+    .q-best { color: var(--success); }
+</style>

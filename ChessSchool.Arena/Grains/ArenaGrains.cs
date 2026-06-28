@@ -1,5 +1,6 @@
 using ChessSchool.Arena.Services;
 using ChessSchool.Contracts;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Color = ChessSchool.Contracts.PieceColor;
 
@@ -130,6 +131,7 @@ public sealed class ArenaTournamentGrain(
     IChessEngine engine,
     ArenaRuntimeOptions runtime,
     IAnalytics analytics,
+    IServiceProvider services,
     ILogger<ArenaTournamentGrain> logger) : Grain, IArenaTournamentGrain, IRemindable
 {
     private sealed class Player
@@ -987,6 +989,21 @@ public sealed class ArenaTournamentGrain(
         }
 
         _dirty = true; // изменилась таблица — сохранить, чтобы пережить деактивацию грейна
+
+        ArchiveFinishedGame(g);
+    }
+
+    /// <summary>Архивирует партию в ApiService (история/разбор) — fire-and-forget, не блокирует ход турнира.
+    /// Клиент берём опционально из DI (тестовый силос его не регистрирует — тогда просто пропускаем).</summary>
+    private void ArchiveFinishedGame(Game g)
+    {
+        var archive = services.GetService<IArenaGameArchiveClient>();
+        if (archive is null) return;
+        var req = new ArenaGameArchiveRequest(
+            Id, g.Id, g.WhiteSub, g.BlackSub, g.WhiteName, g.BlackName,
+            IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub),
+            g.Board.Pgn, g.Result, g.Reason, _tc, g.FinishedAt ?? DateTimeOffset.UtcNow);
+        _ = archive.ArchiveAsync(req); // ошибки клиент логирует сам и не бросает
     }
 
     private static void Award(Player p, double outcome)

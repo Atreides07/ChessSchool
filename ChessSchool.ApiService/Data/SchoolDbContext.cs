@@ -14,6 +14,7 @@ public class SchoolDbContext(DbContextOptions<SchoolDbContext> options) : DbCont
     public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<ProcessedBillingEvent> ProcessedBillingEvents => Set<ProcessedBillingEvent>();
+    public DbSet<ArenaGame> ArenaGames => Set<ArenaGame>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -28,6 +29,12 @@ public class SchoolDbContext(DbContextOptions<SchoolDbContext> options) : DbCont
         b.Entity<Game>().HasIndex(g => new { g.Source, g.PlayedAt }); // очередь атрибуции (необатрибутир.)
         b.Entity<ShareLink>().HasIndex(s => s.Token).IsUnique();
         b.Entity<RatingPoint>().HasIndex(r => r.StudentId);
+        // Идемпотентность архивации арена-партий + история по каждому игроку (sub) от свежих к старым.
+        b.Entity<ArenaGame>().HasIndex(g => g.ExternalGameId).IsUnique();
+        b.Entity<ArenaGame>().HasIndex(g => new { g.WhiteSub, g.PlayedAt });
+        b.Entity<ArenaGame>().HasIndex(g => new { g.BlackSub, g.PlayedAt });
+        // TimeControl — value-объект (initial+increment) → две колонки, без отдельной таблицы/ключа.
+        b.Entity<ArenaGame>().OwnsOne(g => g.TimeControl);
         // DateTimeOffset хранится нативно в PostgreSQL (timestamptz) — конвертеры не нужны.
     }
 }

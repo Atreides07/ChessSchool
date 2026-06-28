@@ -17,6 +17,7 @@ builder.Services.AddDbContext<SchoolDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("schooldb")));
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
+builder.Services.AddScoped<ArenaGameStore>();
 builder.Services.AddScoped<SubscriptionService>();
 // Провайдер эквайринга: Paddle при наличии конфига (секрет вебхука/API-ключ), иначе dev-заглушка
 // (оплата проходит локально). Выбор по конфигу — как S3↔MinIO.
@@ -237,6 +238,48 @@ app.MapPost("/internal/games/archive", async (ArchiveGameRequest req, HttpReques
     if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var created = await archiver.ArchiveOnlineAsync(req, ct);
     return Results.Ok(new { archived = created });
+});
+
+// --- Арена-партии (B2C): архив + история игрока + разбор. Всё под внутренним ключом (server-to-server). ---
+app.MapPost("/internal/arena-games/archive", async (ArenaGameArchiveRequest req, HttpRequest http,
+    ArenaGameStore store, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    return Results.Ok(new { archived = await store.ArchiveAsync(req, ct) });
+});
+
+app.MapGet("/internal/arena-games", async (string sub, int? skip, int? take, HttpRequest http,
+    ArenaGameStore store, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var t = Math.Clamp(take ?? 20, 1, 100); // лимит выборки — без «отдай всё»
+    return Results.Ok(await store.ListForPlayerAsync(sub, Math.Max(0, skip ?? 0), t, ct));
+});
+
+app.MapGet("/internal/arena-games/{id:guid}", async (Guid id, string sub, HttpRequest http,
+    ArenaGameStore store, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var g = await store.GetForPlayerAsync(id, sub, ct);
+    return g is null ? Results.NotFound() : Results.Ok(g);
+});
+
+app.MapGet("/internal/arena-games/{id:guid}/analysis", async (Guid id, string sub, HttpRequest http,
+    ArenaGameStore store, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var json = await store.GetAnalysisJsonAsync(id, sub, ct);
+    return json is null ? Results.NoContent() : Results.Content(json, "application/json");
+});
+
+app.MapPost("/internal/arena-games/{id:guid}/analysis", async (Guid id, HttpRequest http,
+    ArenaGameStore store, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    using var reader = new StreamReader(http.Body);
+    var json = await reader.ReadToEndAsync(ct);
+    await store.SaveAnalysisJsonAsync(id, json, ct);
+    return Results.Ok();
 });
 
 // Entitlement подписки для потребителей (Arena/Web) — server-to-server по внутреннему ключу.

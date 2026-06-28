@@ -87,6 +87,12 @@ builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy =>
 
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();
+// Отдельный инстанс движка (свой процесс/семафор) для разбора партий — чтобы анализ не конкурировал
+// с ходами ботов в живой игре.
+builder.Services.AddSingleton<ChessSchool.Arena.Services.IPositionEvaluator>(sp =>
+    new ChessSchool.Arena.Services.StockfishEngine(
+        sp.GetRequiredService<IConfiguration>(),
+        sp.GetRequiredService<ILogger<ChessSchool.Arena.Services.StockfishEngine>>()));
 
 // Хранилище фоновых изображений трансляций: S3 (реальный в проде, MinIO локально) при наличии конфига
 // Storage:S3, иначе заглушка (загрузка недоступна, но поле URL остаётся рабочим). Бакет приватный —
@@ -134,6 +140,20 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.IPlayerEntitlements>(sp
         sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
         internalApiKey,
         sp.GetRequiredService<ILogger<ChessSchool.Arena.Services.PlayerEntitlements>>()));
+
+// Архив завершённых арена-партий в ApiService (для истории/разбора).
+builder.Services.AddHttpClient(ChessSchool.Arena.Services.ArenaGameArchiveClient.HttpClientName,
+    c => c.BaseAddress = new("https+http://apiservice"));
+builder.Services.AddSingleton<ChessSchool.Arena.Services.IArenaGameArchiveClient>(sp =>
+    new ChessSchool.Arena.Services.ArenaGameArchiveClient(
+        sp.GetRequiredService<IHttpClientFactory>(), internalApiKey,
+        sp.GetRequiredService<ILogger<ChessSchool.Arena.Services.ArenaGameArchiveClient>>()));
+
+// История и разбор партий (премиум-фича): клиент к ApiService + сервис разбора (Stockfish) + оркестратор.
+builder.Services.AddSingleton(sp => new ChessSchool.Arena.Services.ArenaGamesApiClient(
+    sp.GetRequiredService<IHttpClientFactory>(), internalApiKey));
+builder.Services.AddSingleton<ChessSchool.Arena.Services.GameAnalysisService>();
+builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaReviewService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

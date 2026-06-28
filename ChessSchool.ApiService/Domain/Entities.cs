@@ -101,6 +101,34 @@ public class Subscription
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>
+/// Завершённая партия арена-турнира (B2C). Отдельно от школьных <see cref="Game"/>: игроки тут —
+/// по IdP-sub, без привязки к ученикам/рейтингу. Хранит PGN для воспроизведения и кэш разбора.
+/// </summary>
+public class ArenaGame
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string TournamentId { get; set; } = string.Empty;
+    /// <summary>Id партии внутри грейна турнира — для идемпотентности архивации.</summary>
+    public string ExternalGameId { get; set; } = string.Empty;
+
+    public string WhiteSub { get; set; } = string.Empty;
+    public string BlackSub { get; set; } = string.Empty;
+    public string WhiteName { get; set; } = string.Empty;
+    public string BlackName { get; set; } = string.Empty;
+    public bool WhiteIsBot { get; set; }
+    public bool BlackIsBot { get; set; }
+
+    public string Pgn { get; set; } = string.Empty;
+    public GameResult Result { get; set; }
+    public GameEndReason EndReason { get; set; }
+    public TimeControl TimeControl { get; set; }
+    public DateTimeOffset PlayedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Кэш разбора (сериализованный GameAnalysisDto). Считается лениво при первом открытии премиумом.</summary>
+    public string? AnalysisJson { get; set; }
+}
+
 /// <summary>Обработанное событие биллинга — для идемпотентности вебхуков (повтор/несколько нод).</summary>
 public class ProcessedBillingEvent
 {

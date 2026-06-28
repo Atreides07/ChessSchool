@@ -8,12 +8,23 @@ public interface IChessEngine
     Task<string?> GetBestMoveAsync(string fen, int skillLevel, int moveTimeMs, CancellationToken ct = default);
 }
 
+/// <summary>Оценка позиции движком (со стороны игрока, чей ход — UCI-конвенция): cp или мат + лучший ход.</summary>
+public readonly record struct EngineEval(int? Cp, int? Mate, string? BestMove);
+
+/// <summary>Оценщик позиций для разбора партий. Отдельный инстанс/процесс, чтобы анализ не конкурировал
+/// с ходами ботов в живой игре (полная сила движка, без ограничения Skill Level).</summary>
+public interface IPositionEvaluator
+{
+    Task<EngineEval?> EvaluateAsync(string fen, int moveTimeMs, CancellationToken ct = default);
+}
+
 /// <summary>
 /// Серверная обёртка над Stockfish по протоколу UCI. Один процесс, запросы сериализуются семафором.
 /// Если бинарь недоступен — помечает движок недоступным и возвращает null (вызывающий ходит случайно).
 /// Путь к движку: конфиг Engine:Path (по умолчанию "stockfish" в PATH).
 /// </summary>
-public sealed class StockfishEngine(IConfiguration config, ILogger<StockfishEngine> log) : IChessEngine, IAsyncDisposable
+public sealed class StockfishEngine(IConfiguration config, ILogger<StockfishEngine> log)
+    : IChessEngine, IPositionEvaluator, IAsyncDisposable
 {
     private readonly string _path = config["Engine:Path"] ?? "stockfish";
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -50,6 +61,60 @@ public sealed class StockfishEngine(IConfiguration config, ILogger<StockfishEngi
             return null;
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<EngineEval?> EvaluateAsync(string fen, int moveTimeMs, CancellationToken ct = default)
+    {
+        if (_unavailable) return null;
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (!await EnsureStartedAsync(ct)) return null;
+            var p = _proc!;
+
+            await SendAsync(p, "setoption name Skill Level value 20"); // разбор — полной силой
+            await SendAsync(p, $"position fen {fen}");
+            await SendAsync(p, $"go movetime {moveTimeMs}");
+
+            int? cp = null, mate = null;
+            string? line;
+            while ((line = await p.StandardOutput.ReadLineAsync(ct)) != null)
+            {
+                if (line.StartsWith("info", StringComparison.Ordinal))
+                {
+                    var (c, m) = ParseScore(line);
+                    if (c.HasValue) { cp = c; mate = null; }
+                    else if (m.HasValue) { mate = m; cp = null; }
+                }
+                else if (line.StartsWith("bestmove", StringComparison.Ordinal))
+                {
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    var best = parts.Length > 1 && parts[1] is not "(none)" ? parts[1] : null;
+                    return new EngineEval(cp, mate, best);
+                }
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Сбой Stockfish при оценке позиции — разбор недоступен.");
+            _unavailable = true;
+            return null;
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Достаёт оценку из строки UCI info: "... score cp 34 ..." или "... score mate 3 ...".</summary>
+    public static (int? Cp, int? Mate) ParseScore(string infoLine)
+    {
+        var t = infoLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i + 2 < t.Length; i++)
+        {
+            if (t[i] != "score") continue;
+            if (t[i + 1] == "cp" && int.TryParse(t[i + 2], out var cp)) return (cp, null);
+            if (t[i + 1] == "mate" && int.TryParse(t[i + 2], out var m)) return (null, m);
+        }
+        return (null, null);
     }
 
     private async Task<bool> EnsureStartedAsync(CancellationToken ct)

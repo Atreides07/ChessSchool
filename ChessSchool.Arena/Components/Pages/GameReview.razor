@@ -47,23 +47,37 @@ else
     <script type="module">
         const CFG = @((MarkupString)JsonSerializer.Serialize(_cfg, JsonOpts));
 
-        const { Chess } = await import('https://esm.sh/chess.js@1');
+        // Позиции готовы с сервера (без внешнего chess.js): fens[k] = позиция после k полуходов.
+        const plies = CFG.plies || [];
+        const fens = [CFG.startFen, ...plies.map(p => p.fen)];
+        const froms = [null, ...plies.map(p => p.from)];
+        const tos = [null, ...plies.map(p => p.to)];
+        const sans = [null, ...plies.map(p => p.san)];
+        const total = plies.length;
 
-        // Воспроизводим PGN → массивы позиций (FEN после k полуходов) и ходов.
-        const moves = [];
-        try { const g = new Chess(); g.loadPgn(CFG.pgn); moves.push(...g.history({ verbose: true })); } catch { }
-        const replay = new Chess();
-        const fens = [replay.fen()], froms = [null], tos = [null], sans = [null];
-        for (const m of moves) { replay.move(m); fens.push(replay.fen()); froms.push(m.from); tos.push(m.to); sans.push(m.san); }
-
-        const reader = new Chess();
         const flip = CFG.myColor === 'b';
-        let ply = moves.length;            // открываем на финальной позиции
+        let ply = total;                   // открываем на финальной позиции
         let analysis = CFG.analysis;       // может быть null → подгрузим (премиум)
 
         const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-        const PIECE_SRC = (p) => `_content/ChessSchool.Design/pieces/${p.color}${p.type.toUpperCase()}.svg`;
-        const pieceImg = (p) => `<img class="cp" draggable="false" alt="" src="${PIECE_SRC(p)}">`;
+        // Фигура из символа FEN: верхний регистр — белые (w), нижний — чёрные (b); тип = буква в верхнем.
+        const pieceImg = (ch) => {
+            const color = ch === ch.toUpperCase() ? 'w' : 'b';
+            return `<img class="cp" draggable="false" alt="" src="_content/ChessSchool.Design/pieces/${color}${ch.toUpperCase()}.svg">`;
+        };
+        // FEN → { square: pieceChar } по первому полю (расстановка), ранги сверху (8) вниз (1).
+        function parseFen(fen) {
+            const map = {};
+            const rows = (fen || '').split(' ')[0].split('/');
+            for (let r = 0; r < 8; r++) {
+                let file = 0;
+                for (const ch of rows[r] || '') {
+                    if (ch >= '1' && ch <= '8') { file += +ch; }
+                    else { map[files[file] + (8 - r)] = ch; file++; }
+                }
+            }
+            return map;
+        }
         const botTag = `<span class="bot-tag">${esc(CFG.loc.bot)}</span>`;
 
         const boardEl = document.getElementById('rv-board');
@@ -92,15 +106,15 @@ else
         }
 
         function renderBoard() {
-            reader.load(fens[ply]);
+            const pos = parseFen(fens[ply]);
             for (const f of files) for (let r = 1; r <= 8; r++) {
-                const sq = f + r, el = cells[sq], p = reader.get(sq);
-                el.innerHTML = coordHtml[sq] + (p ? pieceImg(p) : '');
+                const sq = f + r, el = cells[sq], ch = pos[sq];
+                el.innerHTML = coordHtml[sq] + (ch ? pieceImg(ch) : '');
                 el.classList.remove('hl');
             }
             if (froms[ply] && cells[froms[ply]]) cells[froms[ply]].classList.add('hl');
             if (tos[ply] && cells[tos[ply]]) cells[tos[ply]].classList.add('hl');
-            counterEl.textContent = `${ply} / ${moves.length}`;
+            counterEl.textContent = `${ply} / ${total}`;
         }
 
         // Имена: сверху соперник, снизу я (ориентация как на живой доске).
@@ -123,7 +137,7 @@ else
 
         function renderMoves() {
             let html = '';
-            for (let i = 1; i <= moves.length; i++) {
+            for (let i = 1; i <= total; i++) {
                 if ((i % 2) === 1) html += `<span class="rv-num">${(i + 1) / 2 | 0}.</span>`;
                 const q = qualityAt(i);
                 const sym = (q != null && QSYM[q]) ? `<span class="rv-q ${QCLS[q] || ''}">${QSYM[q]}</span>` : '';
@@ -167,17 +181,17 @@ else
         }
 
         function renderAll() { renderBoard(); renderMoves(); renderAnalysis(); }
-        function go(i) { ply = Math.max(0, Math.min(moves.length, i)); renderAll(); }
+        function go(i) { ply = Math.max(0, Math.min(total, i)); renderAll(); }
 
         document.getElementById('rv-first').onclick = () => go(0);
         document.getElementById('rv-prev').onclick = () => go(ply - 1);
         document.getElementById('rv-next').onclick = () => go(ply + 1);
-        document.getElementById('rv-last').onclick = () => go(moves.length);
+        document.getElementById('rv-last').onclick = () => go(total);
         document.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowLeft') go(ply - 1);
             else if (e.key === 'ArrowRight') go(ply + 1);
             else if (e.key === 'Home') go(0);
-            else if (e.key === 'End') go(moves.length);
+            else if (e.key === 'End') go(total);
         });
 
         buildBoard();
@@ -219,9 +233,14 @@ else
         var premium = await Entitlements.IsPremiumAsync(sub, ct);
         var cached = premium ? await Review.GetCachedAnalysisAsync(Id, sub, ct) : null;
 
+        // Позиции считаем на сервере (без зависимости от внешнего chess.js в браузере): стартовый FEN +
+        // FEN/ход после каждого полухода. Клиент просто рисует доску по FEN и листает массив.
+        var (startFen, plies) = GameReplay.FromPgn(_detail.Pgn);
+
         _cfg = new
         {
-            pgn = _detail.Pgn,
+            startFen,
+            plies = plies.Select(p => new { fen = p.Fen, san = p.San, from = p.From, to = p.To }),
             myColor = _detail.MyColor == PieceColor.White ? "w" : "b",
             whiteName = _detail.WhiteName,
             blackName = _detail.BlackName,

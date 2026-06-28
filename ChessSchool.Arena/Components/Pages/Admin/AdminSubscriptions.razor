@@ -1,0 +1,299 @@
+@page "/admin/subscriptions"
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using ChessSchool.Arena
+@attribute [Authorize(Policy = "Admin")]
+
+@* Управление премиум-подписками — ЧИСТЫЙ ТОНКИЙ КЛИЕНТ. Статический каркас БЕЗ серверного HTTP
+   (исходящий HTTP из рендера Blazor-компонента в этом окружении зависает — грабля #12). Список и
+   операции браузер тянет/шлёт на minimal-API /admin/api/subscriptions (под политикой Admin), которые
+   проксируют в ApiService в обычном request-контексте. Закрытый раздел → noindex. *@
+
+<PageTitle>@Loc.T("admin.subs.title") — @Loc.T("admin.title")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-bar">
+    <div>
+        <a class="adm-back" href="admin" data-enhance-nav="false">← @Loc.T("admin.title")</a>
+        <h1 class="adm-h1">@Loc.T("admin.subs.title")</h1>
+    </div>
+</div>
+
+<p class="asub-lead">@Loc.T("admin.subs.lead")</p>
+
+<div class="card asub-form">
+    <div class="asub-form-head">
+        <h2 class="asub-h2">@Loc.T("admin.subs.form")</h2>
+        <span id="asub-editing" class="asub-editing" hidden></span>
+    </div>
+    <div class="asub-grid">
+        <label class="asub-field asub-email">
+            <span class="asub-lbl">@Loc.T("admin.subs.email")</span>
+            <input id="asub-email" class="asub-in" type="email" autocomplete="off" placeholder="user@example.com" />
+        </label>
+        <label class="asub-field">
+            <span class="asub-lbl">@Loc.T("admin.subs.status")</span>
+            <select id="asub-status" class="asub-in">
+                <option value="2">@Loc.T("admin.subs.st.active")</option>
+                <option value="1">@Loc.T("admin.subs.st.trialing")</option>
+                <option value="3">@Loc.T("admin.subs.st.pastdue")</option>
+                <option value="4">@Loc.T("admin.subs.st.paused")</option>
+                <option value="5">@Loc.T("admin.subs.st.canceled")</option>
+            </select>
+        </label>
+        <label class="asub-field">
+            <span class="asub-lbl">@Loc.T("admin.subs.plan")</span>
+            <input id="asub-plan" class="asub-in" type="text" placeholder="premium" />
+        </label>
+        <label class="asub-field asub-exp">
+            <span class="asub-lbl">@Loc.T("admin.subs.expiry")</span>
+            <input id="asub-expiry" class="asub-in" type="datetime-local" />
+        </label>
+    </div>
+    <div class="asub-presets">
+        <button type="button" class="btn btn-sm btn-outline" data-add="hour">@Loc.T("admin.subs.p.hour")</button>
+        <button type="button" class="btn btn-sm btn-outline" data-add="day">@Loc.T("admin.subs.p.day")</button>
+        <button type="button" class="btn btn-sm btn-outline" data-add="week">@Loc.T("admin.subs.p.week")</button>
+        <button type="button" class="btn btn-sm btn-outline" data-add="month">@Loc.T("admin.subs.p.month")</button>
+        <button type="button" class="btn btn-sm btn-outline" data-add="year">@Loc.T("admin.subs.p.year")</button>
+        <button type="button" class="btn btn-sm btn-outline" data-add="forever">@Loc.T("admin.subs.p.forever")</button>
+        <button type="button" class="btn btn-sm btn-outline" data-add="expired">@Loc.T("admin.subs.p.expired")</button>
+    </div>
+    <div class="asub-actions">
+        <button id="asub-apply" class="btn btn-primary">@Loc.T("admin.subs.apply")</button>
+        <button id="asub-cancel" class="btn btn-sm btn-outline" hidden>@Loc.T("admin.subs.cancel")</button>
+        <span id="asub-msg" class="asub-msg" role="alert" hidden></span>
+    </div>
+</div>
+
+<h2 class="asub-h2 asub-list-h">@Loc.T("admin.subs.list")</h2>
+<div id="asub-list" class="asub-list"><p class="asub-muted">@Loc.T("loading")</p></div>
+
+@{
+    var cfg = new
+    {
+        loc = new
+        {
+            user = Loc.T("admin.subs.c.user"),
+            status = Loc.T("admin.subs.status"),
+            plan = Loc.T("admin.subs.plan"),
+            expiry = Loc.T("admin.subs.expiry"),
+            premium = Loc.T("admin.subs.c.premium"),
+            updated = Loc.T("admin.subs.c.updated"),
+            actions = Loc.T("admin.subs.c.actions"),
+            edit = Loc.T("admin.subs.edit"),
+            remove = Loc.T("admin.subs.remove"),
+            removeConfirm = Loc.T("admin.subs.remove.confirm"),
+            empty = Loc.T("admin.subs.empty"),
+            forever = Loc.T("admin.subs.forever"),
+            manual = Loc.T("admin.subs.manual"),
+            yes = Loc.T("admin.subs.yes"),
+            no = Loc.T("admin.subs.no"),
+            saved = Loc.T("admin.subs.saved"),
+            notfound = Loc.T("admin.subs.notfound"),
+            error = Loc.T("admin.subs.error"),
+            editing = Loc.T("admin.subs.editing"),
+            // Названия статусов по индексу SubscriptionStatus (0..5).
+            statuses = new[]
+            {
+                Loc.T("admin.subs.st.none"), Loc.T("admin.subs.st.trialing"), Loc.T("admin.subs.st.active"),
+                Loc.T("admin.subs.st.pastdue"), Loc.T("admin.subs.st.paused"), Loc.T("admin.subs.st.canceled"),
+            },
+        },
+    };
+}
+
+<script type="module">
+    const CFG = @((MarkupString)JsonSerializer.Serialize(cfg, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    const L = CFG.loc;
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    const emailEl = $('asub-email'), statusEl = $('asub-status'), planEl = $('asub-plan'), expEl = $('asub-expiry');
+    const applyBtn = $('asub-apply'), cancelBtn = $('asub-cancel'), msgEl = $('asub-msg'), editEl = $('asub-editing');
+    let editSub = null; // null — выдаём по e-mail; иначе правим существующую подписку по sub
+
+    function msg(text, ok) {
+        msgEl.textContent = text; msgEl.hidden = false;
+        msgEl.style.color = ok ? 'var(--success)' : 'var(--danger, #c0392b)';
+    }
+    function clearMsg() { msgEl.hidden = true; }
+
+    // datetime-local (локальное) → ISO в UTC; пусто → null (бессрочно).
+    function expiryIso() {
+        const v = expEl.value;
+        if (!v) return null;
+        const d = new Date(v);
+        return isNaN(d) ? null : d.toISOString();
+    }
+    // ISO UTC → значение для datetime-local (локальное, без таймзоны).
+    function isoToLocalInput(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d)) return '';
+        const p = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function fmt(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return isNaN(d) ? '—' : d.toLocaleString();
+    }
+
+    // Пресеты срока: сдвиг от «сейчас» (или очистка / вчера).
+    document.querySelectorAll('.asub-presets [data-add]').forEach(b => b.onclick = () => {
+        const k = b.dataset.add;
+        if (k === 'forever') { expEl.value = ''; return; }
+        const d = new Date();
+        if (k === 'hour') d.setHours(d.getHours() + 1);
+        else if (k === 'day') d.setDate(d.getDate() + 1);
+        else if (k === 'week') d.setDate(d.getDate() + 7);
+        else if (k === 'month') d.setMonth(d.getMonth() + 1);
+        else if (k === 'year') d.setFullYear(d.getFullYear() + 1);
+        else if (k === 'expired') d.setDate(d.getDate() - 1);
+        expEl.value = isoToLocalInput(d.toISOString());
+    });
+
+    function resetForm() {
+        editSub = null;
+        emailEl.value = ''; emailEl.disabled = false;
+        statusEl.value = '2'; planEl.value = ''; expEl.value = '';
+        editEl.hidden = true; cancelBtn.hidden = true; clearMsg();
+    }
+    cancelBtn.onclick = resetForm;
+
+    function startEdit(row) {
+        editSub = row.userSub;
+        emailEl.value = row.email || row.userSub; emailEl.disabled = true;
+        statusEl.value = String(row.status);
+        planEl.value = row.plan || '';
+        expEl.value = isoToLocalInput(row.currentPeriodEnd);
+        editEl.textContent = L.editing + ': ' + (row.email || row.displayName || row.userSub);
+        editEl.hidden = false; cancelBtn.hidden = false; clearMsg();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function apply() {
+        clearMsg();
+        const body = { status: Number(statusEl.value), plan: planEl.value.trim() || null, currentPeriodEnd: expiryIso() };
+        applyBtn.disabled = true;
+        try {
+            let resp;
+            if (editSub) {
+                resp = await fetch('/admin/api/subscriptions/' + encodeURIComponent(editSub),
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'include' });
+            } else {
+                const email = emailEl.value.trim();
+                if (!email) { msg(L.error, false); applyBtn.disabled = false; return; }
+                resp = await fetch('/admin/api/subscriptions/by-email',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, ...body }), credentials: 'include' });
+            }
+            if (resp.status === 404) { msg(L.notfound, false); applyBtn.disabled = false; return; }
+            if (!resp.ok) { msg(L.error, false); applyBtn.disabled = false; return; }
+            resetForm();
+            msg(L.saved, true);
+            await load();
+        } catch { msg(L.error, false); }
+        finally { applyBtn.disabled = false; }
+    }
+    applyBtn.onclick = apply;
+
+    async function remove(sub) {
+        if (!confirm(L.removeConfirm)) return;
+        try {
+            const resp = await fetch('/admin/api/subscriptions/' + encodeURIComponent(sub), { method: 'DELETE', credentials: 'include' });
+            if (resp.ok) await load(); else msg(L.error, false);
+        } catch { msg(L.error, false); }
+    }
+
+    function renderRow(r) {
+        const who = esc(r.email || r.displayName || '—');
+        const provider = r.providerSubscriptionId ? 'Paddle' : L.manual;
+        const premBadge = r.isPremium
+            ? `<span class="asub-badge asub-on">${esc(L.yes)}</span>`
+            : `<span class="asub-badge asub-off">${esc(L.no)}</span>`;
+        const statusName = L.statuses[r.status] || String(r.status);
+        return `<tr>
+            <td class="asub-user">
+                <span class="asub-who">${who}</span>
+                <span class="asub-sub" title="${esc(r.userSub)}">${esc(r.userSub)}</span>
+            </td>
+            <td>${esc(statusName)}<span class="asub-prov">${esc(provider)}</span></td>
+            <td>${esc(r.plan || '—')}</td>
+            <td>${r.currentPeriodEnd ? esc(fmt(r.currentPeriodEnd)) : '<span class="asub-muted">' + esc(L.forever) + '</span>'}</td>
+            <td>${premBadge}</td>
+            <td class="asub-muted">${esc(fmt(r.updatedAt))}</td>
+            <td class="asub-rowact">
+                <button class="btn btn-sm btn-outline" data-edit="${esc(r.userSub)}">${esc(L.edit)}</button>
+                <button class="btn btn-sm btn-danger" data-remove="${esc(r.userSub)}">${esc(L.remove)}</button>
+            </td>
+        </tr>`;
+    }
+
+    let rows = [];
+    async function load() {
+        const host = $('asub-list');
+        try {
+            const r = await fetch('/admin/api/subscriptions', { credentials: 'include' });
+            rows = r.ok ? await r.json() : [];
+        } catch { rows = []; }
+        if (!rows.length) { host.innerHTML = `<p class="asub-muted">${esc(L.empty)}</p>`; return; }
+        host.innerHTML = `<div class="asub-tablewrap"><table class="asub-table">
+            <thead><tr>
+                <th>${esc(L.user)}</th><th>${esc(L.status)}</th><th>${esc(L.plan)}</th>
+                <th>${esc(L.expiry)}</th><th>${esc(L.premium)}</th><th>${esc(L.updated)}</th><th>${esc(L.actions)}</th>
+            </tr></thead><tbody>${rows.map(renderRow).join('')}</tbody></table></div>`;
+        host.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+            const row = rows.find(x => x.userSub === b.dataset.edit); if (row) startEdit(row);
+        });
+        host.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => remove(b.dataset.remove));
+    }
+
+    resetForm();
+    load();
+</script>
+
+<style>
+    .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+    .adm-back { color: var(--ink-2); font-weight: 600; font-size: .9rem; }
+    .adm-back:hover { color: var(--accent); }
+    .adm-h1 { font-size: 1.9rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }
+    .asub-lead { color: var(--ink-2); max-width: 70ch; margin: 0 0 1.4rem; }
+    .asub-h2 { font-size: 1.1rem; font-weight: 720; color: var(--ink); margin: 0; }
+    .asub-muted { color: var(--ink-2); }
+
+    .asub-form { max-width: 760px; margin-bottom: 2rem; }
+    .asub-form-head { display: flex; align-items: baseline; gap: .8rem; margin-bottom: 1rem; }
+    .asub-editing { font-size: .85rem; color: var(--accent); font-weight: 600; }
+    .asub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+    .asub-email, .asub-exp { grid-column: 1 / -1; }
+    .asub-field { display: flex; flex-direction: column; gap: .3rem; }
+    .asub-lbl { font-size: .82rem; font-weight: 600; color: var(--ink-2); }
+    .asub-in { font: inherit; padding: .5rem .65rem; border: 1px solid var(--line); border-radius: var(--r-sm);
+               background: var(--surface); color: var(--ink); width: 100%; }
+    .asub-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+    .asub-in:disabled { background: color-mix(in srgb, var(--ink) 4%, var(--surface)); color: var(--ink-2); }
+    .asub-presets { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 0; }
+    .asub-actions { display: flex; align-items: center; gap: .8rem; margin-top: 1.2rem; }
+    .asub-msg { font-size: .9rem; font-weight: 600; }
+
+    .asub-list-h { margin: 0 0 .9rem; }
+    .asub-tablewrap { overflow-x: auto; }
+    .asub-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    .asub-table th { text-align: left; font-weight: 700; color: var(--ink-2); font-size: .8rem; text-transform: uppercase;
+                     letter-spacing: .03em; padding: .5rem .7rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    .asub-table td { padding: .6rem .7rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    .asub-user { display: flex; flex-direction: column; }
+    .asub-who { font-weight: 600; color: var(--ink); }
+    .asub-sub { font-size: .72rem; color: var(--ink-2); font-family: ui-monospace, monospace; max-width: 22ch;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .asub-prov { display: block; font-size: .72rem; color: var(--ink-2); }
+    .asub-badge { display: inline-block; font-size: .76rem; font-weight: 800; padding: .1rem .5rem; border-radius: var(--r-pill); }
+    .asub-on { color: #0a7d33; background: #d7f5e0; }
+    .asub-off { color: var(--ink-2); background: color-mix(in srgb, var(--ink) 8%, var(--surface)); }
+    .asub-rowact { display: flex; gap: .4rem; white-space: nowrap; }
+    .btn-danger { background: var(--danger, #c0392b); color: #fff; border: 1px solid var(--danger, #c0392b); }
+    .btn-danger:hover { filter: brightness(.95); }
+
+    @@media (max-width: 560px) { .asub-grid { grid-template-columns: 1fr; } .asub-email, .asub-exp { grid-column: auto; } }
+</style>

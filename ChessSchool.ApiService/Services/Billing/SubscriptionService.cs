@@ -91,4 +91,55 @@ public sealed class SubscriptionService(SchoolDbContext db, ILogger<Subscription
         bool grants = status is SubscriptionStatus.Active or SubscriptionStatus.Trialing or SubscriptionStatus.PastDue;
         return grants && (periodEnd is null || periodEnd > DateTimeOffset.UtcNow);
     }
+
+    // ---------------- Админ-операции (ручное управление/тест, в обход провайдера) ----------------
+
+    /// <summary>
+    /// Список подписок для админки (последние изменённые сверху, с лимитом). Без e-mail/имени —
+    /// их добивает вызывающий код, резолвя sub в IdP (это не задача стора подписок).
+    /// </summary>
+    public async Task<IReadOnlyList<AdminSubscriptionDto>> ListAsync(int take, CancellationToken ct = default)
+    {
+        take = Math.Clamp(take, 1, 1000);
+        var rows = await db.Subscriptions.AsNoTracking()
+            .OrderByDescending(s => s.UpdatedAt)
+            .Take(take)
+            .ToListAsync(ct);
+        return rows.Select(s => new AdminSubscriptionDto(
+            s.UserSub, Email: null, DisplayName: null, s.Status, s.Plan,
+            s.CurrentPeriodEnd, s.UpdatedAt, s.ProviderSubscriptionId,
+            IsPremium(s.Status, s.CurrentPeriodEnd))).ToList();
+    }
+
+    /// <summary>
+    /// Админ задаёт состояние подписки напрямую (выдать/снять премиум, подвинуть срок для теста).
+    /// Статус и срок ставятся явно (в т.ч. срок можно очистить или поставить в прошлое — «истекло»),
+    /// в отличие от upsert событий биллинга, который пустые поля сохраняет. last-write-wins.
+    /// </summary>
+    public async Task<SubscriptionDto> AdminSetAsync(string userSub, SubscriptionStatus status,
+        string? plan, DateTimeOffset? periodEnd, CancellationToken ct = default)
+    {
+        var sub = await db.Subscriptions.FirstOrDefaultAsync(s => s.UserSub == userSub, ct);
+        if (sub is null)
+        {
+            sub = new Subscription { UserSub = userSub };
+            db.Subscriptions.Add(sub);
+        }
+        sub.Status = status;
+        sub.Plan = string.IsNullOrWhiteSpace(plan) ? sub.Plan : plan;
+        sub.CurrentPeriodEnd = periodEnd;
+        sub.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await GetAsync(userSub, ct);
+    }
+
+    /// <summary>Админ полностью удаляет подписку пользователя (премиум снимается). true — была и удалена.</summary>
+    public async Task<bool> AdminRemoveAsync(string userSub, CancellationToken ct = default)
+    {
+        var sub = await db.Subscriptions.FirstOrDefaultAsync(s => s.UserSub == userSub, ct);
+        if (sub is null) return false;
+        db.Subscriptions.Remove(sub);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
 }

@@ -307,6 +307,25 @@ app.MapPost("/internal/users/by-email", async (ByEmailRequest req, HttpRequest h
         : Results.Ok(new { sub = user.Id.ToString(), displayName = user.DisplayName });
 });
 
+// ---------------- Батч-резолв sub → профиль (человекочитаемый список подписок в админке) ----------------
+// Возвращаем только найденных; неизвестные/невалидные sub просто отсутствуют в ответе (вызывающий мержит).
+app.MapPost("/internal/users/by-subs", async (BySubsRequest req, HttpRequest http, AuthDbContext db,
+    CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+
+    var ids = (req.Subs ?? [])
+        .Select(s => Guid.TryParse(s, out var g) ? g : (Guid?)null)
+        .Where(g => g.HasValue).Select(g => g!.Value).Distinct().ToList();
+    if (ids.Count == 0) return Results.Ok(Array.Empty<UserInfo>());
+
+    var users = await db.Users.AsNoTracking()
+        .Where(u => ids.Contains(u.Id))
+        .Select(u => new UserInfo(u.Id.ToString(), u.Email, u.DisplayName))
+        .ToListAsync(ct);
+    return Results.Ok(users);
+});
+
 app.MapDefaultEndpoints();
 app.Run();
 

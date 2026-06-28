@@ -328,6 +328,76 @@ app.MapPost("/internal/subscriptions/reconcile-transaction", async (ReconcileTxn
     return Results.Ok(state is null ? null : await subsSvc.GetAsync(state.UserSub, ct));
 });
 
+// ---------------- Админ-управление подписками (ручная выдача/снятие, сдвиг срока для теста) --------
+// Защита — внутренний ключ (вызывает только Arena из-под политики Admin). Это сознательный обход
+// провайдера: выданное вручную состояние — источник истины наравне с вебхуком (last-write-wins;
+// вебхук Paddle может его позже переписать). Резолв e-mail/имени — батчем в IdP (деградирует тихо).
+async Task<List<AdminSubscriptionDto>> EnrichWithUsersAsync(IReadOnlyList<AdminSubscriptionDto> rows,
+    IHttpClientFactory hf, CancellationToken ct)
+{
+    if (rows.Count == 0) return [];
+    var byEmail = new Dictionary<string, UserInfo>(StringComparer.Ordinal);
+    try
+    {
+        var client = hf.CreateClient("auth");
+        using var msg = new HttpRequestMessage(HttpMethod.Post, "/internal/users/by-subs")
+        { Content = JsonContent.Create(new BySubsRequest(rows.Select(r => r.UserSub).Distinct().ToList())) };
+        msg.Headers.Add("X-Internal-Key", internalKey);
+        using var resp = await client.SendAsync(msg, ct);
+        if (resp.IsSuccessStatusCode && await resp.Content.ReadFromJsonAsync<List<UserInfo>>(ct) is { } users)
+            foreach (var u in users) byEmail[u.Sub] = u;
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Не удалось резолвить пользователей по sub для админки подписок — список без имён.");
+    }
+    return rows.Select(r => byEmail.TryGetValue(r.UserSub, out var u)
+        ? r with { Email = u.Email, DisplayName = u.DisplayName } : r).ToList();
+}
+
+app.MapGet("/internal/admin/subscriptions", async (HttpRequest http, int? take,
+    SubscriptionService subs, IHttpClientFactory hf, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var rows = await subs.ListAsync(take ?? 500, ct);
+    return Results.Ok(await EnrichWithUsersAsync(rows, hf, ct));
+});
+
+app.MapPost("/internal/admin/subscriptions/{sub}", async (string sub, AdminSetSubscriptionRequest req,
+    HttpRequest http, SubscriptionService subs, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(sub)) return Results.BadRequest(new { error = "Пустой sub." });
+    return Results.Ok(await subs.AdminSetAsync(sub, req.Status, req.Plan, req.CurrentPeriodEnd, ct));
+});
+
+app.MapPost("/internal/admin/subscriptions/by-email", async (AdminSetByEmailRequest req, HttpRequest http,
+    SubscriptionService subs, IHttpClientFactory hf, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(req.Email)) return Results.BadRequest(new { error = "Не указан e-mail." });
+
+    var client = hf.CreateClient("auth");
+    using var msg = new HttpRequestMessage(HttpMethod.Post, "/internal/users/by-email")
+    { Content = JsonContent.Create(new { email = req.Email }) };
+    msg.Headers.Add("X-Internal-Key", internalKey);
+    using var resp = await client.SendAsync(msg, ct);
+    if (!resp.IsSuccessStatusCode)
+        return Results.NotFound(new { error = "Пользователь с таким e-mail не найден в IdP." });
+    var found = await resp.Content.ReadFromJsonAsync<ResolvedUser>(ct);
+    if (found is null) return Results.NotFound(new { error = "Пользователь с таким e-mail не найден в IdP." });
+
+    var dto = await subs.AdminSetAsync(found.Sub, req.Status, req.Plan, req.CurrentPeriodEnd, ct);
+    return Results.Ok(new { sub = found.Sub, subscription = dto });
+});
+
+app.MapDelete("/internal/admin/subscriptions/{sub}", async (string sub, HttpRequest http,
+    SubscriptionService subs, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    return await subs.AdminRemoveAsync(sub, ct) ? Results.Ok() : Results.NotFound();
+});
+
 // Dev-активация премиума без провайдера (только Development) — локальный тест гейтинга.
 if (app.Environment.IsDevelopment())
 {

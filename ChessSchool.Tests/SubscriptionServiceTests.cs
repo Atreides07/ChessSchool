@@ -86,6 +86,60 @@ public class SubscriptionServiceTests
         Assert.False(dto.IsPremium);
     }
 
+    [Fact]
+    public async Task AdminSet_GrantsAndRevokes_AndShiftsExpiry()
+    {
+        using var db = NewDb();
+        var svc = Svc(db);
+
+        // Выдать вручную (в обход провайдера) — премиум активен.
+        var granted = await svc.AdminSetAsync("u", SubscriptionStatus.Active, "premium",
+            DateTimeOffset.UtcNow.AddDays(30));
+        Assert.True(granted.IsPremium);
+        Assert.Equal(SubscriptionStatus.Active, granted.Status);
+
+        // Подвинуть срок в прошлое (тест «истекло») — премиум снимается, хотя статус активен.
+        var expired = await svc.AdminSetAsync("u", SubscriptionStatus.Active, null,
+            DateTimeOffset.UtcNow.AddDays(-1));
+        Assert.False(expired.IsPremium);
+        Assert.Equal("premium", expired.Plan); // план сохранён (пустой plan не затирает)
+
+        // Бессрочно (срок очищен) — снова премиум.
+        var forever = await svc.AdminSetAsync("u", SubscriptionStatus.Active, null, null);
+        Assert.True(forever.IsPremium);
+        Assert.Null(forever.CurrentPeriodEnd);
+
+        Assert.Equal(1, await db.Subscriptions.CountAsync()); // одна строка на пользователя (upsert)
+    }
+
+    [Fact]
+    public async Task AdminRemove_DeletesSubscription()
+    {
+        using var db = NewDb();
+        var svc = Svc(db);
+        await svc.AdminSetAsync("u", SubscriptionStatus.Active, "premium", null);
+
+        Assert.True(await svc.AdminRemoveAsync("u"));
+        Assert.False((await svc.GetAsync("u")).IsPremium);
+        Assert.Equal(0, await db.Subscriptions.CountAsync());
+        Assert.False(await svc.AdminRemoveAsync("u")); // повтор — уже нет
+    }
+
+    [Fact]
+    public async Task List_ReturnsRows_NewestFirst_WithoutUserInfo()
+    {
+        using var db = NewDb();
+        var svc = Svc(db);
+        await svc.AdminSetAsync("old", SubscriptionStatus.Canceled, "premium", null);
+        await svc.AdminSetAsync("new", SubscriptionStatus.Active, "premium", DateTimeOffset.UtcNow.AddDays(10));
+
+        var rows = await svc.ListAsync(50);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("new", rows[0].UserSub); // последняя изменённая — сверху
+        Assert.True(rows[0].IsPremium);
+        Assert.Null(rows[0].Email); // e-mail добивает вызывающий код (резолв в IdP), не стор
+    }
+
     [Theory]
     [InlineData(SubscriptionStatus.Active, 1, true)]
     [InlineData(SubscriptionStatus.Trialing, 1, true)]

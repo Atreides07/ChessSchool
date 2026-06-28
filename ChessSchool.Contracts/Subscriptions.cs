@@ -41,3 +41,36 @@ public sealed record BillingEventDto(
     string? ProviderCustomerId = null,
     string? PriceId = null,
     DateTimeOffset? CurrentPeriodEnd = null);
+
+// ---------------- Админка управления подписками ----------------
+
+/// <summary>
+/// Строка подписки для админки. Кроме состояния несёт e-mail/имя пользователя (резолвятся в IdP по sub
+/// для человекочитаемого списка) — могут быть null, если пользователь не найден (удалён/чужой sub).
+/// </summary>
+public sealed record AdminSubscriptionDto(
+    string UserSub,
+    string? Email,
+    string? DisplayName,
+    SubscriptionStatus Status,
+    string? Plan,
+    DateTimeOffset? CurrentPeriodEnd,
+    DateTimeOffset UpdatedAt,
+    string? ProviderSubscriptionId,   // есть → подписка заведена провайдером (Paddle), нет → ручная выдача
+    bool IsPremium);
+
+/// <summary>Админ-операция: задать подписку конкретному пользователю по его sub.</summary>
+public sealed record AdminSetSubscriptionRequest(
+    SubscriptionStatus Status,
+    string? Plan,
+    DateTimeOffset? CurrentPeriodEnd);
+
+/// <summary>Админ-операция: задать подписку по e-mail (sub резолвится в IdP). Удобно для теста/поддержки.</summary>
+public sealed record AdminSetByEmailRequest(
+    string Email,
+    SubscriptionStatus Status,
+    string? Plan,
+    DateTimeOffset? CurrentPeriodEnd);
+
+/// <summary>Батч-резолв sub → профиль в IdP (для человекочитаемого списка подписок в админке).</summary>
+public sealed record BySubsRequest(IReadOnlyList<string> Subs);

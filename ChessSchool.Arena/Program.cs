@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using ChessSchool.Arena.Components;
 using ChessSchool.WebAuth;
 using Orleans.Configuration;
@@ -330,6 +331,67 @@ app.MapPost("/premium/reconcile", async (HttpContext ctx, string? txn, IHttpClie
     ents.Invalidate(sub); // статус мог измениться — сбросить кэш ноды, чтобы reload показал актуальное
     return Results.Ok();
 }).RequireAuthorization().DisableAntiforgery();
+
+// ---------------- Админка управления подписками (тонкий клиент /admin/subscriptions) ----------------
+// Прокси к ApiService (источник истины) под политикой Admin — браузер админки fetch'ит эти эндпоинты
+// в обычном request-контексте (НЕ из рендера Blazor, где исходящий HTTP зависает — грабля #12).
+// После изменения сбрасываем кэш entitlement на ноде, чтобы статус подхватился сразу (другие ноды — по TTL).
+app.MapGet("/admin/api/subscriptions", async (IHttpClientFactory http, CancellationToken ct) =>
+{
+    var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+    using var req = new HttpRequestMessage(HttpMethod.Get, "/internal/admin/subscriptions?take=500");
+    req.Headers.Add("X-Internal-Key", internalApiKey);
+    try
+    {
+        using var resp = await client.SendAsync(req, ct);
+        var rows = resp.IsSuccessStatusCode
+            ? await resp.Content.ReadFromJsonAsync<List<ChessSchool.Contracts.AdminSubscriptionDto>>(ct)
+            : null;
+        return Results.Ok(rows ?? []);
+    }
+    catch { return Results.Ok(Array.Empty<ChessSchool.Contracts.AdminSubscriptionDto>()); }
+}).RequireAuthorization("Admin");
+
+app.MapPost("/admin/api/subscriptions/by-email", async (ChessSchool.Contracts.AdminSetByEmailRequest body,
+    IHttpClientFactory http, ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
+{
+    var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+    using var req = new HttpRequestMessage(HttpMethod.Post, "/internal/admin/subscriptions/by-email")
+    { Content = System.Net.Http.Json.JsonContent.Create(body) };
+    req.Headers.Add("X-Internal-Key", internalApiKey);
+    using var resp = await client.SendAsync(req, ct);
+    var json = await resp.Content.ReadAsStringAsync(ct);
+    if (resp.IsSuccessStatusCode)
+    {
+        try { ents.Invalidate(System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("sub").GetString()); }
+        catch { /* не критично — кэш истечёт по TTL */ }
+    }
+    return Results.Content(json, "application/json", null, (int)resp.StatusCode);
+}).RequireAuthorization("Admin").DisableAntiforgery();
+
+app.MapPost("/admin/api/subscriptions/{sub}", async (string sub, ChessSchool.Contracts.AdminSetSubscriptionRequest body,
+    IHttpClientFactory http, ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
+{
+    var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+    using var req = new HttpRequestMessage(HttpMethod.Post, $"/internal/admin/subscriptions/{Uri.EscapeDataString(sub)}")
+    { Content = System.Net.Http.Json.JsonContent.Create(body) };
+    req.Headers.Add("X-Internal-Key", internalApiKey);
+    using var resp = await client.SendAsync(req, ct);
+    var json = await resp.Content.ReadAsStringAsync(ct);
+    if (resp.IsSuccessStatusCode) ents.Invalidate(sub);
+    return Results.Content(json, "application/json", null, (int)resp.StatusCode);
+}).RequireAuthorization("Admin").DisableAntiforgery();
+
+app.MapDelete("/admin/api/subscriptions/{sub}", async (string sub, IHttpClientFactory http,
+    ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
+{
+    var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+    using var req = new HttpRequestMessage(HttpMethod.Delete, $"/internal/admin/subscriptions/{Uri.EscapeDataString(sub)}");
+    req.Headers.Add("X-Internal-Key", internalApiKey);
+    using var resp = await client.SendAsync(req, ct);
+    if (resp.IsSuccessStatusCode) ents.Invalidate(sub);
+    return Results.StatusCode((int)resp.StatusCode);
+}).RequireAuthorization("Admin").DisableAntiforgery();
 
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
 app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));

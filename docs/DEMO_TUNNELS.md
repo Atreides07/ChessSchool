@@ -31,30 +31,42 @@ brew install --cask devtunnel   # или: https://aka.ms/devtunnel/install
 devtunnel user login            # вход в аккаунт Microsoft/GitHub
 ```
 
-## Шаг 1. Стабильные порты (один раз)
+## Быстрый путь — скрипт
 
-URL туннеля привязан к локальному порту, поэтому порты 4 сервисов нужно зафиксировать (иначе при
-каждом запуске Aspire порт — и публичный URL — меняются). Пропиши фиксированные https‑порты в
-`launchSettings.json` каждого проекта (профиль, который запускает AppHost), например:
+Всё ниже автоматизирует [scripts/demo-tunnels.sh](../scripts/demo-tunnels.sh):
 
-| Сервис | Порт (пример) |
+```bash
+scripts/demo-tunnels.sh up      # создать туннели + прописать user-secrets, печатает публичные URL
+dotnet run --project ChessSchool.AppHost   # в отдельном терминале — поднять стенд
+scripts/demo-tunnels.sh host    # опубликовать туннели (держать запущенным, пока идёт демо)
+# …раздать URL тестировщикам…
+scripts/demo-tunnels.sh clear   # выключить демо-режим (убрать user-secrets, удалить туннель)
+```
+
+Дальше — то же самое вручную (если хочется контроля или скрипт не подошёл под твою версию CLI).
+
+## Шаг 1. Порты — уже зафиксированы
+
+URL туннеля привязан к локальному порту, поэтому порты должны быть постоянными. https‑порты Kestrel
+заданы в `launchSettings.json` и стабильны — их и форвардим напрямую (минуя прокси Aspire):
+
+| Сервис | Порт |
 |---|---|
 | auth | 7139 |
-| webfrontend | 7100 |
-| arena | 7200 |
-| gameserver | 7300 |
-
-(значения свои; главное — постоянные между запусками)
+| webfrontend | 7108 |
+| arena | 7167 |
+| gameserver | 7123 |
 
 ## Шаг 2. Постоянные туннели (один раз)
 
 ```bash
-devtunnel create chess-demo                  # один тунель-контейнер
+devtunnel create chess-demo
 devtunnel port create chess-demo -p 7139     # auth
-devtunnel port create chess-demo -p 7100     # web
-devtunnel port create chess-demo -p 7200     # arena
-devtunnel port create chess-demo -p 7300     # gameserver
-devtunnel show chess-demo                     # покажет публичные URL вида https://<id>-7139.<region>.devtunnels.ms
+devtunnel port create chess-demo -p 7108     # web
+devtunnel port create chess-demo -p 7167     # arena
+devtunnel port create chess-demo -p 7123     # gameserver
+devtunnel access create chess-demo --anonymous   # тестировщикам не логиниться в сам туннель
+devtunnel show chess-demo                     # публичные URL вида https://<id>-7139.<region>.devtunnels.ms
 ```
 
 Запиши 4 полученных URL — это `AUTH_URL`, `WEB_URL`, `ARENA_URL`, `GAME_URL`.

@@ -873,16 +873,33 @@ public sealed class ArenaTournamentGrain(
         var elapsed = (long)(DateTimeOffset.UtcNow - g.LastMoveAt).TotalMilliseconds;
         if (mover == Color.White)
         {
-            if (g.WhiteMs - elapsed <= 0) { g.WhiteMs = 0; g.Result = GameResult.BlackWins; g.Reason = GameEndReason.Timeout; return true; }
+            if (g.WhiteMs - elapsed <= 0) { g.WhiteMs = 0; FlagTimeout(g, Color.White); return true; }
             g.WhiteMs -= elapsed;
         }
         else
         {
-            if (g.BlackMs - elapsed <= 0) { g.BlackMs = 0; g.Result = GameResult.WhiteWins; g.Reason = GameEndReason.Timeout; return true; }
+            if (g.BlackMs - elapsed <= 0) { g.BlackMs = 0; FlagTimeout(g, Color.Black); return true; }
             g.BlackMs -= elapsed;
         }
         g.LastMoveAt = DateTimeOffset.UtcNow;
         return false;
+    }
+
+    // Просрочка времени: поражение просрочившего — но если у соперника недостаточно материала для мата,
+    // партия завершается вничью (FIDE 6.9 / lichess).
+    private static void FlagTimeout(Game g, Color flagged)
+    {
+        bool winnerIsWhite = flagged == Color.Black;
+        if (ChessMaterial.HasMatingMaterial(g.Board.Fen, winnerIsWhite))
+        {
+            g.Result = winnerIsWhite ? GameResult.WhiteWins : GameResult.BlackWins;
+            g.Reason = GameEndReason.Timeout;
+        }
+        else
+        {
+            g.Result = GameResult.Draw;
+            g.Reason = GameEndReason.InsufficientMaterial; // ничья: у соперника нет материала на мат
+        }
     }
 
     private void FinishGame(Game g)

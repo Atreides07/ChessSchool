@@ -100,13 +100,31 @@ public sealed class GameGrain(IGameArchiveClient archive, ILogger<GameGrain> log
         if (mover == Color.White)
         {
             _whiteMs -= elapsed;
-            if (_whiteMs <= 0) { _whiteMs = 0; _result = GameResult.BlackWins; _reason = GameEndReason.Timeout; _status = GameStatus.Finished; }
+            if (_whiteMs <= 0) { _whiteMs = 0; FlagTimeout(Color.White); }
         }
         else
         {
             _blackMs -= elapsed;
-            if (_blackMs <= 0) { _blackMs = 0; _result = GameResult.WhiteWins; _reason = GameEndReason.Timeout; _status = GameStatus.Finished; }
+            if (_blackMs <= 0) { _blackMs = 0; FlagTimeout(Color.Black); }
         }
+    }
+
+    // Просрочка времени: поражение просрочившего — но если у соперника недостаточно материала для мата,
+    // партия завершается вничью (FIDE 6.9 / lichess).
+    private void FlagTimeout(Color flagged)
+    {
+        bool winnerIsWhite = flagged == Color.Black;
+        if (ChessMaterial.HasMatingMaterial(_board.ToFen(), winnerIsWhite))
+        {
+            _result = winnerIsWhite ? GameResult.WhiteWins : GameResult.BlackWins;
+            _reason = GameEndReason.Timeout;
+        }
+        else
+        {
+            _result = GameResult.Draw;
+            _reason = GameEndReason.InsufficientMaterial; // ничья: у соперника нет материала на мат
+        }
+        _status = GameStatus.Finished;
     }
 
     private void ResolveEndgame()

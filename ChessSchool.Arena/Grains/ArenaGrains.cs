@@ -154,8 +154,11 @@ public sealed class ArenaTournamentGrain(
         public bool OnFire => Streak >= 2;
     }
 
-    // Минимум участников в идущем турнире — добираем ботами; при достатке людей боты убираются.
-    private const int MinParticipants = 6;
+    // Желаемое число ботов в идущем турнире — настраивается в админке по типу игры (BotSettingsGrain).
+    // Кэшируется на грейне и обновляется с троттлингом (не дёргаем конфиг-грейн на каждый тик).
+    private int? _botTarget;
+    private DateTimeOffset _botSettingsAt;
+    private int BotTarget => _botTarget ?? BotSettingsGrain.DefaultCount;
     // Сколько секунд человек ждёт соперника-человека, прежде чем к нему подключат бота.
     private const int WaitForBotSeconds = 10;
     // Хвост показа завершённой партии БЕЗ живого участника (бот-vs-бот / человек уже ушёл): зрители
@@ -460,15 +463,33 @@ public sealed class ArenaTournamentGrain(
 
     private async Task OnTimerAsync()
     {
+        await RefreshBotSettingsAsync();
         Tick();
         await DriveBotsAsync(); // ходы ботов через Stockfish (серверная игра)
         await FlushAsync();
         notifier.Notify(Id);
     }
 
+    /// <summary>
+    /// Подтягивает желаемое число ботов для типа этого турнира из настроек (BotSettingsGrain), с
+    /// троттлингом (не чаще раза в 15с) — чтобы правки из админки применялись, но без вызова конфиг-грейна
+    /// на каждый тик. id вне расписания (напр. тестовый/бренд) → дефолт.
+    /// </summary>
+    private async Task RefreshBotSettingsAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_botTarget is not null && (now - _botSettingsAt).TotalSeconds < 15) return;
+        _botSettingsAt = now;
+        var type = ArenaSchedule.TypeOf(Id);
+        if (type is null) { _botTarget = BotSettingsGrain.DefaultCount; return; }
+        try { _botTarget = await GrainFactory.GetGrain<IBotSettingsGrain>(0).GetCountAsync(type); }
+        catch { _botTarget ??= BotSettingsGrain.DefaultCount; } // конфиг недоступен — дефолт, не падаем
+    }
+
     public async Task JoinAsync(string sub, string name)
     {
         EnsureConfigured();
+        await RefreshBotSettingsAsync();
         // Регистрация возможна и до старта (Created), и во время турнира (Running).
         if (Status() == TournamentStatus.Finished) return;
         if (!_players.ContainsKey(sub))
@@ -497,6 +518,7 @@ public sealed class ArenaTournamentGrain(
     public async Task SeekAsync(string sub)
     {
         EnsureConfigured();
+        await RefreshBotSettingsAsync();
         if (Status() != TournamentStatus.Running) return; // искать соперника можно только в идущем турнире
         if (_players.TryGetValue(sub, out var p) && !p.IsBot)
         {
@@ -520,6 +542,7 @@ public sealed class ArenaTournamentGrain(
     public async Task<TournamentSummaryDto> GetSummaryAsync(string? sub = null)
     {
         EnsureConfigured();
+        await RefreshBotSettingsAsync();
         Tick();
         EnsureTimer();
         await FlushAsync();
@@ -532,6 +555,7 @@ public sealed class ArenaTournamentGrain(
     public async Task<ArenaStateDto> GetStateAsync(string sub)
     {
         EnsureConfigured();
+        await RefreshBotSettingsAsync();
         Tick();
         EnsureTimer();
         await FlushAsync();
@@ -559,6 +583,7 @@ public sealed class ArenaTournamentGrain(
     public async Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync()
     {
         EnsureConfigured();
+        await RefreshBotSettingsAsync();
         Tick();
         EnsureTimer();
         await FlushAsync();
@@ -687,12 +712,8 @@ public sealed class ArenaTournamentGrain(
     /// </summary>
     private void ManageBots()
     {
-        int humans = _players.Values.Count(p => !p.IsBot);
         int bots = _players.Values.Count(p => p.IsBot);
-
-        int targetBots = Math.Max(0, MinParticipants - humans);
-        // Пока людей меньше минимума — держим чётное число участников (для пейринга).
-        if (humans < MinParticipants && (humans + targetBots) % 2 == 1) targetBots++;
+        int targetBots = BotTarget; // настраивается в админке по типу игры (0 — без ботов)
 
         while (bots < targetBots)
         {
@@ -700,6 +721,7 @@ public sealed class ArenaTournamentGrain(
             bots++;
         }
 
+        // Лишних (свыше таргета) ботов убираем по мере их простоя — играющих не трогаем.
         if (bots > targetBots)
         {
             foreach (var kv in _players.Where(kv => kv.Value.IsBot && !kv.Value.Playing).ToList())
@@ -825,7 +847,9 @@ public sealed class ArenaTournamentGrain(
             var human = _players[idleHumans[hi]];
             if (human.WaitingSince is not { } since || (now - since).TotalSeconds < WaitForBotSeconds)
                 continue; // ещё ищем — оставляем «Ищем соперника…»
-            var bot = bi < idleBots.Count ? idleBots[bi++] : SpawnBot();
+            // Боты для этого типа отключены (таргет 0) — соперника-бота не подключаем, ждём человека.
+            var bot = bi < idleBots.Count ? idleBots[bi++] : (BotTarget > 0 ? SpawnBot() : null);
+            if (bot is null) continue;
             CreateGame(idleHumans[hi], bot);
         }
 

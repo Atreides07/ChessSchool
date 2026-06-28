@@ -1,0 +1,100 @@
+@page "/admin/bots"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using ChessSchool.Arena
+@using ChessSchool.Arena.Grains
+@using ChessSchool.Arena.Services
+@attribute [Authorize(Policy = "Admin")]
+@inject IGrainFactory Grains
+
+<PageTitle>@Loc.T("admin.bots.title") — @Loc.T("admin.title")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-bar">
+    <div>
+        <a class="adm-back" href="admin">@Loc.T("admin.back")</a>
+        <h1 class="adm-h1">@Loc.T("admin.bots.title")</h1>
+    </div>
+</div>
+
+<p class="adm-muted bots-sub">@Loc.T("admin.bots.sub")</p>
+
+@if (_rows is null)
+{
+    <p class="adm-muted">@Loc.T("loading")</p>
+}
+else
+{
+    <div class="bots-list">
+        @foreach (var r in _rows)
+        {
+            <div class="bots-row">
+                <div class="bots-type">
+                    <span class="bots-type-name">@r.Type</span>
+                    <span class="bots-type-tc">@r.Tc</span>
+                </div>
+                <input class="adm-in bots-num" type="number" min="0" max="50" step="1" @bind="r.Count" />
+            </div>
+        }
+    </div>
+    <div class="bots-actions">
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@Loc.T("admin.bots.save")</button>
+        @if (_saved) { <span class="bots-saved">@Loc.T("admin.bots.saved")</span> }
+    </div>
+}
+
+@code {
+    private sealed class Row { public string Type = ""; public string Tc = ""; public int Count; }
+
+    private List<Row>? _rows;
+    private bool _saving, _saved;
+
+    private IBotSettingsGrain Settings => Grains.GetGrain<IBotSettingsGrain>(0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var counts = await Settings.GetAllAsync();
+        _rows = ArenaSchedule.Series.Select(s => new Row
+        {
+            Type = s.Type,
+            Tc = s.Tc.ToString(),
+            Count = counts.TryGetValue(s.Type, out var n) ? n : BotSettingsGrain.DefaultCount,
+        }).ToList();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_rows is null) return;
+        _saving = true;
+        _saved = false;
+        try
+        {
+            foreach (var r in _rows)
+                await Settings.SetCountAsync(r.Type, Math.Clamp(r.Count, 0, 50));
+            _saved = true;
+        }
+        finally { _saving = false; }
+    }
+}
+
+<style>
+    .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
+    .adm-back { color: var(--ink-2); font-weight: 600; font-size: .9rem; }
+    .adm-back:hover { color: var(--accent); }
+    .adm-h1 { font-size: 1.9rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }
+    .adm-muted { color: var(--ink-2); }
+    .bots-sub { margin: 0 0 1.4rem; max-width: 48ch; }
+
+    .bots-list { display: flex; flex-direction: column; gap: .6rem; max-width: 420px; }
+    .bots-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+                background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: .8rem 1rem; }
+    .bots-type { display: flex; flex-direction: column; }
+    .bots-type-name { font-weight: 700; color: var(--ink); }
+    .bots-type-tc { font-size: .85rem; color: var(--ink-2); }
+    .adm-in { font: inherit; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); }
+    .adm-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+    .bots-num { width: 84px; text-align: center; font-variant-numeric: tabular-nums; }
+
+    .bots-actions { display: flex; align-items: center; gap: 1rem; margin-top: 1.4rem; }
+    .bots-saved { color: var(--success); font-weight: 700; }
+</style>

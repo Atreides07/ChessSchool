@@ -29,6 +29,15 @@ public static class ArenaSchedule
     public static string MakeName(Spec spec, DateTimeOffset startsAt) =>
         $"{spec.Type} {spec.Tc} {startsAt.ToLocalTime():HH:mm}";
 
+    /// <summary>Канонический тип регулярного турнира по его id (Bullet/Blitz/Rapid). null — id вне расписания.</summary>
+    public static string? TypeOf(string id)
+    {
+        var dash = id.LastIndexOf('-');
+        if (dash <= 0) return null;
+        var type = id[..dash];
+        return Series.FirstOrDefault(s => s.Type.Equals(type, StringComparison.OrdinalIgnoreCase))?.Type;
+    }
+
     /// <summary>Разбирает id ссылки в мету турнира. null — id не относится к расписанию (напр. тестовый).</summary>
     public static (string Name, TimeControl Tc, DateTimeOffset StartsAt, int DurationSeconds)? Resolve(string id)
     {

@@ -264,6 +264,34 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task RunningTournament_RespectsConfiguredBotCount()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var settings = cluster.GrainFactory.GetGrain<IBotSettingsGrain>(0);
+
+            // Blitz: держим ровно 2 ботов. Турнир по расписанию (id вида "blitz-{unix}"), стартовал недавно.
+            await settings.SetCountAsync("Blitz", 2);
+            long blitzStart = DateTimeOffset.UtcNow.AddSeconds(-5).ToUnixTimeSeconds();
+            var blitz = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>($"blitz-{blitzStart}");
+            var blitzSummary = await blitz.GetSummaryAsync();
+            Assert.Equal(TournamentStatus.Running, blitzSummary.Status);
+            Assert.Equal(2, blitzSummary.BotCount);
+
+            // Bullet: ботов отключили (0) — в пустом турнире ботов нет.
+            await settings.SetCountAsync("Bullet", 0);
+            long bulletStart = DateTimeOffset.UtcNow.AddSeconds(-5).ToUnixTimeSeconds();
+            var bullet = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>($"bullet-{bulletStart}");
+            var bulletSummary = await bullet.GetSummaryAsync();
+            Assert.Equal(TournamentStatus.Running, bulletSummary.Status);
+            Assert.Equal(0, bulletSummary.BotCount);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
     public async Task FinishedTournament_ExposesRealSimulatedHistoryConsistentWithScoring()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

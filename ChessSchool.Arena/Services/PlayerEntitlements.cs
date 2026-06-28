@@ -8,6 +8,9 @@ namespace ChessSchool.Arena.Services;
 public interface IPlayerEntitlements
 {
     Task<bool> IsPremiumAsync(string? sub, CancellationToken ct = default);
+
+    /// <summary>Премиум-подмножество из набора sub'ов (для бейджей в таблице турнира) — один батч-запрос, с кэшем.</summary>
+    Task<IReadOnlySet<string>> PremiumSubsAsync(IReadOnlyCollection<string> subs, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -51,5 +54,39 @@ public sealed class PlayerEntitlements(
 
         cache.Set(key, premium, Ttl);
         return premium;
+    }
+
+    public async Task<IReadOnlySet<string>> PremiumSubsAsync(IReadOnlyCollection<string> subs, CancellationToken ct = default)
+    {
+        var result = new HashSet<string>();
+        var misses = new List<string>();
+        foreach (var s in subs)
+        {
+            if (string.IsNullOrEmpty(s)) continue;
+            if (cache.TryGetValue($"premium:{s}", out bool p)) { if (p) result.Add(s); }
+            else if (!misses.Contains(s)) misses.Add(s);
+        }
+        if (misses.Count == 0) return result;
+
+        try
+        {
+            var client = httpFactory.CreateClient(HttpClientName);
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/internal/subscriptions/batch");
+            req.Headers.Add("X-Internal-Key", internalKey);
+            req.Content = JsonContent.Create(misses);
+            using var resp = await client.SendAsync(req, ct);
+            if (resp.IsSuccessStatusCode)
+            {
+                var premiumSet = (await resp.Content.ReadFromJsonAsync<string[]>(ct) ?? []).ToHashSet();
+                foreach (var s in misses) cache.Set($"premium:{s}", premiumSet.Contains(s), Ttl);
+                result.UnionWith(misses.Where(premiumSet.Contains));
+            }
+            // Неуспех — не кэшируем; считаем misses без премиума (безопасная деградация).
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Батч-запрос подписок не удался — считаем без премиума.");
+        }
+        return result;
     }
 }

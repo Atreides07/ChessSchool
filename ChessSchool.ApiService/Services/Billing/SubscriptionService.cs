@@ -57,6 +57,17 @@ public sealed class SubscriptionService(SchoolDbContext db, ILogger<Subscription
             : new SubscriptionDto(userSub, s.Status, s.Plan, s.CurrentPeriodEnd, IsPremium(s.Status, s.CurrentPeriodEnd));
     }
 
+    /// <summary>Премиум-подмножество из набора sub'ов (для бейджей в таблице турнира) — один запрос к БД.</summary>
+    public async Task<IReadOnlySet<string>> PremiumSubsAsync(IReadOnlyCollection<string> subs, CancellationToken ct = default)
+    {
+        if (subs.Count == 0) return new HashSet<string>();
+        var rows = await db.Subscriptions.AsNoTracking()
+            .Where(s => subs.Contains(s.UserSub))
+            .Select(s => new { s.UserSub, s.Status, s.CurrentPeriodEnd })
+            .ToListAsync(ct);
+        return rows.Where(s => IsPremium(s.Status, s.CurrentPeriodEnd)).Select(s => s.UserSub).ToHashSet();
+    }
+
     /// <summary>
     /// Даёт ли подписка премиум прямо сейчас. Active/Trialing/PastDue (ретенция — доступ до конца
     /// оплаченного периода) и период не истёк. Это единственное место, по которому гейтятся фичи.

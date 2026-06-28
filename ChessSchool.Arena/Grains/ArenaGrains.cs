@@ -1,5 +1,6 @@
 using ChessSchool.Arena.Services;
 using ChessSchool.Contracts;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Color = ChessSchool.Contracts.PieceColor;
 
@@ -130,8 +131,12 @@ public sealed class ArenaTournamentGrain(
     IChessEngine engine,
     ArenaRuntimeOptions runtime,
     IAnalytics analytics,
+    IServiceProvider services,
     ILogger<ArenaTournamentGrain> logger) : Grain, IArenaTournamentGrain, IRemindable
 {
+    // Опционально: премиум-статусы для бейджей в таблице. В тестовом силосе не зарегистрирован → null
+    // (бейджи просто отсутствуют), поэтому конфигураторы тестов трогать не нужно.
+    private readonly IPlayerEntitlements? _entitlements = services.GetService<IPlayerEntitlements>();
     private sealed class Player
     {
         public string Name = "";
@@ -560,11 +565,18 @@ public sealed class ArenaTournamentGrain(
         EnsureTimer();
         await FlushAsync();
 
-        var standings = _players
+        var ordered = _players
             .OrderByDescending(p => p.Value.Score)
             .ThenByDescending(p => p.Value.Streak)
+            .ToList();
+        // Премиум-бейджи в таблице: один батч-запрос статусов людей (с кэшем). Боты — не премиум.
+        IReadOnlySet<string> premium = _entitlements is null
+            ? new HashSet<string>()
+            : await _entitlements.PremiumSubsAsync(ordered.Where(p => !p.Value.IsBot).Select(p => p.Key).ToList());
+        var standings = ordered
             .Select((p, i) => new ArenaStandingRow(i + 1, p.Value.Name, p.Value.Score, p.Value.Streak,
-                p.Value.OnFire, p.Value.Playing, p.Value.Games, p.Value.Wins, p.Value.Results.ToList()))
+                p.Value.OnFire, p.Value.Playing, p.Value.Games, p.Value.Wins, p.Value.Results.ToList(),
+                IsPremium: !p.Value.IsBot && premium.Contains(p.Key)))
             .ToList();
 
         _players.TryGetValue(sub, out var me);

@@ -29,6 +29,7 @@
         </div>
     </div>
     <div class="rv-side">
+        <div id="rv-result" class="rv-result"></div>
         <div id="rv-analysis"></div>
         <div class="rv-moves" id="rv-moves"></div>
     </div>
@@ -51,6 +52,17 @@
             premiumonly = Loc.T("review.premiumonly"),
             premiumcta = Loc.T("review.premiumcta"),
             notfound = Loc.T("games.empty"),
+            win = Loc.T("games.win"),
+            loss = Loc.T("games.loss"),
+            draw = Loc.T("games.draw"),
+            // Причины завершения по индексу GameEndReason (0 None … 7 Abandoned).
+            reasons = new[]
+            {
+                "", Loc.T("review.reason.checkmate"), Loc.T("review.reason.resignation"),
+                Loc.T("review.reason.timeout"), Loc.T("review.reason.stalemate"),
+                Loc.T("review.reason.drawagreed"), Loc.T("review.reason.insufficient"),
+                Loc.T("review.reason.abandoned"),
+            },
         },
     };
 }
@@ -147,6 +159,8 @@
 
     const QSYM = { 2: '?!', 3: '?', 4: '??' };
     const QCLS = { 0: 'q-best', 2: 'q-inacc', 3: 'q-mist', 4: 'q-blun' };
+    // Цвет хода: зелёный — хорошие (лучший/хороший), жёлтый — сомнительные (неточность), красный — ошибки/зевки.
+    const MCLS = (q) => (q === 0 || q === 1) ? 'mv-good' : q === 2 ? 'mv-dub' : (q === 3 || q === 4) ? 'mv-bad' : '';
     const qualityAt = (i) => (analysis && analysis.moves && i >= 1 && i <= analysis.moves.length)
         ? analysis.moves[i - 1].quality : null;
 
@@ -156,10 +170,22 @@
             if ((i % 2) === 1) html += `<span class="rv-num">${(i + 1) / 2 | 0}.</span>`;
             const q = qualityAt(i);
             const sym = (q != null && QSYM[q]) ? `<span class="rv-q ${QCLS[q] || ''}">${QSYM[q]}</span>` : '';
-            html += `<button class="rv-move ${i === ply ? 'on' : ''}" data-ply="${i}">${esc(sans[i])}${sym}</button>`;
+            html += `<button class="rv-move ${MCLS(q)} ${i === ply ? 'on' : ''}" data-ply="${i}">${esc(sans[i])}${sym}</button>`;
         }
         movesEl.innerHTML = html;
         movesEl.querySelectorAll('.rv-move').forEach(b => b.onclick = () => go(+b.dataset.ply));
+    }
+
+    // Баннер исхода партии: победа/поражение/ничья + причина (мат / время / пат / сдача …). Не зависит от хода.
+    function renderResult() {
+        const el = document.getElementById('rv-result');
+        const oc = data.outcome;
+        const word = oc === 0 ? CFG.loc.win : oc === 1 ? CFG.loc.loss : CFG.loc.draw;
+        const cls = oc === 0 ? 'win' : oc === 1 ? 'loss' : 'draw';
+        const reason = CFG.loc.reasons[data.endReason] || '';
+        el.className = 'rv-result ' + cls;
+        el.innerHTML = `<span class="rv-result-word">${esc(word)}</span>` +
+            (reason ? `<span class="rv-result-reason">${esc(reason)}</span>` : '');
     }
 
     function evalText(m) {
@@ -211,6 +237,7 @@
 
     buildBoard();
     renderPlayers();
+    renderResult();
     renderAll();
 
     // Разбор (премиум) — отдельным запросом, если кэша нет.
@@ -256,6 +283,15 @@
     .rv-ply { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 56px; text-align: center; }
     .rv-side { flex: 1; min-width: 240px; max-width: 360px; }
     .rv-status { color: var(--ink-2); padding: .6rem 0; }
+
+    /* Баннер исхода: победа/поражение/ничья + причина */
+    .rv-result { display: flex; align-items: baseline; gap: .5rem; padding: .55rem .75rem; border-radius: var(--r-md);
+        margin-bottom: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+    .rv-result-word { font-weight: 800; text-transform: uppercase; letter-spacing: .03em; font-size: .9rem; }
+    .rv-result-reason { color: var(--ink-2); font-size: .9rem; }
+    .rv-result.win .rv-result-word { color: var(--success); }
+    .rv-result.loss .rv-result-word { color: var(--danger); }
+    .rv-result.draw .rv-result-word { color: var(--muted); }
     .rv-acc { display: flex; gap: 12px; margin-bottom: 8px; }
     .rv-acc-cell { flex: 1; background: var(--surface-2); border-radius: var(--r-md); padding: .5rem .7rem; }
     .rv-acc-num { display: block; font-size: 1.3rem; font-weight: 800; }
@@ -270,6 +306,11 @@
     .rv-move { border: 0; background: transparent; cursor: pointer; padding: .05rem .3rem; border-radius: var(--r-sm); color: var(--ink); font-size: .92rem; font-weight: 560; }
     .rv-move:hover { background: var(--surface-2); }
     .rv-move.on { background: var(--accent); color: #fff; }
+    /* Цвет хода по качеству: зелёный — хороший, жёлтый — сомнительный, красный — ошибка/зевок */
+    .rv-move.mv-good { color: var(--success); }
+    .rv-move.mv-dub { color: #b58300; font-weight: 700; }
+    .rv-move.mv-bad { color: var(--danger); font-weight: 700; }
+    .rv-move.on { color: #fff; } /* выбранный ход — всегда белым поверх цвета качества */
     .rv-q { font-weight: 800; margin-left: 1px; }
     .q-best { color: var(--success); }
     .q-inacc { color: #b58300; }

@@ -253,6 +253,14 @@ app.MapGet("/api/me/games/{id:guid}", async (Guid id, HttpContext ctx,
     var premium = await ents.IsPremiumAsync(sub, ct);
     var analysis = premium ? await review.GetCachedAnalysisAsync(id, sub, ct) : null;
 
+    // Исход с точки зрения игрока (0 победа / 1 поражение / 2 ничья — как PlayerOutcome).
+    var outcome = detail.Result switch
+    {
+        ChessSchool.Contracts.GameResult.WhiteWins => detail.MyColor == ChessSchool.Contracts.PieceColor.White ? 0 : 1,
+        ChessSchool.Contracts.GameResult.BlackWins => detail.MyColor == ChessSchool.Contracts.PieceColor.Black ? 0 : 1,
+        _ => 2,
+    };
+
     return Results.Ok(new
     {
         startFen,
@@ -262,6 +270,8 @@ app.MapGet("/api/me/games/{id:guid}", async (Guid id, HttpContext ctx,
         blackName = detail.BlackName,
         whiteIsBot = detail.WhiteIsBot,
         blackIsBot = detail.BlackIsBot,
+        outcome,
+        endReason = (int)detail.EndReason,
         premium,
         analysis,
     });

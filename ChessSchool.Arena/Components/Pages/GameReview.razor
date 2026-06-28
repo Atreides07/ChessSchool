@@ -159,8 +159,9 @@
 
     const QSYM = { 2: '?!', 3: '?', 4: '??' };
     const QCLS = { 0: 'q-best', 2: 'q-inacc', 3: 'q-mist', 4: 'q-blun' };
-    // Цвет хода: зелёный — хорошие (лучший/хороший), жёлтый — сомнительные (неточность), красный — ошибки/зевки.
-    const MCLS = (q) => (q === 0 || q === 1) ? 'mv-good' : q === 2 ? 'mv-dub' : (q === 3 || q === 4) ? 'mv-bad' : '';
+    // Хорошие/лучшие ходы — нейтральные (их большинство), цветом помечаем ТОЛЬКО проблемные, чтобы глаз
+    // сразу находил, где ошибся: жёлтый — неточность, оранжевый — ошибка, красный — зевок.
+    const MCLS = (q) => q === 2 ? 'mv-inacc' : q === 3 ? 'mv-mist' : q === 4 ? 'mv-blun' : '';
     const qualityAt = (i) => (analysis && analysis.moves && i >= 1 && i <= analysis.moves.length)
         ? analysis.moves[i - 1].quality : null;
 
@@ -306,10 +307,10 @@
     .rv-move { border: 0; background: transparent; cursor: pointer; padding: .05rem .3rem; border-radius: var(--r-sm); color: var(--ink); font-size: .92rem; font-weight: 560; }
     .rv-move:hover { background: var(--surface-2); }
     .rv-move.on { background: var(--accent); color: #fff; }
-    /* Цвет хода по качеству: зелёный — хороший, жёлтый — сомнительный, красный — ошибка/зевок */
-    .rv-move.mv-good { color: var(--success); }
-    .rv-move.mv-dub { color: #b58300; font-weight: 700; }
-    .rv-move.mv-bad { color: var(--danger); font-weight: 700; }
+    /* Только проблемные ходы цветные (хорошие — нейтральные): жёлтый/оранжевый/красный по тяжести */
+    .rv-move.mv-inacc { color: #b58300; }
+    .rv-move.mv-mist { color: #d2691e; font-weight: 700; }
+    .rv-move.mv-blun { color: var(--danger); font-weight: 700; }
     .rv-move.on { color: #fff; } /* выбранный ход — всегда белым поверх цвета качества */
     .rv-q { font-weight: 800; margin-left: 1px; }
     .q-best { color: var(--success); }

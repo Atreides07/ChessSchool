@@ -55,6 +55,13 @@
             win = Loc.T("games.win"),
             loss = Loc.T("games.loss"),
             draw = Loc.T("games.draw"),
+            qInacc = Loc.T("review.q.inacc"),
+            qMist = Loc.T("review.q.mist"),
+            qBlun = Loc.T("review.q.blun"),
+            exLost = Loc.T("review.ex.lost"),
+            exBetter = Loc.T("review.ex.better"),
+            exBest = Loc.T("review.ex.best"),
+            exGood = Loc.T("review.ex.good"),
             // Причины завершения по индексу GameEndReason (0 None … 7 Abandoned).
             reasons = new[]
             {
@@ -227,8 +234,8 @@
             `<div class="rv-counts">${count(2, CFG.loc.inacc, 'mv-inacc')} · ${count(3, CFG.loc.mist, 'mv-mist')} · ${count(4, CFG.loc.blun, 'mv-blun')}</div>`;
         if (ply >= 1 && ply <= a.moves.length) {
             const m = a.moves[ply - 1];
-            const best = m.bestFrom ? `<span class="rv-best">${esc(CFG.loc.best)}: ${m.bestFrom}–${m.bestTo}</span>` : '';
-            html += `<div class="rv-eval ${QCLS[m.quality] || ''}"><strong>${evalText(m)}</strong>${best}</div>`;
+            html += `<div class="rv-eval ${QCLS[m.quality] || ''}"><strong>${evalText(m)}</strong></div>`;
+            html += moveExplain(ply); // объяснение: почему плохой + что было лучше
         }
         analysisEl.innerHTML = html;
         // Клик по счётчику → переход к следующему ходу этого типа (по кругу, если их несколько).
@@ -238,9 +245,29 @@
     function renderAll() { renderBoard(); renderMoves(); renderAnalysis(); }
     function go(i) { ply = Math.max(0, Math.min(total, i)); renderAll(); }
 
-    // Все полуходы заданного качества (обе стороны), по порядку — для перехода по счётчику.
+    const myColorNum = data.myColor === 'w' ? 0 : 1; // PieceColor: White=0, Black=1
+    // Полуходы заданного качества ТОЛЬКО игрока (для счётчика/перехода). Подсветка в таблице — обе стороны.
     const pliesOfQuality = (q) => (analysis && analysis.moves)
-        ? analysis.moves.map((m, i) => m.quality === q ? i + 1 : 0).filter(Boolean) : [];
+        ? analysis.moves.map((m, i) => (m.quality === q && m.side === myColorNum) ? i + 1 : 0).filter(Boolean) : [];
+
+    // Объяснение хода (почему плохой + что было лучше). Источник — оценки движка по ходам.
+    function moveExplain(p) {
+        if (!analysis || !analysis.moves || p < 1 || p > analysis.moves.length) return '';
+        const m = analysis.moves[p - 1];
+        if (m.quality <= 1) { // хороший/лучший
+            const t = m.quality === 0 ? CFG.loc.exBest : CFG.loc.exGood;
+            return `<div class="rv-explain good">${esc(t)}</div>`;
+        }
+        const before = p >= 2 ? analysis.moves[p - 2].scoreCp : 20; // оценка ДО хода (старт ≈ равенство)
+        const white = m.side === 0;
+        const lossCp = white ? (before - m.scoreCp) : (m.scoreCp - before); // >0 = ход ухудшил позицию мовера
+        const lost = Math.max(0.1, lossCp / 100).toFixed(1);
+        const QW = { 2: CFG.loc.qInacc, 3: CFG.loc.qMist, 4: CFG.loc.qBlun };
+        let t = `<div class="rv-explain ${QCLS[m.quality] || ''}"><strong>${esc(QW[m.quality])}</strong> — ` +
+            esc(CFG.loc.exLost).replace('{n}', lost);
+        if (m.bestFrom) t += ' ' + esc(CFG.loc.exBetter).replace('{m}', `${m.bestFrom}–${m.bestTo}`);
+        return t + '</div>';
+    }
     const jumpIdx = { 2: -1, 3: -1, 4: -1 }; // запоминаем позицию цикла по каждому типу
     function jumpQuality(q) {
         const list = pliesOfQuality(q);
@@ -328,9 +355,16 @@
     .rv-count.mv-inacc { color: #b58300; }
     .rv-count.mv-mist { color: #d2691e; }
     .rv-count.mv-blun { color: var(--danger); }
-    .rv-eval { padding: .5rem .7rem; border-radius: var(--r-md); background: var(--surface-2); margin-bottom: 12px; }
+    .rv-eval { padding: .5rem .7rem; border-radius: var(--r-md); background: var(--surface-2); margin-bottom: 8px; }
     .rv-eval strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-    .rv-best { margin-left: .6rem; color: var(--ink-2); font-size: .85rem; }
+    /* Объяснение хода: почему плохой + что было лучше (цвет рамки по тяжести) */
+    .rv-explain { font-size: .88rem; line-height: 1.45; padding: .5rem .7rem; border-radius: var(--r-md);
+        background: var(--surface-2); margin-bottom: 12px; border-left: 3px solid var(--line); color: var(--ink-2); }
+    .rv-explain strong { font-weight: 800; color: var(--ink); }
+    .rv-explain.good { border-left-color: var(--success); }
+    .rv-explain.q-inacc { border-left-color: #b58300; }
+    .rv-explain.q-mist { border-left-color: #d2691e; }
+    .rv-explain.q-blun { border-left-color: var(--danger); }
     .rv-upsell { margin-bottom: 14px; }
     /* Таблица ходов: № | белые | чёрные — выровненные колонки, легко сканировать и искать ход */
     .rv-moves { display: grid; grid-template-columns: auto 1fr 1fr; column-gap: 6px; row-gap: 1px; align-items: stretch; }

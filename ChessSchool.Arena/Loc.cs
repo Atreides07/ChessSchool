@@ -92,6 +92,15 @@ public static class Loc
         ["review.premiumcta"] = ("Получить разбор", "Unlock analysis"),
         ["review.back"] = ("К моим партиям", "Back to my games"),
         ["review.do"] = ("Разобрать партию", "Analyze game"),
+        // Объяснение хода при клике (разбор).
+        ["review.q.inacc"] = ("Неточность", "Inaccuracy"),
+        ["review.q.mist"] = ("Ошибка", "Mistake"),
+        ["review.q.blun"] = ("Зевок", "Blunder"),
+        ["review.ex.lost"] = ("ход ухудшил оценку примерно на {n}.", "this move worsened the evaluation by about {n}."),
+        ["review.ex.better"] = ("Лучше было {m} — сильнейший ход по оценке движка.",
+                                "Better was {m} — the engine's top move."),
+        ["review.ex.best"] = ("Точный ход — совпал с выбором движка.", "Best move — matches the engine."),
+        ["review.ex.good"] = ("Хороший ход.", "Good move."),
         // Причины завершения партии (для баннера исхода в разборе).
         ["review.reason.checkmate"] = ("мат", "checkmate"),
         ["review.reason.timeout"] = ("истекло время", "on time"),

@@ -91,9 +91,8 @@
     function setup() {
         reconcileOnReturn();
 
-        // Уже премиум (видна карточка «есть подписка») — забываем запомненную транзакцию.
-        if (document.querySelector('.prem-have')) { try { localStorage.removeItem(TXN_KEY); } catch (e) { } return; }
-
+        // Кнопка «Обновить статус» работает в обоих состояниях: у не-премиума — добить активацию после
+        // оплаты (по запомненной транзакции); у премиума — подтянуть статус, если подписку отменили в портале.
         var refresh = document.getElementById('prem-refresh');
         if (refresh && !refresh.__wired) {
             refresh.__wired = true;
@@ -106,6 +105,9 @@
                 location.href = '/premium';
             };
         }
+
+        // Уже премиум (видна карточка «есть подписка») — кнопки покупки нет; забываем запомненную транзакцию.
+        if (document.querySelector('.prem-have')) { try { localStorage.removeItem(TXN_KEY); } catch (e) { } return; }
 
         var root = document.getElementById('prem-root');
         var btn = document.getElementById('prem-buy');
@@ -134,7 +136,8 @@
     function watch() {
         if (window.__premObs) return;
         var relevant = function (n) {
-            return n.nodeType === 1 && (n.id === 'prem-root' || (n.querySelector && n.querySelector('#prem-root')));
+            return n.nodeType === 1 && (n.id === 'prem-root' || n.id === 'prem-refresh'
+                || (n.querySelector && n.querySelector('#prem-root, #prem-refresh')));
         };
         window.__premObs = new MutationObserver(function (recs) {
             if (recs.some(function (r) { return Array.from(r.addedNodes).some(relevant); })) setup();

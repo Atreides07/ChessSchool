@@ -30,9 +30,13 @@ else if (_isPremium)
 {
     <div class="card prem-card">
         <p class="prem-have">@Loc.T("premium.have")</p>
-        @* Внешний редирект на Customer Portal Paddle: отключаем enhanced-nav, иначе Blazor делает fetch
-           и не может последовать за 302 на чужой домен (CORS) — ссылка «зависает». *@
-        <a class="btn btn-sm btn-outline" href="/premium/portal" data-enhance-nav="false">@Loc.T("premium.manage")</a>
+        <div class="prem-actions">
+            @* Внешний редирект на Customer Portal Paddle: отключаем enhanced-nav, иначе Blazor делает fetch
+               и не может последовать за 302 на чужой домен (CORS) — ссылка «зависает». *@
+            <a class="btn btn-sm btn-outline" href="/premium/portal" data-enhance-nav="false">@Loc.T("premium.manage")</a>
+            @* Подтянуть статус из API (на случай отмены/изменения в портале) — premium.js навешивает обработчик. *@
+            <button id="prem-refresh" class="btn btn-sm btn-outline">@Loc.T("premium.refresh")</button>
+        </div>
     </div>
 }
 else

@@ -151,7 +151,8 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.IArenaGameArchiveClient
 
 // История и разбор партий (премиум-фича): клиент к ApiService + сервис разбора (Stockfish) + оркестратор.
 builder.Services.AddSingleton(sp => new ChessSchool.Arena.Services.ArenaGamesApiClient(
-    sp.GetRequiredService<IHttpClientFactory>(), internalApiKey));
+    sp.GetRequiredService<IHttpClientFactory>(), internalApiKey,
+    sp.GetRequiredService<ILogger<ChessSchool.Arena.Services.ArenaGamesApiClient>>()));
 builder.Services.AddSingleton<ChessSchool.Arena.Services.GameAnalysisService>();
 builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaReviewService>();
 

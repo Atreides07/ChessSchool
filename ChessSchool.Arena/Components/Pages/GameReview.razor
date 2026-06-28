@@ -1,18 +1,21 @@
 @page "/me/games/{Id:guid}"
-@* prerender:false — приватная страница под [Authorize], уже noindex (SEO не нужно). При prerender=true
-   компонент пытается разрешить интерактивный Task<AuthenticationState> во время статического prerender —
-   а он приходит только с интерактивным контуром → запрос виснет. В контуре auth-state доступен сразу. *@
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@rendermode InteractiveServer
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @using ChessSchool.Arena
 @using ChessSchool.Arena.Services
 @using ChessSchool.Contracts
-@using Microsoft.AspNetCore.Components.Authorization
 @using Color = ChessSchool.Contracts.PieceColor
 @inject ArenaReviewService Review
 @inject IPlayerEntitlements Entitlements
 @inject NavigationManager Nav
+@inject IHttpContextAccessor Http
+@inject PersistentComponentState State
 @implements IDisposable
+
+@* Данные партии грузим в SSR-фазе (там доступен HttpContext и работает HTTP к ApiService) и передаём
+   в интерактивный контур через PersistentComponentState. Контур НЕ делает HTTP на критическом пути —
+   иначе вызов из контура зависает (renderer SynchronizationContext). Разбор (премиум) считается в
+   контуре через Task.Run (вне sync-контекста) с таймаутом, чтобы никогда не подвешивать страницу. *@
 
 @* Разбор/реплей партии. Реплей доступен всем участникам; разбор движком (точность, классификация,
    лучшие ходы) — премиум. Холодный путь (просмотр своих партий) → серверный интерактив, без своего JS.
@@ -108,7 +111,6 @@ else
 
 @code {
     [Parameter] public Guid Id { get; set; }
-    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private ArenaGameDetail? _detail;
     private string _startFen = "";
@@ -117,38 +119,71 @@ else
     private bool _loaded, _premium, _analyzing, _analysisStarted;
     private GameAnalysisDto? _analysis;
     private string _sub = "";
+    private PersistingComponentStateSubscription _persist;
     private readonly CancellationTokenSource _cts = new();
+
+    // Снимок данных партии, переданный из SSR-фазы в интерактивный контур (без повторного HTTP в контуре).
+    private sealed record Snapshot(string Sub, ArenaGameDetail? Detail, bool Premium, GameAnalysisDto? Analysis);
 
     protected override async Task OnInitializedAsync()
     {
-        try
+        // Сохраняем загруженное при пререндере, чтобы контур взял готовое, а не ходил в ApiService сам.
+        _persist = State.RegisterOnPersisting(() =>
         {
-            if (AuthState is null) return;
-            _sub = (await AuthState).User.FindFirst("sub")?.Value ?? "";
-            if (string.IsNullOrEmpty(_sub)) return;
+            State.PersistAsJson(StateKey, new Snapshot(_sub, _detail, _premium, _analysis));
+            return Task.CompletedTask;
+        });
 
-            _detail = await Review.GetAsync(Id, _sub, _cts.Token);
-            if (_detail is null) return;
+        if (State.TryTakeFromJson<Snapshot>(StateKey, out var snap) && snap is not null)
+        {
+            // Интерактивный контур: данные уже посчитаны в SSR — берём их, без HTTP.
+            (_sub, _detail, _premium, _analysis) = (snap.Sub, snap.Detail, snap.Premium, snap.Analysis);
+        }
+        else
+        {
+            // SSR-фаза: HttpContext доступен, HTTP к ApiService работает — грузим тут.
+            _sub = Http.HttpContext?.User.FindFirst("sub")?.Value ?? "";
+            if (!string.IsNullOrEmpty(_sub))
+            {
+                _detail = await Review.GetAsync(Id, _sub, _cts.Token);
+                if (_detail is not null)
+                {
+                    _premium = await Entitlements.IsPremiumAsync(_sub, _cts.Token);
+                    if (_premium) _analysis = await Review.GetCachedAnalysisAsync(Id, _sub, _cts.Token);
+                }
+            }
+        }
 
+        if (_detail is not null)
+        {
             (_startFen, _plies) = GameReplay.FromPgn(_detail.Pgn);
             _ply = _plies.Count; // открываем на финальной позиции
-            _premium = await Entitlements.IsPremiumAsync(_sub, _cts.Token);
         }
-        finally { _loaded = true; }
+        _loaded = true;
     }
 
-    // Разбор запускаем после первого рендера (реплей виден сразу, анализ догружается ~секунды).
+    // Разбор (премиум) считаем в контуре, если кэша нет. Через Task.Run — вне renderer-sync-контекста
+    // (HTTP/движок не подвешивают контур) и с таймаутом: худший случай — «разбор недоступен», не зависание.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || !_premium || _detail is null || _analysisStarted) return;
+        if (!firstRender || !_premium || _detail is null || _analysis is not null || _analysisStarted) return;
         _analysisStarted = true;
         _analyzing = true;
         await InvokeAsync(StateHasChanged);
-        try { _analysis = await Review.GetOrComputeAnalysisAsync(Id, _sub, _cts.Token); }
-        catch (OperationCanceledException) { return; }
+
+        var pgn = _detail.Pgn;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(90));
+            _analysis = await Task.Run(() => Review.ComputeAnalysisAsync(Id, _sub, pgn, timeout.Token), timeout.Token);
+        }
+        catch (OperationCanceledException) { /* отмена/таймаут — оставим «недоступен» */ }
         finally { _analyzing = false; }
         await InvokeAsync(StateHasChanged);
     }
+
+    private const string StateKey = "review";
 
     private void Go(int ply) => _ply = Math.Clamp(ply, 0, _plies.Count);
 
@@ -201,7 +236,12 @@ else
         _ => "",
     };
 
-    public void Dispose() => _cts.Cancel();
+    public void Dispose()
+    {
+        _persist.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
 }
 
 <style>

@@ -47,16 +47,18 @@ public sealed class ArenaReviewService(
     public Task<ArenaGameDetail?> GetAsync(Guid id, string sub, CancellationToken ct)
         => api.GetAsync(id, sub, ct);
 
-    /// <summary>Разбор партии: из кэша, иначе считаем и кэшируем. null — игрок не участник/партии нет.</summary>
-    public async Task<GameAnalysisDto?> GetOrComputeAnalysisAsync(Guid id, string sub, CancellationToken ct)
+    /// <summary>Только кэш разбора (быстрый путь, без расчёта). null — кэша нет/не участник.</summary>
+    public Task<GameAnalysisDto?> GetCachedAnalysisAsync(Guid id, string sub, CancellationToken ct)
+        => api.GetCachedAnalysisAsync(id, sub, ct);
+
+    /// <summary>Разбор по уже известному PGN: из кэша, иначе считаем движком и кэшируем. PGN передаём, чтобы
+    /// не ходить в ApiService за партией повторно (вызывается из интерактивного контура).</summary>
+    public async Task<GameAnalysisDto?> ComputeAnalysisAsync(Guid id, string sub, string pgn, CancellationToken ct)
     {
         var cached = await api.GetCachedAnalysisAsync(id, sub, ct);
         if (cached is not null) return cached;
 
-        var game = await api.GetAsync(id, sub, ct);
-        if (game is null) return null;
-
-        var result = await analysis.AnalyzeAsync(game.Pgn, ct);
+        var result = await analysis.AnalyzeAsync(pgn, ct);
         if (result.EngineAvailable && result.Moves.Count > 0)
         {
             try { await api.SaveAnalysisAsync(id, result, ct); }

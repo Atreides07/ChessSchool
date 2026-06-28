@@ -56,13 +56,13 @@
         }
     }
 
-    function openCheckout(d, btn) {
+    function openCheckout(d, btn, price) {
         loadPaddle(function (ok) {
             if (!ok) { status('Не удалось загрузить Paddle (проверь сеть/блокировщик рекламы).'); return; }
             if (!initPaddle(d)) return;
             try {
                 window.Paddle.Checkout.open({
-                    items: [{ priceId: d.price, quantity: 1 }],
+                    items: [{ priceId: price || d.price, quantity: 1 }],
                     customData: { user_sub: d.sub },         // связь подписки с пользователем (в вебхуке)
                     settings: { successUrl: d.success }
                 });
@@ -70,6 +70,36 @@
                 status('Не удалось открыть оплату: ' + (e && e.message ? e.message : e));
             }
         });
+    }
+
+    // Выбор плана (месяц/год): .prem-plan.is-sel задаёт цену для чекаута. Без карточек — обычный d.price.
+    function selectedPrice(d) {
+        var sel = document.querySelector('.prem-plan.is-sel');
+        return (sel && sel.dataset.price) || d.price;
+    }
+    function wirePlans() {
+        var plans = document.querySelectorAll('.prem-plan');
+        plans.forEach(function (p) {
+            if (p.__wired) return; p.__wired = true;
+            p.onclick = function () { plans.forEach(function (x) { x.classList.remove('is-sel'); }); p.classList.add('is-sel'); };
+        });
+    }
+
+    // Реальные локализованные цены в карточки (best-effort): Paddle PricePreview. Сбой — карточки без сумм.
+    function fillPrices(d) {
+        if (!d.priceAnnual) return;
+        var ids = {}; document.querySelectorAll('.prem-plan').forEach(function (p) { if (p.dataset.price) ids[p.dataset.price] = p; });
+        var items = Object.keys(ids).map(function (id) { return { priceId: id, quantity: 1 }; });
+        if (!items.length || !window.Paddle.PricePreview) return;
+        window.Paddle.PricePreview({ items: items }).then(function (res) {
+            var li = res && res.data && res.data.details && res.data.details.lineItems;
+            if (!li) return;
+            li.forEach(function (item) {
+                var card = ids[item.price && item.price.id];
+                var amtEl = card && card.querySelector('[data-amt]');
+                if (amtEl && item.formattedTotals) amtEl.textContent = item.formattedTotals.total;
+            });
+        }).catch(function () { });
     }
 
     var TXN_KEY = 'prem_txn';
@@ -117,10 +147,11 @@
 
         if (d.mode === 'paddle') {
             if (!d.token || !d.price) { status('Не задан Paddle:ClientToken или PremiumPriceId.'); return; }
+            wirePlans();   // выбор месяц/год (если карточки есть)
             // Вешаем обработчик СРАЗУ — клик всегда реагирует; Paddle грузится лениво при первом клике.
-            btn.onclick = function () { openCheckout(d, btn); };
-            // Предзагрузка в фоне, чтобы первый клик открывался без паузы.
-            loadPaddle(function (ok) { if (ok) initPaddle(d); });
+            btn.onclick = function () { openCheckout(d, btn, selectedPrice(d)); };
+            // Предзагрузка в фоне + реальные цены в карточки, чтобы первый клик открывался без паузы.
+            loadPaddle(function (ok) { if (ok && initPaddle(d)) fillPrices(d); });
         } else {
             btn.onclick = async function () {
                 btn.disabled = true;

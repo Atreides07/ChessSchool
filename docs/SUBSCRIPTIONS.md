@@ -98,6 +98,20 @@ dotnet user-secrets set "Paddle:PremiumPriceId" "pri_01kw6rax9s5bfx03vyk5ccgnbz"
 dotnet user-secrets set "Paddle:Environment"    "sandbox"
 ```
 
+**Годовой план (опционально, для удержания).** Создай в Paddle вторую цену (annual) того же продукта со
+скидкой и задай её id в Arena. Тогда на `/premium` появляется выбор «Месяц / Год» (год выбран по
+умолчанию — меньше «точек продления» = меньше оттока), чекаут идёт по выбранному плану, реальные
+локализованные суммы подтягиваются Paddle PricePreview. Без этого ключа — один план, как раньше.
+
+```bash
+cd ChessSchool.Arena
+dotnet user-secrets set "Paddle:PremiumPriceIdAnnual" "<annual price_id>"
+dotnet user-secrets set "Paddle:AnnualNote"           "−17%"   # необязательный бейдж выгоды на карточке «Год»
+```
+
+«Пауза вместо отмены» включается в самом Paddle (Customer Portal) — отдельного кода не нужно: кнопка
+«Управление подпиской» уже ведёт в портал.
+
 Проверить: `dotnet user-secrets list --project ChessSchool.ApiService` и `--project ChessSchool.Arena`.
 
 - Ключ — через **двоеточие** (`Paddle:ClientToken`), это формат user-secrets (не `Paddle__…`, как в env).

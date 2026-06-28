@@ -43,6 +43,24 @@ else
 {
     <div class="card prem-card">
         <ul class="prem-perks"><li>@Loc.T("premium.perk")</li></ul>
+
+        @* Выбор плана (месяц/год) — только в режиме Paddle и если задан годовой price_id. Годовой выбран
+           по умолчанию: меньше «точек продления» = меньше оттока. Чекаут идёт по выбранному плану. *@
+        @if (_paddle && _hasAnnual)
+        {
+            <div class="prem-plans" role="radiogroup" aria-label="@Loc.T("premium.plan.choose")">
+                <button type="button" class="prem-plan" data-price="@_priceId" data-period="month">
+                    <span class="pp-name">@Loc.T("premium.plan.month")</span>
+                    <span class="pp-amt" data-amt></span>
+                </button>
+                <button type="button" class="prem-plan is-sel" data-price="@_priceAnnual" data-period="year">
+                    @if (!string.IsNullOrWhiteSpace(_annualNote)) { <span class="pp-badge">@_annualNote</span> }
+                    <span class="pp-name">@Loc.T("premium.plan.year")</span>
+                    <span class="pp-amt" data-amt></span>
+                </button>
+            </div>
+        }
+
         <div class="prem-actions">
             <button id="prem-buy" class="btn btn-primary">@(_paddle ? Loc.T("premium.buy") : Loc.T("premium.dev"))</button>
             @if (_paddle)
@@ -52,16 +70,16 @@ else
         </div>
         <p id="prem-status" class="prem-status" role="alert" hidden></p>
     </div>
-    @* Параметры для premium.js: режим (paddle/dev), client-токен/price/окружение и user_sub. *@
+    @* Параметры для premium.js: режим (paddle/dev), client-токен/price (месяц)/годовой price/окружение, user_sub. *@
     <div id="prem-root" hidden
          data-mode="@(_paddle ? "paddle" : "dev")"
-         data-token="@_token" data-price="@_priceId" data-env="@_env"
+         data-token="@_token" data-price="@_priceId" data-price-annual="@_priceAnnual" data-env="@_env"
          data-sub="@_sub" data-success="@($"{Nav.BaseUri}premium")"></div>
 }
 
 @code {
-    private bool _authed, _isPremium, _paddle;
-    private string _sub = "", _token = "", _priceId = "", _env = "sandbox";
+    private bool _authed, _isPremium, _paddle, _hasAnnual;
+    private string _sub = "", _token = "", _priceId = "", _priceAnnual = "", _annualNote = "", _env = "sandbox";
 
     protected override async Task OnInitializedAsync()
     {
@@ -70,8 +88,11 @@ else
         _sub = user?.FindFirst("sub")?.Value ?? "";
         _token = Config["Paddle:ClientToken"] ?? "";
         _priceId = Config["Paddle:PremiumPriceId"] ?? "";
+        _priceAnnual = Config["Paddle:PremiumPriceIdAnnual"] ?? ""; // годовой план (необязателен)
+        _annualNote = Config["Paddle:AnnualNote"] ?? "";            // бейдж выгоды, напр. «−17%» / «2 мес. в подарок»
         _env = Config["Paddle:Environment"] ?? "sandbox";
         _paddle = !string.IsNullOrWhiteSpace(_token) && !string.IsNullOrWhiteSpace(_priceId);
+        _hasAnnual = !string.IsNullOrWhiteSpace(_priceAnnual);
         if (_authed) _isPremium = await Entitlements.IsPremiumAsync(_sub);
     }
 }
@@ -85,4 +106,15 @@ else
     .prem-perks li { margin: .2rem 0; }
     .prem-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
     .prem-status { margin: .8rem 0 0; font-size: .88rem; color: var(--danger, #c0392b); }
+
+    /* Выбор плана: месяц/год; выбранный — акцентная рамка, годовой по умолчанию */
+    .prem-plans { display: flex; gap: .6rem; margin: 0 0 1rem; }
+    .prem-plan { position: relative; flex: 1; text-align: left; cursor: pointer; padding: .7rem .8rem;
+        border: 2px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); }
+    .prem-plan:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .prem-plan.is-sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+    .pp-name { display: block; font-weight: 700; }
+    .pp-amt { display: block; color: var(--ink-2); font-size: .9rem; font-variant-numeric: tabular-nums; min-height: 1.1em; }
+    .pp-badge { position: absolute; top: -9px; right: 8px; font-size: .66rem; font-weight: 800; letter-spacing: .02em;
+        text-transform: uppercase; color: #6e5200; background: #fff3cf; border: 1px solid #e0ad00; border-radius: var(--r-pill); padding: .05rem .4rem; }
 </style>

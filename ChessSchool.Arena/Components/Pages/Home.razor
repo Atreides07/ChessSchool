@@ -169,7 +169,7 @@ else
                                 </div>
                                 <div class="tlb-sub">
                                     <span>@b.Time</span>
-                                    <span class="tlb-pop">@b.Humans 👤 @b.Bots 🤖</span>
+                                    <span class="tlb-pop">@b.Humans 👤@(b.Bots > 0 ? $" {b.Bots} 🤖" : "")</span>
                                 </div>
                             </a>
                         }

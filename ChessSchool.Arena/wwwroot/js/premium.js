@@ -13,7 +13,30 @@
         document.head.appendChild(s);
     }
 
+    // После возврата с checkout Paddle добавляет ?_ptxn=... в URL. Сверяем статус из API (reconcile),
+    // чтобы премиум активировался, даже если вебхук не дошёл; затем чистим URL и перечитываем страницу.
+    function reconcileOnReturn() {
+        if (window.__premReconciled) return;
+        var txn = new URLSearchParams(location.search).get('_ptxn');
+        if (!txn) return;
+        window.__premReconciled = true;
+        fetch('/premium/reconcile?txn=' + encodeURIComponent(txn), { method: 'POST' })
+            .finally(function () { location.replace(location.pathname); });
+    }
+
     function setup() {
+        reconcileOnReturn();
+
+        var refresh = document.getElementById('prem-refresh');
+        if (refresh && !refresh.__wired) {
+            refresh.__wired = true;
+            refresh.onclick = async function () {
+                refresh.disabled = true;
+                try { await fetch('/premium/reconcile', { method: 'POST' }); } catch (e) { }
+                location.href = '/premium';
+            };
+        }
+
         var root = document.getElementById('prem-root');
         var btn = document.getElementById('prem-buy');
         if (!root || !btn || btn.__wired) return;

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ChessSchool.ApiService.Services.Billing;
 using ChessSchool.Contracts;
 
@@ -108,6 +109,22 @@ public class PaddleWebhookTests
     {
         const string body = """{"event_id":"e","event_type":"transaction.completed","data":{"id":"txn_1"}}""";
         Assert.False(PaddleWebhook.TryParse(body, out _));
+    }
+
+    [Fact]
+    public void TryMapSubscription_FromApiObject()
+    {
+        // Объект подписки из ответа GET /subscriptions/{id} (тот же shape, что data в вебхуке) — для reconcile.
+        using var doc = JsonDocument.Parse("""
+        {"id":"sub_9","status":"active","customer_id":"ctm_9",
+         "current_billing_period":{"ends_at":"2031-05-01T00:00:00Z"},
+         "items":[{"price":{"id":"pri_x"}}],"custom_data":{"user_sub":"u9"}}
+        """);
+        Assert.True(PaddleWebhook.TryMapSubscription(doc.RootElement, "reconcile-sub_9", out var ev));
+        Assert.Equal("u9", ev!.UserSub);
+        Assert.Equal(SubscriptionStatus.Active, ev.Status);
+        Assert.Equal("sub_9", ev.ProviderSubscriptionId);
+        Assert.Equal("ctm_9", ev.ProviderCustomerId);
     }
 
     [Fact]

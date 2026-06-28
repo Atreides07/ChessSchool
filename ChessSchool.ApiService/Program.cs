@@ -257,6 +257,27 @@ app.MapGet("/internal/subscriptions/{sub}/portal", async (string sub, HttpReques
     return Results.Ok(new PortalLinkDto(url));
 });
 
+// Вытягивание статуса (reconcile из API провайдера, если вебхук не дошёл) по сохранённой подписке.
+app.MapPost("/internal/subscriptions/{sub}/refresh", async (string sub, HttpRequest http,
+    SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var subId = await subsSvc.GetProviderSubscriptionIdAsync(sub, ct);
+    if (!string.IsNullOrEmpty(subId) && await billing.FetchSubscriptionAsync(subId, ct) is { } state)
+        await subsSvc.ReconcileAsync(state, ct);
+    return Results.Ok(await subsSvc.GetAsync(sub, ct));
+});
+
+// Reconcile по transaction id из success-URL checkout — активирует премиум без вебхука (user_sub из txn).
+app.MapPost("/internal/subscriptions/reconcile-transaction", async (ReconcileTxnRequest req, HttpRequest http,
+    SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
+{
+    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
+    var state = await billing.FetchByTransactionAsync(req.TransactionId, ct);
+    if (state is not null) await subsSvc.ReconcileAsync(state, ct);
+    return Results.Ok(state is null ? null : await subsSvc.GetAsync(state.UserSub, ct));
+});
+
 // Dev-активация премиума без провайдера (только Development) — локальный тест гейтинга.
 if (app.Environment.IsDevelopment())
 {

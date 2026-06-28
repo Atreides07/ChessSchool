@@ -28,6 +28,9 @@ public sealed record DevActivateRequest(string UserSub, string? Plan = null);
 /// <summary>Ссылка на hosted Customer Portal провайдера (отмена/смена карты). Url=null — недоступно.</summary>
 public sealed record PortalLinkDto(string? Url);
 
+/// <summary>Запрос reconcile по transaction id из success-URL checkout (`_ptxn`).</summary>
+public sealed record ReconcileTxnRequest(string TransactionId);
+
 /// <summary>Нормализованное событие биллинга (из вебхука провайдера или dev-активации) → состояние.</summary>
 public sealed record BillingEventDto(
     string EventId,                       // id события провайдера — идемпотентность

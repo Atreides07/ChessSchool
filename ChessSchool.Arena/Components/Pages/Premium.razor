@@ -37,7 +37,13 @@ else
 {
     <div class="card prem-card">
         <ul class="prem-perks"><li>@Loc.T("premium.perk")</li></ul>
-        <button id="prem-buy" class="btn btn-primary">@(_paddle ? Loc.T("premium.buy") : Loc.T("premium.dev"))</button>
+        <div class="prem-actions">
+            <button id="prem-buy" class="btn btn-primary">@(_paddle ? Loc.T("premium.buy") : Loc.T("premium.dev"))</button>
+            @if (_paddle)
+            {
+                <button id="prem-refresh" class="btn btn-sm btn-outline">@Loc.T("premium.refresh")</button>
+            }
+        </div>
     </div>
     @* Параметры для premium.js: режим (paddle/dev), client-токен/price/окружение и user_sub. *@
     <div id="prem-root" hidden
@@ -70,4 +76,5 @@ else
     .prem-have { font-weight: 700; color: var(--success); margin: 0; }
     .prem-perks { margin: 0 0 1rem; padding-left: 1.1rem; color: var(--ink-2); }
     .prem-perks li { margin: .2rem 0; }
+    .prem-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 </style>

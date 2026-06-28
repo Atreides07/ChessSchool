@@ -63,6 +63,21 @@ public class SubscriptionServiceTests
     }
 
     [Fact]
+    public async Task Reconcile_AppliesLatestState_WithoutEventDedup()
+    {
+        using var db = NewDb();
+        var svc = Svc(db);
+        // «Вытягивание»: применяем состояние из API напрямую (вебхука не было).
+        await svc.ReconcileAsync(new BillingEventDto("ignored", "u", SubscriptionStatus.Active, "premium",
+            CurrentPeriodEnd: DateTimeOffset.UtcNow.AddDays(5)));
+        Assert.True((await svc.GetAsync("u")).IsPremium);
+
+        // Повторный reconcile меняет статус (дедупа по EventId нет — всегда актуальное состояние).
+        await svc.ReconcileAsync(new BillingEventDto("ignored", "u", SubscriptionStatus.Canceled));
+        Assert.False((await svc.GetAsync("u")).IsPremium);
+    }
+
+    [Fact]
     public async Task UnknownUser_IsNotPremium()
     {
         using var db = NewDb();

@@ -20,20 +20,7 @@ public sealed class SubscriptionService(SchoolDbContext db, ILogger<Subscription
             return false; // уже обработано
 
         db.ProcessedBillingEvents.Add(new ProcessedBillingEvent { EventId = e.EventId });
-
-        var sub = await db.Subscriptions.FirstOrDefaultAsync(s => s.UserSub == e.UserSub, ct);
-        if (sub is null)
-        {
-            sub = new Subscription { UserSub = e.UserSub };
-            db.Subscriptions.Add(sub);
-        }
-        sub.Status = e.Status;
-        sub.Plan = e.Plan ?? sub.Plan;
-        sub.ProviderSubscriptionId = e.ProviderSubscriptionId ?? sub.ProviderSubscriptionId;
-        sub.ProviderCustomerId = e.ProviderCustomerId ?? sub.ProviderCustomerId;
-        sub.PriceId = e.PriceId ?? sub.PriceId;
-        sub.CurrentPeriodEnd = e.CurrentPeriodEnd ?? sub.CurrentPeriodEnd;
-        sub.UpdatedAt = DateTimeOffset.UtcNow;
+        await UpsertAsync(e, ct);
 
         try
         {
@@ -48,6 +35,39 @@ public sealed class SubscriptionService(SchoolDbContext db, ILogger<Subscription
             return false;
         }
     }
+
+    /// <summary>
+    /// «Вытягивание»: применяет состояние, полученное напрямую из API провайдера (если вебхук не дошёл/
+    /// опоздал). Без дедупа по EventId — всегда отражаем актуальное состояние (upsert, last-write-wins).
+    /// </summary>
+    public async Task ReconcileAsync(BillingEventDto state, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(state.UserSub)) return;
+        await UpsertAsync(state, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task UpsertAsync(BillingEventDto e, CancellationToken ct)
+    {
+        var sub = await db.Subscriptions.FirstOrDefaultAsync(s => s.UserSub == e.UserSub, ct);
+        if (sub is null)
+        {
+            sub = new Subscription { UserSub = e.UserSub };
+            db.Subscriptions.Add(sub);
+        }
+        sub.Status = e.Status;
+        sub.Plan = e.Plan ?? sub.Plan;
+        sub.ProviderSubscriptionId = e.ProviderSubscriptionId ?? sub.ProviderSubscriptionId;
+        sub.ProviderCustomerId = e.ProviderCustomerId ?? sub.ProviderCustomerId;
+        sub.PriceId = e.PriceId ?? sub.PriceId;
+        sub.CurrentPeriodEnd = e.CurrentPeriodEnd ?? sub.CurrentPeriodEnd;
+        sub.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Id подписки у провайдера (для reconcile по сохранённой подписке). null — нет подписки.</summary>
+    public Task<string?> GetProviderSubscriptionIdAsync(string userSub, CancellationToken ct = default) =>
+        db.Subscriptions.AsNoTracking().Where(s => s.UserSub == userSub)
+            .Select(s => s.ProviderSubscriptionId).FirstOrDefaultAsync(ct);
 
     public async Task<SubscriptionDto> GetAsync(string userSub, CancellationToken ct = default)
     {

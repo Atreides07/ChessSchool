@@ -67,6 +67,7 @@ public static class Loc
         ["premium.dev"] = ("Активировать (dev)", "Activate (dev)"),
         ["premium.badge"] = ("Premium", "Premium"),
         ["premium.manage"] = ("Управление подпиской", "Manage subscription"),
+        ["premium.refresh"] = ("Обновить статус", "Refresh status"),
         ["admin.bt.title"] = ("Бренд-турниры", "Brand tournaments"),
         ["admin.bt.new"] = ("Добавить бренд-турнир", "Add brand tournament"),
         ["admin.bt.edit"] = ("Редактирование бренд-турнира", "Edit brand tournament"),

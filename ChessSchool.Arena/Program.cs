@@ -231,6 +231,22 @@ app.MapGet("/premium/portal", async (HttpContext ctx, IHttpClientFactory http, C
     return Results.Redirect("/premium"); // портал недоступен (dev/нет клиента) — назад
 }).RequireAuthorization();
 
+// Вытягивание статуса: после возврата с checkout (есть txn) reconcile по транзакции, иначе — refresh
+// по сохранённой подписке. Спасает, если вебхук Paddle не дошёл/опоздал.
+app.MapPost("/premium/reconcile", async (HttpContext ctx, string? txn, IHttpClientFactory http, CancellationToken ct) =>
+{
+    var sub = ctx.User.FindFirst("sub")?.Value;
+    if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
+    var client = http.CreateClient(ChessSchool.Arena.Services.PlayerEntitlements.HttpClientName);
+    using var req = string.IsNullOrEmpty(txn)
+        ? new HttpRequestMessage(HttpMethod.Post, $"/internal/subscriptions/{Uri.EscapeDataString(sub)}/refresh")
+        : new HttpRequestMessage(HttpMethod.Post, "/internal/subscriptions/reconcile-transaction")
+        { Content = System.Net.Http.Json.JsonContent.Create(new ChessSchool.Contracts.ReconcileTxnRequest(txn)) };
+    req.Headers.Add("X-Internal-Key", internalApiKey);
+    try { await client.SendAsync(req, ct); } catch { /* недоступность ApiService — не падаем */ }
+    return Results.Ok();
+}).RequireAuthorization().DisableAntiforgery();
+
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
 app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));
 

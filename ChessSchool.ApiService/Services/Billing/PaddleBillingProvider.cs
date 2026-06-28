@@ -30,6 +30,55 @@ public sealed class PaddleBillingProvider(PaddleOptions options, IHttpClientFact
         new(Name, DevAutoActivate: false, ClientToken: options.ClientToken, PriceId: options.PremiumPriceId,
             CustomData: userSub, Environment: options.Environment);
 
+    /// <summary>Вытягивает текущее состояние подписки из Paddle (GET /subscriptions/{id}) — reconcile,
+    /// если вебхук не пришёл/опоздал. null — не нашли/нет ключа/ошибка.</summary>
+    public async Task<BillingEventDto?> FetchSubscriptionAsync(string subscriptionId, CancellationToken ct = default)
+    {
+        var json = await GetAsync($"/subscriptions/{subscriptionId}", ct);
+        if (json is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("data", out var data)
+                && PaddleWebhook.TryMapSubscription(data, $"reconcile-{subscriptionId}", out var ev) ? ev : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>По transaction id (из success-URL checkout, `_ptxn`) находит подписку и вытягивает её
+    /// состояние — активирует премиум, даже если вебхук активации не дошёл.</summary>
+    public async Task<BillingEventDto?> FetchByTransactionAsync(string transactionId, CancellationToken ct = default)
+    {
+        var json = await GetAsync($"/transactions/{transactionId}", ct);
+        if (json is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return null;
+            var subId = PaddleWebhook.Field(data, "subscription_id");
+            return string.IsNullOrEmpty(subId) ? null : await FetchSubscriptionAsync(subId, ct);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private async Task<string?> GetAsync(string path, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(options.ApiKey)) return null;
+        try
+        {
+            var client = httpFactory.CreateClient(HttpClientName);
+            using var req = new HttpRequestMessage(HttpMethod.Get, path);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);
+            using var resp = await client.SendAsync(req, ct);
+            return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync(ct) : null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Paddle GET {Path} не удался.", path);
+            return null;
+        }
+    }
+
     /// <summary>Создаёт сессию Customer Portal (Paddle API) и возвращает общий URL обзора подписки.</summary>
     public async Task<string?> CreatePortalUrlAsync(string providerCustomerId, CancellationToken ct = default)
     {
@@ -98,7 +147,7 @@ public static class PaddleWebhook
         return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(computed), Encoding.UTF8.GetBytes(h1));
     }
 
-    /// <summary>Разбирает событие subscription.* в нормализованное BillingEventDto. false — событие не про подписку/без user_sub.</summary>
+    /// <summary>Разбирает событие subscription.* вебхука в нормализованное BillingEventDto.</summary>
     public static bool TryParse(string body, out BillingEventDto? ev)
     {
         ev = null;
@@ -109,37 +158,48 @@ public static class PaddleWebhook
             var eventId = Str(root, "event_id");
             var type = Str(root, "event_type") ?? "";
             if (string.IsNullOrEmpty(eventId) || !type.StartsWith("subscription.")) return false;
-            if (!root.TryGetProperty("data", out var data)) return false;
-
-            var mapped = MapStatus(Str(data, "status"));
-            if (mapped is null) return false;
-
-            // user_sub передаём в custom_data при checkout — связывает подписку с пользователем.
-            string? userSub = null;
-            if (data.TryGetProperty("custom_data", out var cd) && cd.ValueKind == JsonValueKind.Object)
-                userSub = Str(cd, "user_sub");
-            if (string.IsNullOrEmpty(userSub)) return false;
-
-            string? priceId = null;
-            if (data.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array
-                && items.GetArrayLength() > 0 && items[0].TryGetProperty("price", out var price))
-                priceId = Str(price, "id");
-
-            DateTimeOffset? periodEnd = null;
-            if (data.TryGetProperty("current_billing_period", out var cbp) && cbp.ValueKind == JsonValueKind.Object
-                && Str(cbp, "ends_at") is { } ends && DateTimeOffset.TryParse(ends, out var pe))
-                periodEnd = pe;
-
-            ev = new BillingEventDto(eventId!, userSub!, mapped.Value, "premium",
-                ProviderSubscriptionId: Str(data, "id"), ProviderCustomerId: Str(data, "customer_id"),
-                PriceId: priceId, CurrentPeriodEnd: periodEnd);
-            return true;
+            return root.TryGetProperty("data", out var data) && TryMapSubscription(data, eventId!, out ev);
         }
         catch (JsonException)
         {
             return false;
         }
     }
+
+    /// <summary>
+    /// Маппит объект subscription (из вебхука или ответа GET /subscriptions/{id}) в BillingEventDto.
+    /// Общий код для вебхука и «вытягивания» статуса из API (reconcile). false — нет статуса/user_sub.
+    /// </summary>
+    public static bool TryMapSubscription(JsonElement data, string eventId, out BillingEventDto? ev)
+    {
+        ev = null;
+        var mapped = MapStatus(Str(data, "status"));
+        if (mapped is null) return false;
+
+        // user_sub передаём в custom_data при checkout — связывает подписку с пользователем.
+        string? userSub = null;
+        if (data.TryGetProperty("custom_data", out var cd) && cd.ValueKind == JsonValueKind.Object)
+            userSub = Str(cd, "user_sub");
+        if (string.IsNullOrEmpty(userSub)) return false;
+
+        string? priceId = null;
+        if (data.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array
+            && items.GetArrayLength() > 0 && items[0].TryGetProperty("price", out var price))
+            priceId = Str(price, "id");
+
+        DateTimeOffset? periodEnd = null;
+        if (data.TryGetProperty("current_billing_period", out var cbp) && cbp.ValueKind == JsonValueKind.Object
+            && Str(cbp, "ends_at") is { } ends && DateTimeOffset.TryParse(ends, out var pe))
+            periodEnd = pe;
+
+        ev = new BillingEventDto(eventId, userSub!, mapped.Value, "premium",
+            ProviderSubscriptionId: Str(data, "id"), ProviderCustomerId: Str(data, "customer_id"),
+            PriceId: priceId, CurrentPeriodEnd: periodEnd);
+        return true;
+    }
+
+    /// <summary>Достаёт строковое поле верхнего уровня (для разбора ответов API).</summary>
+    public static string? Field(JsonElement e, string prop) => Str(e, prop);
 
     private static string? Str(JsonElement e, string prop) =>
         e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

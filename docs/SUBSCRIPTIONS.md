@@ -20,6 +20,10 @@
   ([PlayerEntitlements](../ChessSchool.Arena/Services/PlayerEntitlements.cs), кэш на ноду), бейдж
   «Premium» у текущего игрока в навигации; хук `IsPremiumAsync(sub)` для гейтинга любых фич.
 - ✅ Customer Portal: `/premium/portal` → сессия hosted-портала Paddle (отмена/смена карты).
+- ✅ Reconcile (если вебхук не дошёл): авто-сверка после оплаты по `_ptxn` из success-URL
+  (`GET /transactions` → `GET /subscriptions` → применить), кнопка «Обновить статус» и эндпоинт
+  `POST /internal/subscriptions/{sub}/refresh` (по сохранённой подписке). Вытягивание не зависит от
+  дедупа событий — всегда отражает актуальное состояние из API Paddle.
 
 Премиум-статус **других** игроков не показывается (приватность) — бейдж виден только самому
 пользователю в его навигации. `IsPremiumAsync(sub)` гейтит фичи по текущему пользователю.

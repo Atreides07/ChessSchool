@@ -237,6 +237,36 @@ if (app.Environment.IsDevelopment())
     }).RequireAuthorization().DisableAntiforgery();
 }
 
+// Данные партии для тонкого клиента страницы /me/games/{id}: позиции (стартовый FEN + FEN/ход после
+// каждого полухода), имена, премиум-статус и кэш разбора. Грузится браузером (fetch) — НЕ в рендере
+// Blazor-компонента (там исходящий HTTP зависает; здесь обычный request-контекст — работает).
+app.MapGet("/api/me/games/{id:guid}", async (Guid id, HttpContext ctx,
+    ChessSchool.Arena.Services.ArenaReviewService review,
+    ChessSchool.Arena.Services.IPlayerEntitlements ents, CancellationToken ct) =>
+{
+    var sub = ctx.User.FindFirst("sub")?.Value;
+    if (string.IsNullOrEmpty(sub)) return Results.Unauthorized();
+    var detail = await review.GetAsync(id, sub, ct);
+    if (detail is null) return Results.NotFound();
+
+    var (startFen, plies) = ChessSchool.Arena.Services.GameReplay.FromPgn(detail.Pgn);
+    var premium = await ents.IsPremiumAsync(sub, ct);
+    var analysis = premium ? await review.GetCachedAnalysisAsync(id, sub, ct) : null;
+
+    return Results.Ok(new
+    {
+        startFen,
+        plies = plies.Select(p => new { fen = p.Fen, san = p.San, from = p.From, to = p.To }),
+        myColor = detail.MyColor == ChessSchool.Contracts.PieceColor.White ? "w" : "b",
+        whiteName = detail.WhiteName,
+        blackName = detail.BlackName,
+        whiteIsBot = detail.WhiteIsBot,
+        blackIsBot = detail.BlackIsBot,
+        premium,
+        analysis,
+    });
+}).RequireAuthorization();
+
 // Разбор партии для тонкого клиента страницы /me/games/{id}: считается в обычном request-контексте
 // (Stockfish/HTTP к ApiService тут работают, в отличие от Blazor-рендерера), кэшируется в ApiService.
 // Премиум-фича → гейт по подписке; только участник (GetAsync вернёт null постороннему).

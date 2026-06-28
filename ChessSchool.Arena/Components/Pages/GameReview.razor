@@ -2,271 +2,238 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @using System.Text.Json
 @using ChessSchool.Arena
-@using ChessSchool.Arena.Services
-@using ChessSchool.Contracts
-@inject ArenaReviewService Review
-@inject IPlayerEntitlements Entitlements
-@inject IHttpContextAccessor Http
 
-@* Разбор/реплей партии — ТОНКИЙ КЛИЕНТ (как /play): статический SSR-каркас, данные партии грузятся на
-   сервере в обычном request-контексте (HTTP к ApiService там работает; из Blazor-рендерера он зависал).
-   Доска, навигация по ходам и подгрузка разбора — в браузере на chess.js. Никакого серверного контура
-   на зрителя (масштаб). Приватная страница → noindex. *@
+@* Разбор/реплей партии — ЧИСТЫЙ ТОНКИЙ КЛИЕНТ. Документ страницы — статический каркас БЕЗ серверного
+   HTTP (исходящий HTTP из рендера Blazor-компонента в этом окружении зависает). Все данные (позиции,
+   имена, разбор) браузер тянет с обычных minimal-API эндпоинтов /api/me/games/{id}[/analysis], которые
+   работают в обычном request-контексте. Доска рисуется из FEN без внешних библиотек. Приватная → noindex. *@
 
 <PageTitle>@Loc.T("review.title") — ChessArena</PageTitle>
 <HeadContent><meta name="robots" content="noindex" /></HeadContent>
 
 <a class="rv-back" href="/me/games">← @Loc.T("review.back")</a>
 
-@if (_detail is null)
-{
-    <p class="text-secondary">@Loc.T("games.empty")</p>
-}
-else
-{
-    <div class="rv">
-        <div class="rv-board-col">
-            <div class="rv-player" id="rv-top"></div>
-            <div class="board-wrap"><div id="rv-board" class="board"></div></div>
-            <div class="rv-player" id="rv-bottom"></div>
-            <div class="rv-controls">
-                <button class="btn btn-sm btn-outline" id="rv-first" aria-label="⏮">⏮</button>
-                <button class="btn btn-sm btn-outline" id="rv-prev" aria-label="◀">◀</button>
-                <span class="rv-ply" id="rv-counter">0 / 0</span>
-                <button class="btn btn-sm btn-outline" id="rv-next" aria-label="▶">▶</button>
-                <button class="btn btn-sm btn-outline" id="rv-last" aria-label="⏭">⏭</button>
-            </div>
-        </div>
+<div id="rv-loading" class="text-secondary">@Loc.T("review.loading")</div>
 
-        <div class="rv-side">
-            <div id="rv-analysis"></div>
-            <div class="rv-moves" id="rv-moves"></div>
+<div class="rv" id="rv-main" hidden>
+    <div class="rv-board-col">
+        <div class="rv-player" id="rv-top"></div>
+        <div class="board-wrap"><div id="rv-board" class="board"></div></div>
+        <div class="rv-player" id="rv-bottom"></div>
+        <div class="rv-controls">
+            <button class="btn btn-sm btn-outline" id="rv-first" aria-label="⏮">⏮</button>
+            <button class="btn btn-sm btn-outline" id="rv-prev" aria-label="◀">◀</button>
+            <span class="rv-ply" id="rv-counter">0 / 0</span>
+            <button class="btn btn-sm btn-outline" id="rv-next" aria-label="▶">▶</button>
+            <button class="btn btn-sm btn-outline" id="rv-last" aria-label="⏭">⏭</button>
         </div>
     </div>
+    <div class="rv-side">
+        <div id="rv-analysis"></div>
+        <div class="rv-moves" id="rv-moves"></div>
+    </div>
+</div>
 
-    <script type="module">
-        const CFG = @((MarkupString)JsonSerializer.Serialize(_cfg, JsonOpts));
-
-        // Позиции готовы с сервера (без внешнего chess.js): fens[k] = позиция после k полуходов.
-        const plies = CFG.plies || [];
-        const fens = [CFG.startFen, ...plies.map(p => p.fen)];
-        const froms = [null, ...plies.map(p => p.from)];
-        const tos = [null, ...plies.map(p => p.to)];
-        const sans = [null, ...plies.map(p => p.san)];
-        const total = plies.length;
-
-        const flip = CFG.myColor === 'b';
-        let ply = total;                   // открываем на финальной позиции
-        let analysis = CFG.analysis;       // может быть null → подгрузим (премиум)
-
-        const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-        // Фигура из символа FEN: верхний регистр — белые (w), нижний — чёрные (b); тип = буква в верхнем.
-        const pieceImg = (ch) => {
-            const color = ch === ch.toUpperCase() ? 'w' : 'b';
-            return `<img class="cp" draggable="false" alt="" src="_content/ChessSchool.Design/pieces/${color}${ch.toUpperCase()}.svg">`;
-        };
-        // FEN → { square: pieceChar } по первому полю (расстановка), ранги сверху (8) вниз (1).
-        function parseFen(fen) {
-            const map = {};
-            const rows = (fen || '').split(' ')[0].split('/');
-            for (let r = 0; r < 8; r++) {
-                let file = 0;
-                for (const ch of rows[r] || '') {
-                    if (ch >= '1' && ch <= '8') { file += +ch; }
-                    else { map[files[file] + (8 - r)] = ch; file++; }
-                }
-            }
-            return map;
-        }
-        const botTag = `<span class="bot-tag">${esc(CFG.loc.bot)}</span>`;
-
-        const boardEl = document.getElementById('rv-board');
-        const movesEl = document.getElementById('rv-moves');
-        const analysisEl = document.getElementById('rv-analysis');
-        const counterEl = document.getElementById('rv-counter');
-        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-        const cells = {}, coordHtml = {};
-
-        function buildBoard() {
-            boardEl.innerHTML = '';
-            const ranks = flip ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
-            const cols = flip ? [...files].reverse() : files;
-            for (const r of ranks) for (const f of cols) {
-                const sq = f + r, dark = (files.indexOf(f) + r) % 2 === 0;
-                const el = document.createElement('div');
-                el.className = 'sq ' + (dark ? 'dark' : 'light');
-                let cd = '';
-                const tone = dark ? 'on-dark' : 'on-light';
-                if (f === cols[0]) cd += `<span class="coord rank ${tone}">${r}</span>`;
-                if (r === ranks[ranks.length - 1]) cd += `<span class="coord file ${tone}">${f}</span>`;
-                coordHtml[sq] = cd;
-                boardEl.appendChild(el);
-                cells[sq] = el;
-            }
-        }
-
-        function renderBoard() {
-            const pos = parseFen(fens[ply]);
-            for (const f of files) for (let r = 1; r <= 8; r++) {
-                const sq = f + r, el = cells[sq], ch = pos[sq];
-                el.innerHTML = coordHtml[sq] + (ch ? pieceImg(ch) : '');
-                el.classList.remove('hl');
-            }
-            if (froms[ply] && cells[froms[ply]]) cells[froms[ply]].classList.add('hl');
-            if (tos[ply] && cells[tos[ply]]) cells[tos[ply]].classList.add('hl');
-            counterEl.textContent = `${ply} / ${total}`;
-        }
-
-        // Имена: сверху соперник, снизу я (ориентация как на живой доске).
-        function renderPlayers() {
-            const meWhite = CFG.myColor === 'w';
-            const top = meWhite
-                ? { name: CFG.blackName, bot: CFG.blackIsBot }
-                : { name: CFG.whiteName, bot: CFG.whiteIsBot };
-            const bottom = meWhite
-                ? { name: CFG.whiteName, bot: CFG.whiteIsBot }
-                : { name: CFG.blackName, bot: CFG.blackIsBot };
-            document.getElementById('rv-top').innerHTML = esc(top.name) + (top.bot ? botTag : '');
-            document.getElementById('rv-bottom').innerHTML = esc(bottom.name) + (bottom.bot ? botTag : '');
-        }
-
-        const QSYM = { 2: '?!', 3: '?', 4: '??' };
-        const QCLS = { 0: 'q-best', 2: 'q-inacc', 3: 'q-mist', 4: 'q-blun' };
-        const qualityAt = (i) => (analysis && analysis.moves && i >= 1 && i <= analysis.moves.length)
-            ? analysis.moves[i - 1].quality : null;
-
-        function renderMoves() {
-            let html = '';
-            for (let i = 1; i <= total; i++) {
-                if ((i % 2) === 1) html += `<span class="rv-num">${(i + 1) / 2 | 0}.</span>`;
-                const q = qualityAt(i);
-                const sym = (q != null && QSYM[q]) ? `<span class="rv-q ${QCLS[q] || ''}">${QSYM[q]}</span>` : '';
-                html += `<button class="rv-move ${i === ply ? 'on' : ''}" data-ply="${i}">${esc(sans[i])}${sym}</button>`;
-            }
-            movesEl.innerHTML = html;
-            movesEl.querySelectorAll('.rv-move').forEach(b => b.onclick = () => go(+b.dataset.ply));
-        }
-
-        function evalText(m) {
-            if (m.mateIn != null) return m.mateIn > 0 ? `#${m.mateIn}` : `#-${Math.abs(m.mateIn)}`;
-            const v = m.scoreCp / 100;
-            return (v > 0 ? '+' : v < 0 ? '' : '') + v.toFixed(1);
-        }
-
-        function renderAnalysis() {
-            if (!CFG.premium) {
-                analysisEl.innerHTML =
-                    `<div class="card rv-upsell"><p>${esc(CFG.loc.premiumonly)}</p>` +
-                    `<a class="btn btn-primary btn-sm" href="/premium">${esc(CFG.loc.premiumcta)}</a></div>`;
-                return;
-            }
-            if (analysis === 'loading') { analysisEl.innerHTML = `<div class="rv-status">${esc(CFG.loc.analyzing)}</div>`; return; }
-            if (!analysis || !analysis.engineAvailable || !analysis.moves || !analysis.moves.length) {
-                analysisEl.innerHTML = `<div class="rv-status">${esc(CFG.loc.unavailable)}</div>`;
-                return;
-            }
-            const a = analysis;
-            let html =
-                `<div class="rv-acc">` +
-                `<div class="rv-acc-cell"><span class="rv-acc-num">${Math.round(a.whiteAccuracy)}%</span><span class="rv-acc-lbl">${esc(CFG.whiteName)}</span></div>` +
-                `<div class="rv-acc-cell"><span class="rv-acc-num">${Math.round(a.blackAccuracy)}%</span><span class="rv-acc-lbl">${esc(CFG.blackName)}</span></div>` +
-                `</div>` +
-                `<div class="rv-counts">${a.whiteInaccuracies} ${esc(CFG.loc.inacc)} · ${a.whiteMistakes} ${esc(CFG.loc.mist)} · ${a.whiteBlunders} ${esc(CFG.loc.blun)}</div>`;
-            if (ply >= 1 && ply <= a.moves.length) {
-                const m = a.moves[ply - 1];
-                const best = m.bestFrom ? `<span class="rv-best">${esc(CFG.loc.best)}: ${m.bestFrom}–${m.bestTo}</span>` : '';
-                html += `<div class="rv-eval ${QCLS[m.quality] || ''}"><strong>${evalText(m)}</strong>${best}</div>`;
-            }
-            analysisEl.innerHTML = html;
-        }
-
-        function renderAll() { renderBoard(); renderMoves(); renderAnalysis(); }
-        function go(i) { ply = Math.max(0, Math.min(total, i)); renderAll(); }
-
-        document.getElementById('rv-first').onclick = () => go(0);
-        document.getElementById('rv-prev').onclick = () => go(ply - 1);
-        document.getElementById('rv-next').onclick = () => go(ply + 1);
-        document.getElementById('rv-last').onclick = () => go(total);
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowLeft') go(ply - 1);
-            else if (e.key === 'ArrowRight') go(ply + 1);
-            else if (e.key === 'Home') go(0);
-            else if (e.key === 'End') go(total);
-        });
-
-        buildBoard();
-        renderPlayers();
-        renderAll();
-
-        // Разбор (премиум) подгружаем с обычного эндпоинта (вне Blazor-рендерера — работает), если не из кэша.
-        if (CFG.premium && !analysis) {
-            analysis = 'loading'; renderAnalysis();
-            try {
-                const r = await fetch(CFG.analysisUrl, { credentials: 'include' });
-                analysis = r.ok ? await r.json() : null;
-            } catch { analysis = null; }
-            renderMoves(); renderAnalysis();
-        }
-    </script>
+@{
+    var cfg = new
+    {
+        dataUrl = $"/api/me/games/{Id}",
+        analysisUrl = $"/api/me/games/{Id}/analysis",
+        loc = new
+        {
+            bot = Loc.T("bot.tag"),
+            best = Loc.T("review.best"),
+            inacc = Loc.T("review.inaccuracies"),
+            mist = Loc.T("review.mistakes"),
+            blun = Loc.T("review.blunders"),
+            analyzing = Loc.T("review.analyzing"),
+            unavailable = Loc.T("review.unavailable"),
+            premiumonly = Loc.T("review.premiumonly"),
+            premiumcta = Loc.T("review.premiumcta"),
+            notfound = Loc.T("games.empty"),
+        },
+    };
 }
+
+<script type="module">
+    const CFG = @((MarkupString)JsonSerializer.Serialize(cfg, JsonOpts));
+    const loadingEl = document.getElementById('rv-loading');
+    const mainEl = document.getElementById('rv-main');
+
+    // Все данные партии — с обычного эндпоинта (вне рендера Blazor): позиции, имена, премиум, кэш разбора.
+    let data;
+    try {
+        const r = await fetch(CFG.dataUrl, { credentials: 'include' });
+        if (!r.ok) { loadingEl.textContent = CFG.loc.notfound; throw 0; }
+        data = await r.json();
+    } catch { loadingEl.textContent ||= CFG.loc.notfound; throw 0; }
+
+    loadingEl.hidden = true;
+    mainEl.hidden = false;
+
+    const plies = data.plies || [];
+    const fens = [data.startFen, ...plies.map(p => p.fen)];
+    const froms = [null, ...plies.map(p => p.from)];
+    const tos = [null, ...plies.map(p => p.to)];
+    const sans = [null, ...plies.map(p => p.san)];
+    const total = plies.length;
+    const flip = data.myColor === 'b';
+    let ply = total;
+    let analysis = data.analysis;
+
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const pieceImg = (ch) => {
+        const color = ch === ch.toUpperCase() ? 'w' : 'b';
+        return `<img class="cp" draggable="false" alt="" src="_content/ChessSchool.Design/pieces/${color}${ch.toUpperCase()}.svg">`;
+    };
+    function parseFen(fen) {
+        const map = {};
+        const rows = (fen || '').split(' ')[0].split('/');
+        for (let r = 0; r < 8; r++) {
+            let file = 0;
+            for (const ch of rows[r] || '') {
+                if (ch >= '1' && ch <= '8') { file += +ch; }
+                else { map[files[file] + (8 - r)] = ch; file++; }
+            }
+        }
+        return map;
+    }
+    const botTag = `<span class="bot-tag">${esc(CFG.loc.bot)}</span>`;
+
+    const boardEl = document.getElementById('rv-board');
+    const movesEl = document.getElementById('rv-moves');
+    const analysisEl = document.getElementById('rv-analysis');
+    const counterEl = document.getElementById('rv-counter');
+    const cells = {}, coordHtml = {};
+
+    function buildBoard() {
+        boardEl.innerHTML = '';
+        const ranks = flip ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
+        const cols = flip ? [...files].reverse() : files;
+        for (const r of ranks) for (const f of cols) {
+            const sq = f + r, dark = (files.indexOf(f) + r) % 2 === 0;
+            const el = document.createElement('div');
+            el.className = 'sq ' + (dark ? 'dark' : 'light');
+            let cd = '';
+            const tone = dark ? 'on-dark' : 'on-light';
+            if (f === cols[0]) cd += `<span class="coord rank ${tone}">${r}</span>`;
+            if (r === ranks[ranks.length - 1]) cd += `<span class="coord file ${tone}">${f}</span>`;
+            coordHtml[sq] = cd;
+            boardEl.appendChild(el);
+            cells[sq] = el;
+        }
+    }
+
+    function renderBoard() {
+        const pos = parseFen(fens[ply]);
+        for (const f of files) for (let r = 1; r <= 8; r++) {
+            const sq = f + r, el = cells[sq], ch = pos[sq];
+            el.innerHTML = coordHtml[sq] + (ch ? pieceImg(ch) : '');
+            el.classList.remove('hl');
+        }
+        if (froms[ply] && cells[froms[ply]]) cells[froms[ply]].classList.add('hl');
+        if (tos[ply] && cells[tos[ply]]) cells[tos[ply]].classList.add('hl');
+        counterEl.textContent = `${ply} / ${total}`;
+    }
+
+    function renderPlayers() {
+        const meWhite = data.myColor === 'w';
+        const top = meWhite ? { name: data.blackName, bot: data.blackIsBot } : { name: data.whiteName, bot: data.whiteIsBot };
+        const bottom = meWhite ? { name: data.whiteName, bot: data.whiteIsBot } : { name: data.blackName, bot: data.blackIsBot };
+        document.getElementById('rv-top').innerHTML = esc(top.name) + (top.bot ? botTag : '');
+        document.getElementById('rv-bottom').innerHTML = esc(bottom.name) + (bottom.bot ? botTag : '');
+    }
+
+    const QSYM = { 2: '?!', 3: '?', 4: '??' };
+    const QCLS = { 0: 'q-best', 2: 'q-inacc', 3: 'q-mist', 4: 'q-blun' };
+    const qualityAt = (i) => (analysis && analysis.moves && i >= 1 && i <= analysis.moves.length)
+        ? analysis.moves[i - 1].quality : null;
+
+    function renderMoves() {
+        let html = '';
+        for (let i = 1; i <= total; i++) {
+            if ((i % 2) === 1) html += `<span class="rv-num">${(i + 1) / 2 | 0}.</span>`;
+            const q = qualityAt(i);
+            const sym = (q != null && QSYM[q]) ? `<span class="rv-q ${QCLS[q] || ''}">${QSYM[q]}</span>` : '';
+            html += `<button class="rv-move ${i === ply ? 'on' : ''}" data-ply="${i}">${esc(sans[i])}${sym}</button>`;
+        }
+        movesEl.innerHTML = html;
+        movesEl.querySelectorAll('.rv-move').forEach(b => b.onclick = () => go(+b.dataset.ply));
+    }
+
+    function evalText(m) {
+        if (m.mateIn != null) return m.mateIn > 0 ? `#${m.mateIn}` : `#-${Math.abs(m.mateIn)}`;
+        const v = m.scoreCp / 100;
+        return (v > 0 ? '+' : '') + v.toFixed(1);
+    }
+
+    function renderAnalysis() {
+        if (!data.premium) {
+            analysisEl.innerHTML =
+                `<div class="card rv-upsell"><p>${esc(CFG.loc.premiumonly)}</p>` +
+                `<a class="btn btn-primary btn-sm" href="/premium">${esc(CFG.loc.premiumcta)}</a></div>`;
+            return;
+        }
+        if (analysis === 'loading') { analysisEl.innerHTML = `<div class="rv-status">${esc(CFG.loc.analyzing)}</div>`; return; }
+        if (!analysis || !analysis.engineAvailable || !analysis.moves || !analysis.moves.length) {
+            analysisEl.innerHTML = `<div class="rv-status">${esc(CFG.loc.unavailable)}</div>`;
+            return;
+        }
+        const a = analysis;
+        let html =
+            `<div class="rv-acc">` +
+            `<div class="rv-acc-cell"><span class="rv-acc-num">${Math.round(a.whiteAccuracy)}%</span><span class="rv-acc-lbl">${esc(data.whiteName)}</span></div>` +
+            `<div class="rv-acc-cell"><span class="rv-acc-num">${Math.round(a.blackAccuracy)}%</span><span class="rv-acc-lbl">${esc(data.blackName)}</span></div>` +
+            `</div>` +
+            `<div class="rv-counts">${a.whiteInaccuracies} ${esc(CFG.loc.inacc)} · ${a.whiteMistakes} ${esc(CFG.loc.mist)} · ${a.whiteBlunders} ${esc(CFG.loc.blun)}</div>`;
+        if (ply >= 1 && ply <= a.moves.length) {
+            const m = a.moves[ply - 1];
+            const best = m.bestFrom ? `<span class="rv-best">${esc(CFG.loc.best)}: ${m.bestFrom}–${m.bestTo}</span>` : '';
+            html += `<div class="rv-eval ${QCLS[m.quality] || ''}"><strong>${evalText(m)}</strong>${best}</div>`;
+        }
+        analysisEl.innerHTML = html;
+    }
+
+    function renderAll() { renderBoard(); renderMoves(); renderAnalysis(); }
+    function go(i) { ply = Math.max(0, Math.min(total, i)); renderAll(); }
+
+    document.getElementById('rv-first').onclick = () => go(0);
+    document.getElementById('rv-prev').onclick = () => go(ply - 1);
+    document.getElementById('rv-next').onclick = () => go(ply + 1);
+    document.getElementById('rv-last').onclick = () => go(total);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') go(ply - 1);
+        else if (e.key === 'ArrowRight') go(ply + 1);
+        else if (e.key === 'Home') go(0);
+        else if (e.key === 'End') go(total);
+    });
+
+    buildBoard();
+    renderPlayers();
+    renderAll();
+
+    // Разбор (премиум) — отдельным запросом, если кэша нет.
+    if (data.premium && !analysis) {
+        analysis = 'loading'; renderAnalysis();
+        try {
+            const r = await fetch(CFG.analysisUrl, { credentials: 'include' });
+            analysis = r.ok ? await r.json() : null;
+        } catch { analysis = null; }
+        renderMoves(); renderAnalysis();
+    }
+</script>
 
 @code {
     [Parameter] public Guid Id { get; set; }
 
     private static readonly JsonSerializerOptions JsonOpts =
         new(JsonSerializerDefaults.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-
-    private ArenaGameDetail? _detail;
-    private object? _cfg;
-
-    // Статический SSR: HttpContext доступен, HTTP к ApiService работает в обычном контексте (как в списке
-    // «Мои партии»). Грузим партию, премиум-статус и кэш разбора здесь; всё остальное делает клиент.
-    protected override async Task OnInitializedAsync()
-    {
-        var ct = Http.HttpContext?.RequestAborted ?? default;
-        var sub = Http.HttpContext?.User.FindFirst("sub")?.Value;
-        if (string.IsNullOrEmpty(sub)) return;
-
-        _detail = await Review.GetAsync(Id, sub, ct);
-        if (_detail is null) return;
-
-        var premium = await Entitlements.IsPremiumAsync(sub, ct);
-        var cached = premium ? await Review.GetCachedAnalysisAsync(Id, sub, ct) : null;
-
-        // Позиции считаем на сервере (без зависимости от внешнего chess.js в браузере): стартовый FEN +
-        // FEN/ход после каждого полухода. Клиент просто рисует доску по FEN и листает массив.
-        var (startFen, plies) = GameReplay.FromPgn(_detail.Pgn);
-
-        _cfg = new
-        {
-            startFen,
-            plies = plies.Select(p => new { fen = p.Fen, san = p.San, from = p.From, to = p.To }),
-            myColor = _detail.MyColor == PieceColor.White ? "w" : "b",
-            whiteName = _detail.WhiteName,
-            blackName = _detail.BlackName,
-            whiteIsBot = _detail.WhiteIsBot,
-            blackIsBot = _detail.BlackIsBot,
-            premium,
-            analysis = cached,
-            analysisUrl = $"/api/me/games/{_detail.Id}/analysis",
-            loc = new
-            {
-                bot = Loc.T("bot.tag"),
-                best = Loc.T("review.best"),
-                inacc = Loc.T("review.inaccuracies"),
-                mist = Loc.T("review.mistakes"),
-                blun = Loc.T("review.blunders"),
-                analyzing = Loc.T("review.analyzing"),
-                unavailable = Loc.T("review.unavailable"),
-                premiumonly = Loc.T("review.premiumonly"),
-                premiumcta = Loc.T("review.premiumcta"),
-            },
-        };
-    }
 }
 
 <style>
     .rv-back { display: inline-block; margin-bottom: 14px; color: var(--ink-2); }
+    #rv-loading { padding: .4rem 0; }
     .rv { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
     .rv-board-col { width: min(440px, 92vw); }
     .rv-player { font-weight: 600; padding: .35rem .2rem; min-height: 1.6rem; }

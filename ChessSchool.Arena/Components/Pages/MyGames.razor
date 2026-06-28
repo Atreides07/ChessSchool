@@ -35,7 +35,7 @@ else
     <div class="mg-list">
         @foreach (var g in _page.Items)
         {
-            <a class="mg-row" href="@($"/me/games/{g.Id}")">
+            <a class="mg-row" href="@($"/me/games/{g.Id}")" data-enhance-nav="false">
                 <span class="mg-outcome @OutcomeClass(g.Outcome)">@OutcomeText(g.Outcome)</span>
                 <span class="mg-opp">
                     <span class="text-secondary">@Loc.T("games.vs")</span> @g.OpponentName

@@ -214,22 +214,40 @@
             return;
         }
         const a = analysis;
+        // Счётчик по типу качества: число (суммарно обе стороны) + подпись; кликабелен, если есть ходы.
+        const count = (q, label, cls) => {
+            const n = pliesOfQuality(q).length;
+            return `<span class="rv-count ${n ? 'has ' + cls : ''}" data-q="${q}">${n} ${esc(label)}</span>`;
+        };
         let html =
             `<div class="rv-acc">` +
             `<div class="rv-acc-cell"><span class="rv-acc-num">${Math.round(a.whiteAccuracy)}%</span><span class="rv-acc-lbl">${esc(data.whiteName)}</span></div>` +
             `<div class="rv-acc-cell"><span class="rv-acc-num">${Math.round(a.blackAccuracy)}%</span><span class="rv-acc-lbl">${esc(data.blackName)}</span></div>` +
             `</div>` +
-            `<div class="rv-counts">${a.whiteInaccuracies} ${esc(CFG.loc.inacc)} · ${a.whiteMistakes} ${esc(CFG.loc.mist)} · ${a.whiteBlunders} ${esc(CFG.loc.blun)}</div>`;
+            `<div class="rv-counts">${count(2, CFG.loc.inacc, 'mv-inacc')} · ${count(3, CFG.loc.mist, 'mv-mist')} · ${count(4, CFG.loc.blun, 'mv-blun')}</div>`;
         if (ply >= 1 && ply <= a.moves.length) {
             const m = a.moves[ply - 1];
             const best = m.bestFrom ? `<span class="rv-best">${esc(CFG.loc.best)}: ${m.bestFrom}–${m.bestTo}</span>` : '';
             html += `<div class="rv-eval ${QCLS[m.quality] || ''}"><strong>${evalText(m)}</strong>${best}</div>`;
         }
         analysisEl.innerHTML = html;
+        // Клик по счётчику → переход к следующему ходу этого типа (по кругу, если их несколько).
+        analysisEl.querySelectorAll('.rv-count.has').forEach(el => el.onclick = () => jumpQuality(+el.dataset.q));
     }
 
     function renderAll() { renderBoard(); renderMoves(); renderAnalysis(); }
     function go(i) { ply = Math.max(0, Math.min(total, i)); renderAll(); }
+
+    // Все полуходы заданного качества (обе стороны), по порядку — для перехода по счётчику.
+    const pliesOfQuality = (q) => (analysis && analysis.moves)
+        ? analysis.moves.map((m, i) => m.quality === q ? i + 1 : 0).filter(Boolean) : [];
+    const jumpIdx = { 2: -1, 3: -1, 4: -1 }; // запоминаем позицию цикла по каждому типу
+    function jumpQuality(q) {
+        const list = pliesOfQuality(q);
+        if (!list.length) return;
+        jumpIdx[q] = (jumpIdx[q] + 1) % list.length; // следующий такой ход (по кругу)
+        go(list[jumpIdx[q]]);
+    }
 
     document.getElementById('rv-first').onclick = () => go(0);
     document.getElementById('rv-prev').onclick = () => go(ply - 1);
@@ -304,6 +322,12 @@
     .rv-acc-num { display: block; font-size: 1.3rem; font-weight: 800; }
     .rv-acc-lbl { color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
     .rv-counts { color: var(--ink-2); font-size: .85rem; margin-bottom: 10px; }
+    .rv-count { color: var(--muted); } /* ноль — приглушённый, некликабельный */
+    .rv-count.has { cursor: pointer; font-weight: 600; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+    .rv-count.has:hover { text-decoration-style: solid; }
+    .rv-count.mv-inacc { color: #b58300; }
+    .rv-count.mv-mist { color: #d2691e; }
+    .rv-count.mv-blun { color: var(--danger); }
     .rv-eval { padding: .5rem .7rem; border-radius: var(--r-md); background: var(--surface-2); margin-bottom: 12px; }
     .rv-eval strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
     .rv-best { margin-left: .6rem; color: var(--ink-2); font-size: .85rem; }

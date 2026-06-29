@@ -746,17 +746,10 @@ public sealed class ArenaTournamentGrain(
         catch { return false; }
         if (eval is null) return false;
 
-        // EngineEval — со стороны игрока, чей ход (UCI). Приводим к точке зрения бота.
+        // Перспектива и пороги — в ArenaBotDraw (тестируемо).
         bool botIsWhite = botSub == game.WhiteSub;
-        bool botToMove = (game.Board.Turn == Color.White) == botIsWhite;
-        int stmCp = eval.Value.Mate is int m ? (m > 0 ? 100000 : -100000) : (eval.Value.Cp ?? 0);
-        int botCp = botToMove ? stmCp : -stmCp;
-
-        var parts = game.Board.Fen.Split(' ');
-        int fullmove = parts.Length >= 6 && int.TryParse(parts[5], out var n) ? n : 1;
-
-        if (botCp <= -150) return true;            // бот заметно хуже — согласен
-        return botCp <= 20 && fullmove >= 10;      // равная позиция вне дебюта
+        int botCp = ArenaBotDraw.BotCp(eval.Value, botIsWhite, game.Board.Turn == Color.White);
+        return ArenaBotDraw.ShouldAccept(botCp, ArenaBotDraw.FullmoveFromFen(game.Board.Fen));
     }
 
     // ----------------------- Внутренняя логика -----------------------
@@ -846,7 +839,10 @@ public sealed class ArenaTournamentGrain(
             // когда вариант один/вынужденный. Часы при этом тикают, как у человека.
             if (g.BotThinkUntil is null)
             {
-                g.BotPlannedMs = BotThinkMs(g, mp);
+                g.BotPlannedMs = ArenaBotTiming.ThinkMs(
+                    g.Board.LegalMoveCount, g.Board.InCheck,
+                    g.Board.Turn == Color.White ? g.WhiteMs : g.BlackMs,
+                    mp.SpeedFactor, Random.Shared.NextDouble(), Random.Shared.NextDouble());
                 g.BotThinkUntil = now.AddMilliseconds(g.BotPlannedMs);
                 continue;
             }
@@ -871,25 +867,6 @@ public sealed class ArenaTournamentGrain(
                 FinishGame(g);
             }
         }
-    }
-
-    /// <summary>
-    /// Время обдумывания хода бота, зависящее от сложности позиции: единственный/вынужденный ход —
-    /// мгновенно, много вариантов — дольше. Плюс «человеческий» джиттер, чтобы ходы не были ритмичными.
-    /// </summary>
-    private static int BotThinkMs(Game g, Player bot)
-    {
-        int options = g.Board.LegalMoveCount;
-        if (options <= 1) return Random.Shared.Next(80, 200); // единственный/вынужденный ход — почти мгновенно
-
-        // Бюджет ~ оставшееся время на ~25 предстоящих ходов: под нехватку времени бот ускоряется.
-        long myMs = g.Board.Turn == Color.White ? g.WhiteMs : g.BlackMs;
-        double budget = Math.Max(150, myMs / 25.0);
-        // Сложность: шах и обилие вариантов → дольше; мало вариантов → быстро (доля бюджета).
-        double complexity = g.Board.InCheck ? 0.9 : Math.Min(1.0, 0.25 + options * 0.02);
-        // Личность: слабые ходят быстрее, сильные обстоятельнее; плюс джиттер, чтобы не «по метроному».
-        double t = budget * complexity * bot.SpeedFactor * (0.7 + Random.Shared.NextDouble() * 0.6);
-        return (int)Math.Clamp(t, 90, 2500);
     }
 
     private static bool ApplyUci(Game g, string uci)
@@ -920,35 +897,18 @@ public sealed class ArenaTournamentGrain(
 
     private void PairIdlePlayers()
     {
-        var now = DateTimeOffset.UtcNow;
-
         // В пул подбора входят только «ищущие» люди (нажавшие «подобрать соперника»). Записанные, но
-        // не нажавшие — не спариваются (ни с человеком, ни с ботом).
+        // не нажавшие — не спариваются. Сам алгоритм подбора — чистая функция ArenaPairing.Plan (тестируемо);
+        // грейн лишь собирает пулы из состояния и исполняет план (создание партий/ботов).
         var idleHumans = _players.Where(kv => !kv.Value.IsBot && !kv.Value.Playing && kv.Value.Seeking)
-            .OrderByDescending(kv => kv.Value.Score).Select(kv => kv.Key).ToList();
+            .OrderByDescending(kv => kv.Value.Score)
+            .Select(kv => new SeekingHuman(kv.Key, kv.Value.WaitingSince)).ToList();
         var idleBots = _players.Where(kv => kv.Value.IsBot && !kv.Value.Playing)
             .Select(kv => kv.Key).ToList();
 
-        // 1) Человек с человеком — мгновенно (приоритет живым соперникам).
-        int hi = 0;
-        while (hi + 1 < idleHumans.Count) { CreateGame(idleHumans[hi], idleHumans[hi + 1]); hi += 2; }
-
-        // 2) Оставшийся человек ждёт соперника-человека; если за WaitForBotSeconds не нашёлся —
-        //    подключаем бота (берём свободного либо создаём нового) и сразу спариваем.
-        int bi = 0;
-        for (; hi < idleHumans.Count; hi++)
-        {
-            var human = _players[idleHumans[hi]];
-            if (human.WaitingSince is not { } since || (now - since).TotalSeconds < WaitForBotSeconds)
-                continue; // ещё ищем — оставляем «Ищем соперника…»
-            // Боты для этого типа отключены (таргет 0) — соперника-бота не подключаем, ждём человека.
-            var bot = bi < idleBots.Count ? idleBots[bi++] : (BotTarget > 0 ? SpawnBot() : null);
-            if (bot is null) continue;
-            CreateGame(idleHumans[hi], bot);
-        }
-
-        // 3) Свободные боты играют между собой (живость арены), не занимая место будущего соперника.
-        for (; bi + 1 < idleBots.Count; bi += 2) CreateGame(idleBots[bi], idleBots[bi + 1]);
+        var plan = ArenaPairing.Plan(idleHumans, idleBots, DateTimeOffset.UtcNow, WaitForBotSeconds, BotTarget > 0);
+        foreach (var (a, b) in plan.Pairs) CreateGame(a, b);
+        foreach (var human in plan.HumansNeedingNewBot) CreateGame(human, SpawnBot());
     }
 
     private string SpawnBot()
@@ -1008,38 +968,24 @@ public sealed class ArenaTournamentGrain(
         }
     }
 
+    // Часы и разрешение просрочки — в ArenaClock (тестируемо). Здесь только применяем к доске.
     private bool DeductClock(Game g, Color mover)
     {
         var elapsed = (long)(DateTimeOffset.UtcNow - g.LastMoveAt).TotalMilliseconds;
         if (mover == Color.White)
         {
-            if (g.WhiteMs - elapsed <= 0) { g.WhiteMs = 0; FlagTimeout(g, Color.White); return true; }
-            g.WhiteMs -= elapsed;
+            var (ms, timedOut) = ArenaClock.Deduct(g.WhiteMs, elapsed);
+            g.WhiteMs = ms;
+            if (timedOut) { (g.Result, g.Reason) = ArenaClock.ResolveTimeout(g.Board.Fen, Color.White); return true; }
         }
         else
         {
-            if (g.BlackMs - elapsed <= 0) { g.BlackMs = 0; FlagTimeout(g, Color.Black); return true; }
-            g.BlackMs -= elapsed;
+            var (ms, timedOut) = ArenaClock.Deduct(g.BlackMs, elapsed);
+            g.BlackMs = ms;
+            if (timedOut) { (g.Result, g.Reason) = ArenaClock.ResolveTimeout(g.Board.Fen, Color.Black); return true; }
         }
         g.LastMoveAt = DateTimeOffset.UtcNow;
         return false;
-    }
-
-    // Просрочка времени: поражение просрочившего — но если у соперника недостаточно материала для мата,
-    // партия завершается вничью (FIDE 6.9 / lichess).
-    private static void FlagTimeout(Game g, Color flagged)
-    {
-        bool winnerIsWhite = flagged == Color.Black;
-        if (ChessMaterial.HasMatingMaterial(g.Board.Fen, winnerIsWhite))
-        {
-            g.Result = winnerIsWhite ? GameResult.WhiteWins : GameResult.BlackWins;
-            g.Reason = GameEndReason.Timeout;
-        }
-        else
-        {
-            g.Result = GameResult.Draw;
-            g.Reason = GameEndReason.InsufficientMaterial; // ничья: у соперника нет материала на мат
-        }
     }
 
     private void FinishGame(Game g)

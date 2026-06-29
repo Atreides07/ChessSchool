@@ -38,6 +38,8 @@ public class OnlineGameFlowTests
             // GameGrain зовёт архивацию и аналитику — обе подменяем (без HTTP к API, без PostHog).
             s.AddSingleton<IGameArchiveClient, CapturingArchiveClient>();
             s.AddSingleton<IAnalytics, NoopAnalytics>();
+            // Короткий таймаут матчмейкинга — чтобы тест таймаута не ждал 60 секунд.
+            s.AddSingleton(new MatchmakingOptions(TimeSpan.FromSeconds(1)));
         });
     }
 
@@ -151,6 +153,27 @@ public class OnlineGameFlowTests
             Assert.Equal("bob", archived.BlackUserSub);
             Assert.Equal(GameResult.BlackWins, archived.Result);
             Assert.Equal(GameEndReason.Checkmate, archived.EndReason);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task TimedOutSeeker_IsPurged_AndNotPairedWithLaterPlayer()
+    {
+        var cluster = NewCluster();
+        await cluster.DeployAsync();
+        try
+        {
+            var mm = cluster.GrainFactory.GetGrain<IMatchmakingGrain>(TimeControl.Blitz.ToString());
+
+            // Алиса ищет и не дожидается соперника — заявка протухает по таймауту (1с в тестовом силосе).
+            await Assert.ThrowsAsync<TimeoutException>(
+                () => mm.FindMatchAsync(new MatchRequest("alice", "Алиса", 1200, TimeControl.Blitz)));
+
+            // Боб приходит ПОСЛЕ ухода Алисы. Раньше он спаривался с её «висящей» заявкой и получал
+            // партию-призрак; теперь протухшая заявка вычищается, и Боб сам встаёт в ожидание → таймаут.
+            await Assert.ThrowsAsync<TimeoutException>(
+                () => mm.FindMatchAsync(new MatchRequest("bob", "Боб", 1300, TimeControl.Blitz)));
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

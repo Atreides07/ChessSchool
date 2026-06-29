@@ -85,20 +85,30 @@ public sealed class ArenaGameStore(SchoolDbContext db)
         return new ArenaGameListPage(items, total);
     }
 
-    /// <summary>Сводная статистика игрока (для профиля): всего/победы/поражения/ничьи. Счёт через
-    /// индексируемые Count-запросы (WhiteSub/BlackSub под индексом) — не тащим строки в память.</summary>
+    /// <summary>Сводная статистика игрока (для профиля): всего/победы/поражения/ничьи. Одним запросом
+    /// с условной агрегацией (WhiteSub/BlackSub под индексом) — один round-trip вместо четырёх Count,
+    /// строки в память не тащим. На горячем пути профиля это снимает 4× нагрузку с БД.</summary>
     public async Task<ArenaPlayerStats> GetStatsAsync(string sub, CancellationToken ct)
     {
-        var games = db.ArenaGames.AsNoTracking().Where(g => g.WhiteSub == sub || g.BlackSub == sub);
-        var total = await games.CountAsync(ct);
-        var wins = await games.CountAsync(g =>
-            (g.Result == GameResult.WhiteWins && g.WhiteSub == sub) ||
-            (g.Result == GameResult.BlackWins && g.BlackSub == sub), ct);
-        var draws = await games.CountAsync(g => g.Result == GameResult.Draw, ct);
-        var losses = await games.CountAsync(g =>
-            (g.Result == GameResult.WhiteWins && g.BlackSub == sub) ||
-            (g.Result == GameResult.BlackWins && g.WhiteSub == sub), ct);
-        return new ArenaPlayerStats(total, wins, losses, draws);
+        var agg = await db.ArenaGames.AsNoTracking()
+            .Where(g => g.WhiteSub == sub || g.BlackSub == sub)
+            .GroupBy(_ => 1)
+            .Select(grp => new
+            {
+                Total = grp.Count(),
+                Wins = grp.Count(g =>
+                    (g.Result == GameResult.WhiteWins && g.WhiteSub == sub) ||
+                    (g.Result == GameResult.BlackWins && g.BlackSub == sub)),
+                Draws = grp.Count(g => g.Result == GameResult.Draw),
+                Losses = grp.Count(g =>
+                    (g.Result == GameResult.WhiteWins && g.BlackSub == sub) ||
+                    (g.Result == GameResult.BlackWins && g.WhiteSub == sub)),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return agg is null
+            ? new ArenaPlayerStats(0, 0, 0, 0) // у игрока ещё нет партий
+            : new ArenaPlayerStats(agg.Total, agg.Wins, agg.Losses, agg.Draws);
     }
 
     /// <summary>Партия для воспроизведения. Возвращает null, если игрок не был её участником (приватность).</summary>

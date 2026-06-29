@@ -290,6 +290,10 @@ public static class Loc
         ["bt.remind.hint"] = ("Добавить в календарь", "Add to calendar"),
         ["bt.results"] = ("Результаты", "Results"),
         ["sched.title"] = ("Расписание турниров", "Tournament schedule"),
+        ["sched.pagetitle"] = ("Расписание арена-турниров — ChessArena", "Arena tournament schedule — ChessArena"),
+        ["sched.metadesc"] = ("Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики.",
+                              "Schedule of chess arena tournaments: bullet, blitz, rapid. Continuous pairing and streaks."),
+        ["sched.ogtitle"] = ("ChessArena — арена-турниры в реальном времени", "ChessArena — real-time arena tournaments"),
         ["sched.livenow"] = ("идёт сейчас", "live now"),
         ["view.timeline"] = ("Таймлайн", "Timeline"),
         ["view.list"] = ("Список", "List"),
@@ -318,6 +322,7 @@ public static class Loc
 
         // --- Турнир (Tournament) ---
         ["t.fallback"] = ("Турнир", "Tournament"),
+        ["t.live"] = ("В эфире", "Live"),
         ["t.finished"] = ("Завершён", "Finished"),
         ["t.soon"] = ("Скоро", "Soon"),
         ["t.minutes"] = ("минут", "minutes"),

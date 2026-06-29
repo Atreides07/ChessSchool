@@ -42,6 +42,10 @@ if (redisConn is not null) builder.Services.AddHealthChecks().AddRedis(redisConn
 builder.Services.AddHttpClient<IGameArchiveClient, GameArchiveClient>(c =>
     c.BaseAddress = new("https+http://apiservice"));
 
+// Таймаут ожидания соперника в матчмейкинге — из конфига (без хардкода в грейне).
+builder.Services.AddSingleton(new ChessSchool.GameServer.Grains.MatchmakingOptions(
+    TimeSpan.FromSeconds(builder.Configuration.GetValue("Matchmaking:WaitTimeoutSeconds", 60))));
+
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();
 

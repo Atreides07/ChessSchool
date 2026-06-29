@@ -7,14 +7,14 @@
 @inject NavigationManager Nav
 @inject ChessSchool.Arena.Services.BrandTournamentCatalog BrandCatalog
 
-<PageTitle>Расписание арена-турниров — ChessArena</PageTitle>
+<PageTitle>@Loc.T("sched.pagetitle")</PageTitle>
 <HeadContent>
-    <meta name="description" content="Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики." />
+    <meta name="description" content="@Loc.T("sched.metadesc")" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="@Nav.BaseUri" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="ChessArena — арена-турниры в реальном времени" />
-    <meta property="og:description" content="Расписание шахматных арена-турниров: bullet, blitz, rapid. Непрерывный пейринг и стрики." />
+    <meta property="og:title" content="@Loc.T("sched.ogtitle")" />
+    <meta property="og:description" content="@Loc.T("sched.metadesc")" />
     <meta property="og:url" content="@Nav.BaseUri" />
     <meta property="og:image" content="@($"{Nav.BaseUri}og-image.png")" />
     <meta name="twitter:card" content="summary_large_image" />

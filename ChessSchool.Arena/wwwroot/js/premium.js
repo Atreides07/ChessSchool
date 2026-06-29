@@ -77,12 +77,52 @@
         var sel = document.querySelector('.prem-plan.is-sel');
         return (sel && sel.dataset.price) || d.price;
     }
-    function wirePlans() {
+    function wirePlans(d) {
         var plans = document.querySelectorAll('.prem-plan');
         plans.forEach(function (p) {
             if (p.__wired) return; p.__wired = true;
-            p.onclick = function () { plans.forEach(function (x) { x.classList.remove('is-sel'); }); p.classList.add('is-sel'); };
+            p.onclick = function () {
+                plans.forEach(function (x) { x.classList.remove('is-sel'); });
+                p.classList.add('is-sel');
+                applyTrial(d); // у плана может быть свой триал — обновляем баннер/кнопку
+            };
         });
+    }
+
+    // Сколько дней триала у цены (Paddle отдаёт trial_period в PricePreview). 0 — нет триала.
+    var trialByPeriod = {};
+    function trialDaysFromPrice(price) {
+        var t = price && (price.trialPeriod || price.trial_period);
+        if (!t || !t.frequency) return 0;
+        var per = { day: 1, week: 7, month: 30, year: 365 }[t.interval] || 0;
+        return t.frequency * per;
+    }
+
+    // Баннер «N дней бесплатно» + текст кнопки. Дни берём из реальной цены Paddle (selected plan),
+    // иначе из конфига data-trial-days (fallback). Источник истины — цена; конфиг лишь подстраховка.
+    function applyTrial(d) {
+        var sel = document.querySelector('.prem-plan.is-sel');
+        var period = sel && sel.dataset.period;
+        var days = (period && trialByPeriod[period]) || Number(d.trialDays || 0) || 0;
+
+        var card = document.querySelector('.prem-card');
+        var banner = document.getElementById('prem-trial');
+        if (days > 0) {
+            if (!banner && card) {
+                banner = document.createElement('p');
+                banner.id = 'prem-trial'; banner.className = 'prem-trial';
+                var perks = card.querySelector('.prem-perks');
+                if (perks && perks.nextSibling) card.insertBefore(banner, perks.nextSibling);
+                else card.insertBefore(banner, card.firstChild);
+            }
+            if (banner && d.trialNote) banner.textContent = d.trialNote.replace('{0}', days);
+            var buy = document.getElementById('prem-buy');
+            if (buy && d.trialCta) buy.textContent = d.trialCta.replace('{0}', days);
+        } else {
+            if (banner) banner.remove();
+            var buy2 = document.getElementById('prem-buy');
+            if (buy2 && d.buyLabel) buy2.textContent = d.buyLabel;
+        }
     }
 
     // Реальные локализованные цены в карточки + авто-бейдж выгоды (best-effort): Paddle PricePreview.
@@ -104,7 +144,9 @@
                 var raw = item.totals && item.totals.total;
                 var n = raw != null ? Number(raw) : NaN;
                 if (!isNaN(n)) minor[card.dataset.period] = n;
+                trialByPeriod[card.dataset.period] = trialDaysFromPrice(item.price); // триал из реальной цены
             });
+            applyTrial(d); // показать баннер/кнопку по реальным данным цены
             // Бейдж «−N%»: годовая против 12× месячной (если обе цены известны и выгода положительна).
             if (minor.month > 0 && minor.year > 0) {
                 var save = Math.round((minor.month * 12 - minor.year) / (minor.month * 12) * 100);
@@ -159,7 +201,8 @@
 
         if (d.mode === 'paddle') {
             if (!d.token || !d.price) { status('Не задан Paddle:ClientToken или PremiumPriceId.'); return; }
-            wirePlans();   // выбор месяц/год (если карточки есть)
+            wirePlans(d);   // выбор месяц/год (если карточки есть)
+            applyTrial(d);  // мгновенно по конфигу (fallback); PricePreview ниже уточнит по реальной цене
             // Вешаем обработчик СРАЗУ — клик всегда реагирует; Paddle грузится лениво при первом клике.
             btn.onclick = function () { openCheckout(d, btn, selectedPrice(d)); };
             // Предзагрузка в фоне + реальные цены в карточки, чтобы первый клик открывался без паузы.

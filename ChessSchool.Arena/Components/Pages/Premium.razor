@@ -48,7 +48,7 @@ else
            (карта привязывается, списание — после периода), статус trialing уже даёт премиум. *@
         @if (_paddle && _trialDays > 0)
         {
-            <p class="prem-trial">@string.Format(Loc.T("premium.trial.note"), _trialDays)</p>
+            <p id="prem-trial" class="prem-trial">@string.Format(Loc.T("premium.trial.note"), _trialDays)</p>
         }
 
         @* Выбор плана (месяц/год) — только в режиме Paddle и если задан годовой price_id. Годовой выбран
@@ -83,7 +83,9 @@ else
     <div id="prem-root" hidden
          data-mode="@(_paddle ? "paddle" : "dev")"
          data-token="@_token" data-price="@_priceId" data-price-annual="@_priceAnnual" data-env="@_env"
-         data-sub="@_sub" data-success="@($"{Nav.BaseUri}premium")"></div>
+         data-sub="@_sub" data-success="@($"{Nav.BaseUri}premium")"
+         data-trial-days="@_trialDays" data-trial-note="@Loc.T("premium.trial.note")"
+         data-trial-cta="@Loc.T("premium.trial.cta")" data-buy-label="@Loc.T("premium.buy")"></div>
 }
 
 @code {

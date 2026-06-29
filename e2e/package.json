@@ -1,0 +1,12 @@
+{
+  "name": "chessschool-e2e",
+  "private": true,
+  "description": "Браузерные смоук-тесты (Playwright) против запущенного приложения. Не входят в dotnet test.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

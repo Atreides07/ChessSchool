@@ -1,0 +1,58 @@
+// @ts-check
+const { test, expect } = require('@playwright/test');
+
+// Собираем ошибки консоли и необработанные исключения страницы.
+function trackErrors(page) {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  return errors;
+}
+
+test('главная и список трансляций грузятся без ошибок консоли', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.goto('/broadcasts', { waitUntil: 'networkidle' });
+  expect(errors, 'ошибки консоли: ' + errors.join(' | ')).toEqual([]);
+});
+
+// Регрессия на грабли #12/#13: при переходе со списка (а не по F5) онлайн-доски трансляции должны
+// отрисоваться, а не «висеть» на «Загружаем доски…». Проверяем РЕАЛЬНЫЙ путь пользователя — клик.
+test('трансляция: онлайн-доски грузятся при переходе из списка', async ({ page }) => {
+  const errors = trackErrors(page);
+  const scripts = [];
+  page.on('response', (r) => { const u = r.url(); if (u.endsWith('.js')) scripts.push(u.split('/').pop()); });
+
+  await page.goto('/broadcasts', { waitUntil: 'networkidle' });
+  const slugs = [...new Set(
+    await page.$$eval('a[href^="broadcasts/"]', (els) => els.map((e) => e.getAttribute('href')))
+  )];
+  test.skip(slugs.length === 0, 'в каталоге нет видимых трансляций');
+
+  // Ищем трансляцию с онлайн-досками: раздел #bd-root рендерится только при заданном PgnUrl.
+  let liveHref = null;
+  for (const href of slugs) {
+    await page.goto('/' + href, { waitUntil: 'domcontentloaded' });
+    if (await page.$('#bd-root')) { liveHref = href; break; }
+  }
+  test.skip(!liveHref, 'нет трансляции с live-PGN — добавь через админку «Найти популярные» и сделай видимой');
+
+  // Реальный путь юзера: со списка кликом (data-enhance-nav="false" → полная загрузка, скрипт исполняется).
+  await page.goto('/broadcasts', { waitUntil: 'networkidle' });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle' }),
+    page.click(`a[href="${liveHref}"]`),
+  ]);
+
+  // broadcast.js исполнился и заменил плейсхолдер реальными досками (а не «висит» на загрузке).
+  expect(scripts, 'broadcast.js не загрузился').toContain('broadcast.js');
+  await expect(page.locator('#bd-boards .bd-card').first()).toBeVisible();
+  expect(await page.locator('#bd-boards .bd-card').count()).toBeGreaterThan(0);
+
+  // Клик по доске открывает оверлей с навигацией по ходам.
+  await page.locator('#bd-boards .bd-card').first().click();
+  await expect(page.locator('#bd-overlay')).toBeVisible();
+  await expect(page.locator('#bd-board .sq')).toHaveCount(64);
+
+  expect(errors, 'ошибки консоли: ' + errors.join(' | ')).toEqual([]);
+});

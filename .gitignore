@@ -19,3 +19,6 @@ obj/
 
 # Нагрузочный тест: добытые access-токены (секреты)
 tools/loadtest/tokens.json
+
+# macOS
+.DS_Store

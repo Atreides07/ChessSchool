@@ -1,0 +1,135 @@
+@page "/admin/broadcasts/discover"
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using ChessSchool.Arena
+@attribute [Authorize(Policy = "Admin")]
+
+@* Поиск популярных турниров — ЧИСТЫЙ ТОНКИЙ КЛИЕНТ. Статический каркас БЕЗ серверного HTTP (исходящий
+   HTTP из рендера Blazor-компонента в этом окружении зависает — грабля #12). Список и добавление браузер
+   тянет/шлёт на minimal-API /admin/api/discovery (под политикой Admin), которые ходят во внешний источник
+   и каталог в обычном request-контексте. Закрытый раздел → noindex. *@
+
+<PageTitle>@Loc.T("admin.disc.title") — @Loc.T("admin.title")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<div class="adm-bar">
+    <div>
+        <a class="adm-back" href="admin/broadcasts" data-enhance-nav="false">@Loc.T("admin.back")</a>
+        <h1 class="adm-h1">@Loc.T("admin.disc.title")</h1>
+    </div>
+</div>
+
+<p class="disc-lead">@Loc.T("admin.disc.lead")</p>
+
+<div id="disc-list" class="disc-grid"><p class="adm-muted">@Loc.T("loading")</p></div>
+
+@{
+    var cfg = new
+    {
+        editBase = "admin/broadcasts/",
+        loc = new
+        {
+            live = Loc.T("admin.disc.live"),
+            upcoming = Loc.T("admin.disc.upcoming"),
+            add = Loc.T("admin.disc.add"),
+            adding = Loc.T("admin.disc.adding"),
+            added = Loc.T("admin.disc.added"),
+            edit = Loc.T("admin.disc.edit"),
+            empty = Loc.T("admin.disc.empty"),
+            error = Loc.T("admin.disc.error"),
+            addError = Loc.T("admin.disc.adderror"),
+        },
+    };
+}
+
+<script type="module">
+    const CFG = @((MarkupString)JsonSerializer.Serialize(cfg, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    const L = CFG.loc;
+    const host = document.getElementById('disc-list');
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    function card(t) {
+        const chip = t.live ? `<span class="disc-chip live">${esc(L.live)}</span>` : `<span class="disc-chip soon">${esc(L.upcoming)}</span>`;
+        const banner = t.image
+            ? `<img class="disc-img" src="${esc(t.image)}" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`
+            : '';
+        const place = [t.location].filter(Boolean).map(esc).join('');
+        const meta = [t.dateRange, place, t.format].filter(Boolean).map(esc).join(' · ');
+        const action = t.alreadyAdded
+            ? `<span class="disc-done">✓ ${esc(L.added)}</span><a class="adm-btn" href="${esc(CFG.editBase)}${esc(t.slug)}/edit" data-enhance-nav="false">${esc(L.edit)}</a>`
+            : `<button class="btn btn-primary btn-sm" data-add="${esc(t.slug)}">${esc(L.add)}</button>`;
+        return `<article class="disc-card" data-slug="${esc(t.slug)}">
+            <div class="disc-banner">${banner}${chip}</div>
+            <div class="disc-body">
+                <h2 class="disc-name">${esc(t.name)}</h2>
+                <div class="disc-meta">${meta}</div>
+                <div class="disc-actions">${action}</div>
+            </div>
+        </article>`;
+    }
+
+    async function add(slug, btn) {
+        btn.disabled = true; const original = btn.textContent; btn.textContent = L.adding;
+        try {
+            const r = await fetch('/admin/api/discovery/add', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug }), credentials: 'include',
+            });
+            if (!r.ok) { btn.disabled = false; btn.textContent = original; flash(btn, L.addError); return; }
+            const actions = btn.closest('.disc-actions');
+            actions.innerHTML = `<span class="disc-done">✓ ${esc(L.added)}</span>`
+                + `<a class="adm-btn" href="${esc(CFG.editBase)}${esc(slug)}/edit" data-enhance-nav="false">${esc(L.edit)}</a>`;
+        } catch { btn.disabled = false; btn.textContent = original; flash(btn, L.addError); }
+    }
+
+    function flash(btn, text) {
+        const el = document.createElement('span'); el.className = 'disc-err'; el.textContent = text;
+        btn.closest('.disc-actions').appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    async function load() {
+        let data;
+        try {
+            const r = await fetch('/admin/api/discovery', { credentials: 'include' });
+            if (!r.ok) { host.innerHTML = `<p class="adm-muted">${esc(L.error)}</p>`; return; }
+            data = await r.json();
+        } catch { host.innerHTML = `<p class="adm-muted">${esc(L.error)}</p>`; return; }
+
+        const items = data.items || [];
+        if (!items.length) { host.innerHTML = `<p class="adm-muted">${esc(L.empty)}</p>`; return; }
+        host.innerHTML = items.map(card).join('');
+        host.querySelectorAll('[data-add]').forEach(b => b.onclick = () => add(b.dataset.add, b));
+    }
+
+    load();
+</script>
+
+<style>
+    .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .adm-back { font-size: .9rem; color: var(--ink-2); font-weight: 600; }
+    .adm-back:hover { color: var(--accent); }
+    .adm-h1 { font-size: 1.7rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }
+    .adm-muted { color: var(--ink-2); }
+    .disc-lead { color: var(--ink-2); max-width: 75ch; margin: 0 0 1.4rem; }
+
+    .disc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .disc-card { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .disc-banner { position: relative; aspect-ratio: 16 / 7; width: 100%; overflow: hidden; padding: .6rem .7rem;
+                   display: flex; align-items: flex-start; background: linear-gradient(135deg, var(--surface-2), var(--surface)); }
+    .disc-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+    .disc-chip { position: relative; z-index: 2; font-size: .72rem; font-weight: 800; text-transform: uppercase;
+                 letter-spacing: .04em; padding: .15rem .5rem; border-radius: var(--r-pill); }
+    .disc-chip.live { background: #fde7e7; color: #c0392b; }
+    .disc-chip.soon { background: color-mix(in srgb, var(--accent) 14%, white); color: var(--accent); }
+    .disc-body { padding: .9rem 1rem 1rem; display: flex; flex-direction: column; gap: .5rem; flex: 1; }
+    .disc-name { font-size: 1.06rem; font-weight: 720; margin: 0; color: var(--ink); }
+    .disc-meta { font-size: .88rem; color: var(--ink-2); flex: 1; }
+    .disc-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-top: .3rem; }
+    .disc-done { font-size: .85rem; font-weight: 700; color: #2e8b57; }
+    .disc-err { font-size: .82rem; color: #c0392b; }
+    .adm-btn { font-size: .82rem; font-weight: 600; padding: .32rem .6rem; border-radius: var(--r-sm); border: 1px solid var(--line);
+               background: var(--surface); color: var(--ink-2); cursor: pointer; text-decoration: none; }
+    .adm-btn:hover { background: var(--surface-2); color: var(--ink); }
+</style>

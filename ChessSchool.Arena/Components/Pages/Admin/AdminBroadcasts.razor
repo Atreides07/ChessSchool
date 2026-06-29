@@ -15,7 +15,11 @@
         <a class="adm-back" href="admin">@Loc.T("admin.back")</a>
         <h1 class="adm-h1">@Loc.T("admin.bc.title")</h1>
     </div>
-    <a class="btn btn-primary btn-sm" href="admin/broadcasts/new">+ @Loc.T("admin.bc.new")</a>
+    <div class="adm-bar-actions">
+        @* discover — тонкий клиент со скриптом: enhanced-nav его не исполнит, поэтому навигация без неё. *@
+        <a class="btn btn-outline btn-sm" href="admin/broadcasts/discover" data-enhance-nav="false">@Loc.T("admin.disc.btn")</a>
+        <a class="btn btn-primary btn-sm" href="admin/broadcasts/new">+ @Loc.T("admin.bc.new")</a>
+    </div>
 </div>
 
 @if (_items is null)
@@ -102,6 +106,7 @@ else
 
 <style>
     .adm-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.3rem; flex-wrap: wrap; }
+    .adm-bar-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
     .adm-back { font-size: .9rem; color: var(--ink-2); font-weight: 600; }
     .adm-back:hover { color: var(--accent); }
     .adm-h1 { font-size: 1.7rem; font-weight: 780; letter-spacing: -.02em; color: var(--ink); margin: .25rem 0 0; }

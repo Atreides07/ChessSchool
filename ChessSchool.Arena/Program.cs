@@ -112,6 +112,17 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.IImageIngestor, ChessSc
 // Разовый перенос уже сохранённых внешних URL изображений в S3 (для записей до появления переноса).
 builder.Services.AddHostedService<ChessSchool.Arena.Services.ImageIngestBackfill>();
 
+// Поиск популярных турниров для админки трансляций (курируемый топ официальных трансляций lichess).
+// База источника настраивается конфигом; вызывается из request-контекста minimal-API (не из Blazor).
+var lichessBaseUrl = builder.Configuration["Discovery:LichessBaseUrl"] ?? "https://lichess.org";
+builder.Services.AddHttpClient(ChessSchool.Arena.Services.TournamentDiscovery.HttpClientName, c =>
+{
+    c.BaseAddress = new(lichessBaseUrl);
+    c.Timeout = TimeSpan.FromSeconds(10);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ChessArena/1.0 (broadcast discovery)");
+});
+builder.Services.AddSingleton<ChessSchool.Arena.Services.TournamentDiscovery>();
+
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();
 
@@ -394,6 +405,69 @@ app.MapDelete("/admin/api/subscriptions/{sub}", async (string sub, IHttpClientFa
     using var resp = await client.SendAsync(req, ct);
     if (resp.IsSuccessStatusCode) ents.Invalidate(sub);
     return Results.StatusCode((int)resp.StatusCode);
+}).RequireAuthorization("Admin").DisableAntiforgery();
+
+// ---------------- Поиск популярных турниров для админки трансляций (тонкий клиент /admin/broadcasts/discover) ----------------
+// Сетевой вызов к источнику и перенос изображения — здесь, в request-контексте (не в лайфсайкле Blazor, грабля #12).
+
+app.MapGet("/admin/api/discovery", async (
+    ChessSchool.Arena.Services.TournamentDiscovery discovery,
+    ChessSchool.Arena.Services.BroadcastsCatalog catalog,
+    CancellationToken ct) =>
+{
+    IReadOnlyList<ChessSchool.Arena.Services.TournamentSuggestion> items;
+    try { items = await discovery.PopularAsync(ct); }
+    catch (ChessSchool.Arena.Services.TournamentDiscoveryException) { return Results.Json(new { error = true }, statusCode: 502); }
+
+    var existing = (await catalog.AllFreshAsync()).Select(b => b.Slug).ToHashSet();
+    var result = items.Select(s => new
+    {
+        s.Slug,
+        s.Name,
+        dateRange = ChessSchool.Arena.BroadcastFormat.DateRange(s.Start, s.End),
+        location = s.Location,
+        format = s.Format,
+        url = s.Url,
+        image = s.ImageUrl,
+        s.Live,
+        alreadyAdded = existing.Contains(s.Slug),
+    });
+    return Results.Json(new { items = result });
+}).RequireAuthorization("Admin");
+
+app.MapPost("/admin/api/discovery/add", async (
+    ChessSchool.Contracts.AddSuggestedTournamentRequest body,
+    ChessSchool.Arena.Services.TournamentDiscovery discovery,
+    ChessSchool.Arena.Services.BroadcastsCatalog catalog,
+    ChessSchool.Arena.Services.IImageIngestor ingestor,
+    ILogger<Program> log,
+    CancellationToken ct) =>
+{
+    var slug = body?.Slug?.Trim();
+    if (string.IsNullOrWhiteSpace(slug)) return Results.BadRequest();
+
+    ChessSchool.Arena.Services.TournamentSuggestion? suggestion;
+    try { suggestion = await discovery.BySlugAsync(slug, ct); }
+    catch (ChessSchool.Arena.Services.TournamentDiscoveryException) { return Results.Json(new { error = true }, statusCode: 502); }
+    if (suggestion is null) return Results.NotFound();
+
+    var broadcast = ChessSchool.Arena.Services.TournamentDiscovery.ToBroadcast(suggestion);
+
+    // Идемпотентность: уже в каталоге — считаем добавленным (повторный клик/гонка между нодами).
+    if (await catalog.BySlugAsync(broadcast.Slug) is not null)
+        return Results.Json(new { slug = broadcast.Slug, alreadyAdded = true });
+
+    // Переносим изображение в наше хранилище (не зависим от внешнего источника). Сбой переноса не должен
+    // ронять добавление — оставляем без картинки, админ задаст её при доклассификации.
+    try { broadcast.ImageUrl = await ingestor.EnsureStoredAsync(broadcast.ImageUrl, ct); }
+    catch (ChessSchool.Arena.Services.ImageIngestException ex)
+    {
+        log.LogWarning(ex, "Не удалось перенести изображение турнира {Slug}; добавляем без него.", broadcast.Slug);
+        broadcast.ImageUrl = null;
+    }
+
+    await catalog.UpsertAsync(broadcast);
+    return Results.Json(new { slug = broadcast.Slug, alreadyAdded = false });
 }).RequireAuthorization("Admin").DisableAntiforgery();
 
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));

@@ -103,3 +103,6 @@ public sealed record ArenaStateDto(
     // Игрок нажал «подобрать соперника» и ждёт пары (но партия ещё не началась). Подбор НЕ автоматический:
     // до нажатия игрок просто записан и не ищет соперника. false для зрителей/анонимов.
     [property: Id(13)] bool Seeking = false);
+
+/// <summary>Админ-операция: добавить предложенный (найденный во внешнем источнике) турнир в каталог трансляций по его slug.</summary>
+public sealed record AddSuggestedTournamentRequest(string Slug);

@@ -1065,6 +1065,7 @@ public sealed class ArenaTournamentGrain(
             g.Board.LastFrom, g.Board.LastTo, g.Board.CheckSquare,
             IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub),
             DrawOfferFromOpponent: g.Status == GameStatus.InProgress && g.DrawOfferBy is not null && g.DrawOfferBy != sub,
-            DrawOfferByMe: g.Status == GameStatus.InProgress && g.DrawOfferBy == sub);
+            DrawOfferByMe: g.Status == GameStatus.InProgress && g.DrawOfferBy == sub,
+            EndReason: g.Reason);
     }
 }

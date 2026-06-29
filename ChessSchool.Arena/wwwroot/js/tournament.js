@@ -257,24 +257,64 @@
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
         // Соперник — над доской, я — под доской (как на реальной доске; доска уже развёрнута под мой цвет).
         const iAmWhite = g.myColor === 0; // PieceColor.White = 0
-        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot);
-        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot);
+        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot, fin && g.whiteMs <= 0);
+        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot, fin && g.blackMs <= 0);
 
-        // При завершении — результат и «подобрать соперника» сбоку от доски (справа на десктопе, над
-        // доской на мобиле): видно сразу, а не внизу карточки. Результат — над кнопкой.
-        const side = fin
-            ? `<div class="gs-result"><strong>${esc(resultText(g.result))}</strong></div>
-               <button class="btn btn-join" id="t-seek">${esc(L.seek)}</button>`
+        // Итог — оверлеем поверх финальной доски: исход ОТ ЛИЦА ИГРОКА (победа/поражение/ничья) + причина
+        // (мат/время/сдача). Сбоку — влияние на турнир (очки за партию/место/серия) и что делать дальше.
+        const o = fin ? myOutcome(g) : '';
+        const overlay = fin
+            ? `<div class="gs-overlay"><div class="gs-card gs-${o}"><div class="gs-out">${esc(outcomeLabel(o))}</div>` +
+              `${reasonLabel(g.endReason) ? `<div class="gs-reason">${esc(reasonLabel(g.endReason))}</div>` : ''}</div></div>`
             : '';
+        const side = fin ? endgameSideHtml(g) : '';
         return `<div class="card my-game">
             <div class="players players-top">${iAmWhite ? blackRow : whiteRow}</div>
             <div class="game-row">
-                <div class="board-wrap"><div class="board" id="t-board"></div><div class="promo" id="t-promo" hidden></div></div>
+                <div class="board-wrap"><div class="board" id="t-board"></div>${overlay}<div class="promo" id="t-promo" hidden></div></div>
                 ${side ? `<div class="game-side">${side}</div>` : ''}
             </div>
             <div class="players players-bottom">${iAmWhite ? whiteRow : blackRow}</div>
             <div class="my-controls">${controlsHtml(g)}</div>
         </div>`;
+    }
+
+    // Боковая панель итога: влияние партии на турнир (всё считается из моей строки таблицы лидеров —
+    // последний элемент results = очки именно за эту партию) и иерархия действий.
+    function endgameSideHtml(g) {
+        const row = myStandingRow(g);
+        const pts = row && row.results && row.results.length ? row.results[row.results.length - 1] : 0;
+        const place = row ? row.rank : '—';
+        const total = (state.standings || []).length;
+        const streak = row ? row.streak : 0;
+        return `<div class="gs-meta">
+                <div class="gs-m"><span class="gs-ml">${esc(L.lastpts)}</span><span class="gs-mv">+${pts}</span></div>
+                <div class="gs-m"><span class="gs-ml">${esc(L.placelbl)}</span><span class="gs-mv">${place}<small>/${total}</small></span></div>
+                <div class="gs-m"><span class="gs-ml">${esc(L.streaklbl)}</span><span class="gs-mv">${streak >= 2 ? '🔥 ' : ''}${streak}</span></div>
+            </div>
+            <button class="btn btn-join" id="t-seek">${esc(L.seek)}</button>
+            <div class="gs-actions">
+                <a class="btn btn-outline btn-sm" href="/me/games">${esc(L.review)}</a>
+                <button class="btn btn-outline btn-sm" id="t-standings-btn">${esc(L.standings)}</button>
+            </div>
+            <div class="gs-endin">${esc(L.endin)} ${hms(state.secondsLeft)}</div>`;
+    }
+
+    function myOutcome(g) {
+        if (g.result === 3) return 'draw';
+        const iWhite = g.myColor === 0;
+        if (g.result === 1) return iWhite ? 'win' : 'loss';
+        if (g.result === 2) return iWhite ? 'loss' : 'win';
+        return 'draw';
+    }
+    function outcomeLabel(o) { return o === 'win' ? L.youwin : o === 'loss' ? L.youlose : L.youdraw; }
+    function reasonLabel(r) {
+        return ({ 1: L.rcheckmate, 2: L.rresign, 3: L.rtimeout, 4: L.rstalemate, 5: L.rdrawagreed, 6: L.rinsufficient, 7: L.rabandoned })[r] || '';
+    }
+    // «Я» в таблице — по имени с моей стороны доски (бота исключаем).
+    function myStandingRow(g) {
+        const me = g.myColor === 0 ? g.whiteName : g.blackName;
+        return (state.standings || []).find(r => !r.isBot && r.name === me) || null;
     }
 
     // Управление под доской (ход + берсерк + ничья + сдаться) и баннер входящего предложения ничьи.
@@ -302,9 +342,10 @@
     function updateMyGameCard() {
         const g = state.myGame; if (!g) return;
         const iAmWhite = g.myColor === 0;
+        const fin = g.status === 2;
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
-        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot);
-        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot);
+        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot, fin && g.whiteMs <= 0);
+        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot, fin && g.blackMs <= 0);
         const top = document.querySelector('.my-game .players-top');
         const bot = document.querySelector('.my-game .players-bottom');
         if (top) top.innerHTML = iAmWhite ? blackRow : whiteRow;
@@ -314,8 +355,9 @@
         renderBoard();
     }
 
-    function playerRow(name, berserk, ms, active, isBot) {
-        return `<span>${berserk ? '⚡ ' : ''}${esc(name)}${botTag(isBot)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-active="${active ? 1 : 0}">${mmss(ms)}</span></span>`;
+    function playerRow(name, berserk, ms, active, isBot, flag) {
+        const fl = flag ? ' <span class="clock-flag" title="время вышло">⚑</span>' : '';
+        return `<span>${berserk ? '⚡ ' : ''}${esc(name)}${botTag(isBot)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-active="${active ? 1 : 0}">${mmss(ms)}</span>${fl}</span>`;
     }
 
     function boardsHtml() {
@@ -474,6 +516,8 @@
         if (act) act.onclick = () => { act.disabled = true; conn.invoke('Register', currentId).then(applyState).catch(() => act.disabled = false); };
         const seek = document.getElementById('t-seek');
         if (seek) seek.onclick = () => { seek.disabled = true; conn.invoke('SeekOpponent', currentId).then(applyState).catch(() => seek.disabled = false); };
+        const tostand = document.getElementById('t-standings-btn');
+        if (tostand) tostand.onclick = () => { const s = document.getElementById('t-standings'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
         const berserk = document.getElementById('t-berserk');
         if (berserk) berserk.onclick = () => conn.invoke('Berserk', currentId).then(applyState).catch(() => { });
         const resign = document.getElementById('t-resign');

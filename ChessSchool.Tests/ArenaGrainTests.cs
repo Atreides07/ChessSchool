@@ -229,6 +229,7 @@ public class ArenaGrainTests
             var done = await t.GetStateAsync("a");
             Assert.Equal(GameStatus.Finished, done.MyGame!.Status);
             Assert.Equal(GameResult.Draw, done.MyGame!.Result);
+            Assert.Equal(GameEndReason.DrawAgreed, done.MyGame!.EndReason); // причина пробрасывается в DTO
         }
         finally { await cluster.StopAllSilosAsync(); }
     }
@@ -279,6 +280,7 @@ public class ArenaGrainTests
             var afterResign = await t.GetStateAsync("a");
             Assert.NotNull(afterResign.MyGame);
             Assert.Equal(GameStatus.Finished, afterResign.MyGame!.Status);
+            Assert.Equal(GameEndReason.Resignation, afterResign.MyGame!.EndReason);
             Assert.False(afterResign.Seeking); // следующего соперника не ищем автоматически
 
             // Спустя время дольше прежнего «хвоста» (6с) доска всё ещё на месте — её держит человек.

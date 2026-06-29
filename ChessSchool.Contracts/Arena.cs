@@ -82,7 +82,8 @@ public sealed record ArenaGameDto(
     [property: Id(17)] bool WhiteIsBot = false,
     [property: Id(18)] bool BlackIsBot = false,
     [property: Id(19)] bool DrawOfferFromOpponent = false,
-    [property: Id(20)] bool DrawOfferByMe = false);
+    [property: Id(20)] bool DrawOfferByMe = false,
+    [property: Id(21)] GameEndReason EndReason = GameEndReason.None);
 
 /// <summary>Полное состояние турнира для игрока (доска лидеров + его партия).</summary>
 [GenerateSerializer]

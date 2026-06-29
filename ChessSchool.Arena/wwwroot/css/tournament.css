@@ -75,7 +75,24 @@
     .my-game .game-row .board-wrap { flex: 0 1 auto; }
     .game-side { flex: 0 0 auto; display: flex; flex-direction: column; gap: .8rem; min-width: 150px; padding-top: .25rem; }
     .game-side .btn-join { width: 100%; }
-    .gs-result { font-size: 1.15rem; font-weight: 700; text-align: center; }
+    /* Итог партии — оверлеем поверх финальной доски (исход от лица игрока + причина). */
+    .gs-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+    .gs-card { background: rgba(24,22,20,.84); border-radius: var(--r-md); padding: .5rem 1.1rem; text-align: center; min-width: 140px; }
+    .gs-out { color: #fff; font-size: 1.15rem; font-weight: 700; line-height: 1.2; }
+    .gs-card.gs-win .gs-out { color: #7fe0a0; }
+    .gs-card.gs-loss .gs-out { color: #f3a39a; }
+    .gs-reason { color: rgba(255,255,255,.82); font-size: .8rem; margin-top: 1px; }
+    /* Влияние партии на турнир: очки за партию / место / серия. */
+    .gs-meta { display: flex; flex-direction: column; gap: .35rem; }
+    .gs-m { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem;
+        background: var(--surface-2); border-radius: var(--r-sm); padding: .35rem .6rem; }
+    .gs-ml { font-size: .8rem; color: var(--ink-2); }
+    .gs-mv { font-size: 1.05rem; font-weight: 700; }
+    .gs-mv small { font-size: .78rem; font-weight: 400; color: var(--muted); }
+    .gs-actions { display: flex; gap: .4rem; }
+    .gs-actions .btn { flex: 1; text-align: center; }
+    .gs-endin { font-size: .78rem; color: var(--muted); text-align: center; }
+    .clock-flag { color: #d64545; font-weight: 700; }
     .clock { font-variant-numeric: tabular-nums; padding: .1rem .5rem; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-weight: 600; margin-left: .4rem; }
     .clock.active { background: var(--accent); color: #fff; }
     .gstatus { margin-top: .85rem; display: flex; gap: .6rem; align-items: center; }

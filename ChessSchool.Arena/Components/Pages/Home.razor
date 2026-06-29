@@ -1,5 +1,6 @@
 @page "/"
 @using ChessSchool.Arena
+@using ChessSchool.Arena.Services
 @inject IGrainFactory Grains
 @inject AuthenticationStateProvider AuthState
 @inject IHttpContextAccessor Http
@@ -295,27 +296,16 @@ else
    в App.razor — исполняется и при enhanced-навигации на эту страницу. *@
 
 @code {
-    private const int WindowBackHours = 3;
-    private const int Hours = 9; // 3 назад + 6 вперёд (совпадает с расписанием в ArenaDirectoryGrain)
+    private const int Hours = ScheduleBuilder.Hours; // окно таймлайна (для разметки сетки)
 
-    private IReadOnlyList<TournamentSummaryDto>? _tournaments;
-    private readonly List<Block> _blocks = new();
-    private readonly List<TournamentSummaryDto> _upcoming = new();
-    private readonly List<TournamentSummaryDto> _running = new();   // текущие
-    private readonly List<TournamentSummaryDto> _next = new();      // следующие
-    private readonly List<TournamentSummaryDto> _finished = new();  // завершённые
-    private int _startHour;
+    private IReadOnlyList<TournamentSummaryDto>? _tournaments; // null → состояние загрузки
+    private IReadOnlyList<ScheduleBlock> _blocks = [];
+    private IReadOnlyList<TournamentSummaryDto> _upcoming = [], _running = [], _next = [], _finished = [];
+    private IReadOnlyList<BrandTournamentView> _brand = [];   // «Главные турниры»
+    private int _liveCount, _startHour;
     private long _windowStartUnix;
-    private int _liveCount;
     private string _dateLabel = "";
-    private bool _listView; // выбранный вид (из cookie) — список вместо таймлайна
-
-    private IReadOnlyList<BrandTournamentView> _brand = [];   // «Главные турниры» (лента/дорожка/список)
-    private readonly List<Block> _brandBlocks = new();        // бренд-блоки таймлайна (верхняя дорожка)
-    private int _laneOffset;                                  // 1, если в окне есть бренд-дорожка
-
-    private sealed record Block(string Id, int Col, int Span, int Row, string Type, string Title,
-        string Time, int Humans, int Bots, string Tc, string State, bool Mine);
+    private bool _listView; // выбранный вид (из cookie)
 
     protected override async Task OnInitializedAsync()
     {
@@ -329,72 +319,26 @@ else
             : null;
 
         _tournaments = await Grains.GetGrain<IArenaDirectoryGrain>(0).ListAsync(sub);
-        _liveCount = _tournaments.Count(t => t.Status == TournamentStatus.Running);
-
-        // Бренд-турниры («Главные») — отдельный каталог + живые сводки грейнов.
         _brand = await BrandCatalog.ListWithSummaryAsync(sub);
 
         var now = DateTimeOffset.Now;
         _dateLabel = Loc.DateLabel(now);
 
-        var windowStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset)
-            .AddHours(-WindowBackHours);
-        _startHour = windowStart.Hour;
-        _windowStartUnix = windowStart.ToUnixTimeSeconds();
-
-        BuildBrandBlocks(windowStart); // верхняя дорожка + сдвиг регулярных лейнов (если бренд в окне)
-        BuildTimeline(windowStart);
-        _blocks.AddRange(_brandBlocks);
-
-        _upcoming.AddRange(_tournaments
-            .Where(t => t.Status == TournamentStatus.Created)
-            .OrderBy(t => t.StartsAt));
-
-        // Разделы списка идут последовательно: сначала текущие, затем ближайшие будущие,
-        // затем завершённые (свежие сверху).
-        _running.AddRange(_tournaments.Where(t => t.Status == TournamentStatus.Running).OrderBy(t => t.StartsAt));
-        _next.AddRange(_tournaments.Where(t => t.Status == TournamentStatus.Created).OrderBy(t => t.StartsAt));
-        _finished.AddRange(_tournaments.Where(t => t.Status == TournamentStatus.Finished).OrderByDescending(t => t.StartsAt));
+        // Раскладка таймлайна и категоризация по статусу — в ScheduleBuilder (чистая логика, тестируемо).
+        var view = ScheduleBuilder.Build(_tournaments, _brand, now);
+        _blocks = view.Blocks;
+        _upcoming = view.Upcoming;
+        _running = view.Running;
+        _next = view.Next;
+        _finished = view.Finished;
+        _liveCount = view.LiveCount;
+        _startHour = view.StartHour;
+        _windowStartUnix = view.WindowStartUnix;
     }
 
-    private void BuildTimeline(DateTimeOffset windowStart)
-    {
-        int cols = Hours * 2;
-        foreach (var t in _tournaments!)
-        {
-            var type = TypeOf(t.TimeControl);
-            int startHalf = (int)Math.Round((t.StartsAt.ToLocalTime() - windowStart).TotalMinutes / 30.0);
-            if (startHalf < 0 || startHalf >= cols) continue;
-            int span = Math.Max(1, (int)Math.Round(t.DurationSeconds / 1800.0));
-            span = Math.Min(span, cols - startHalf);
-
-            _blocks.Add(new Block(
-                Id: t.Id, Col: startHalf + 2, Span: span, Row: LaneRow(type) + _laneOffset, Type: type,
-                Title: ShortName(type), Time: t.StartsAt.ToLocalTime().ToString("HH:mm"),
-                Humans: t.HumanCount, Bots: t.BotCount, Tc: t.TimeControl.ToString(), State: StateOf(t.Status),
-                Mine: t.Joined));
-        }
-    }
-
-    // Бренд-турниры, попадающие в окно таймлайна — отдельной верхней дорожкой (row 2); регулярные
-    // лейны сдвигаются вниз на _laneOffset. Счётчики/статус — из живой сводки грейна.
-    private void BuildBrandBlocks(DateTimeOffset windowStart)
-    {
-        int cols = Hours * 2;
-        foreach (var v in _brand)
-        {
-            var b = v.Brand;
-            int startHalf = (int)Math.Round((b.StartsAt.ToLocalTime() - windowStart).TotalMinutes / 30.0);
-            if (startHalf < 0 || startHalf >= cols) continue;
-            int span = Math.Min(Math.Max(1, (int)Math.Round(b.DurationSeconds / 1800.0)), cols - startHalf);
-            _brandBlocks.Add(new Block(
-                Id: b.Slug, Col: startHalf + 2, Span: span, Row: 2, Type: "brand", Title: b.Name,
-                Time: b.StartsAt.ToLocalTime().ToString("HH:mm"), Humans: v.Summary.HumanCount, Bots: v.Summary.BotCount,
-                Tc: new TimeControl(b.InitialSeconds, b.IncrementSeconds).ToString(), State: StateOf(v.Summary.Status),
-                Mine: v.Summary.Joined));
-        }
-        _laneOffset = _brandBlocks.Count > 0 ? 1 : 0;
-    }
+    // ----- Презентационные мапперы (вид/локализация, не бизнес-логика) -----
+    private static string TypeOf(TimeControl tc) => ScheduleBuilder.TypeOf(tc);
+    private static string StateOf(TournamentStatus s) => ScheduleBuilder.StateOf(s);
 
     // Статус-плашка карточки в ленте «Главных»: идёт сейчас / завтра / через N дн / скоро / завершён.
     private (string Cls, string Label) BrandPill(BrandTournamentView v)
@@ -408,36 +352,13 @@ else
         return (days <= 14 ? "soon" : "later", Loc.StatusLabel(kind, days));
     }
 
-    private static string BlockTitle(Block b) => (b.Mine ? Loc.T("mine.title") + " · " : "") + StateHint(b.State);
-
-    private static int LaneRow(string type) => type switch { "bullet" => 2, "blitz" => 3, _ => 4 };
-
-    private static string StateOf(TournamentStatus s) => s switch
-    {
-        TournamentStatus.Running => "live",
-        TournamentStatus.Finished => "past",
-        _ => "future"
-    };
+    private static string BlockTitle(ScheduleBlock b) => (b.Mine ? Loc.T("mine.title") + " · " : "") + StateHint(b.State);
 
     private static string StateHint(string state) => state switch
     {
         "live" => Loc.T("hint.live"),
         "past" => Loc.T("hint.past"),
         _ => Loc.T("hint.future")
-    };
-
-    private static string TypeOf(TimeControl tc) => tc.InitialSeconds switch
-    {
-        <= 120 => "bullet",
-        <= 480 => "blitz",
-        _ => "rapid"
-    };
-
-    private static string ShortName(string type) => type switch
-    {
-        "bullet" => "Bullet",
-        "rapid" => "Rapid",
-        _ => "Blitz"
     };
 
     private static string Icon(string type) => type switch
@@ -462,169 +383,3 @@ else
         _ => "badge-warn"
     };
 }
-
-<style>
-    .sched > .sv-state { display: none; }
-
-    .sched-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-    .sched-status { display: flex; align-items: center; gap: .55rem; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: .35rem; }
-    .sched-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px var(--danger-weak); }
-    .sched h1 { margin: 0; }
-
-    /* Панель управления — строкой над таймлайном: переключатель слева, навигация/масштаб справа. */
-    .sched-bar { margin-top: 16px; }
-    .sched-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    .sched-filters { display: flex; align-items: center; gap: 10px; margin-left: auto; }
-
-    .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 3px; gap: 2px; }
-    .seg label, .seg .rng { display: inline-flex; align-items: center; gap: .4rem; padding: .42rem .85rem; border-radius: var(--r-pill); font-size: .85rem; font-weight: 600; color: var(--ink-2); cursor: pointer; user-select: none; white-space: nowrap; border: 0; background: transparent; }
-    .seg label svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
-    .seg .rng.is-active { background: var(--ink); color: #fff; }
-
-    .now-pill { display: inline-flex; align-items: center; gap: .2rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 2px; }
-    .now-pill .chev { border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: .25rem .5rem; cursor: pointer; border-radius: var(--r-pill); }
-    .now-pill .chev:hover { background: var(--surface-2); color: var(--ink); }
-    .now-pill .now-btn { border: 0; background: transparent; color: var(--ink-2); font-weight: 600; font-size: .85rem; padding: .25rem .4rem; cursor: pointer; }
-    .now-pill .now-btn:hover { color: var(--ink); }
-
-    #sv-tl:checked ~ .sched-bar .seg-view label[for="sv-tl"],
-    #sv-list:checked ~ .sched-bar .seg-view label[for="sv-list"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
-
-    .view-list { display: none; }
-    #sv-list:checked ~ .view-list { display: block; }
-    #sv-list:checked ~ .view-tl { display: none; }
-    /* В списочном виде стрелки/масштаб не нужны — остаётся только переключатель Таймлайн/Список. */
-    #sv-list:checked ~ .sched-bar .sched-filters { display: none; }
-
-    /* ---------------- Лента «Главные турниры» ---------------- */
-    /* auto-fill (не auto-fit): пустые треки сохраняются, поэтому единственная карточка не растягивается на всю ширину. */
-    .bt-rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 280px)); gap: 12px; margin-top: 18px; justify-content: start; }
-    .bt-rcard { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); transition: box-shadow .12s, transform .12s; }
-    .bt-rcard:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); color: var(--ink); }
-    .bt-rbanner { position: relative; aspect-ratio: 16 / 7; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); text-decoration: none; }
-    .bt-rbanner.bt-live { background: #ffe3e0; }
-    .bt-rbanner.bt-done { background: var(--surface-2); }
-    .bt-rimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-    .bt-rstar { font-size: 1.8rem; color: var(--accent); }
-    .bt-rpill { position: absolute; top: 8px; left: 8px; z-index: 1; font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); }
-    .bt-rpill.bt-live { background: var(--danger); color: #fff; }
-    .bt-rpill.bt-soon { background: var(--accent); color: #fff; }
-    .bt-rbody { padding: .7rem .85rem; display: flex; flex-direction: column; gap: .2rem; }
-    .bt-rname { display: block; font-weight: 720; font-size: 1rem; color: var(--ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .bt-rname:hover { color: var(--accent); }
-    .bt-rdesc { font-size: .85rem; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .bt-readmore { align-self: flex-start; margin-top: .15rem; cursor: pointer; font-size: .78rem; font-weight: 700; color: var(--accent); }
-    .bt-readmore:hover { text-decoration: underline; }
-    /* CSS-only модалка полного описания */
-    .bt-dtoggle { display: none; }
-    .bt-dmodal { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; padding: 20px; }
-    .bt-dtoggle:checked + .bt-dmodal { display: flex; }
-    .bt-dmodal-bg { position: absolute; inset: 0; background: rgba(14, 17, 22, .45); cursor: pointer; }
-    .bt-dmodal-box { position: relative; z-index: 1; background: var(--surface); border-radius: var(--r-lg); padding: 1.4rem 1.5rem; max-width: 460px; width: 100%; max-height: 80vh; overflow: auto; box-shadow: var(--shadow-lg); }
-    .bt-dmodal-t { margin: 0 0 .7rem; font-size: 1.25rem; }
-    .bt-dmodal-d { margin: 0 0 1.1rem; color: var(--ink-2); white-space: pre-wrap; line-height: 1.6; }
-    .bt-dmodal-close { display: inline-block; cursor: pointer; font-weight: 700; color: var(--accent); }
-    .bt-dmodal-close:hover { text-decoration: underline; }
-    .bt-rfoot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .35rem; }
-    .bt-rwhen { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .bt-rcta { font-size: .82rem; font-weight: 700; color: var(--accent); white-space: nowrap; text-decoration: none; }
-    .bt-rcta:hover { text-decoration: underline; }
-
-    /* Бренд-блок таймлайна — «премиальный» золотой вид, НЕ синий: синий зарезервирован за «свой»
-       (tlb-mine), иначе бренд читается как «уже присоединился». tlb-mine объявлен ниже и перебивает
-       (если бренд реально твой — он станет синим). */
-    .tlb.brand { background: #fff3cf; border-color: #e0ad00; color: #6e5200; box-shadow: 0 0 0 1px #e0ad00, var(--shadow-sm); opacity: 1; filter: none; }
-    .tlb.brand .tlb-title { font-weight: 760; }
-    .lcard.brand { border-left-color: var(--accent); }
-    .up-item.brand { border-left-color: var(--accent); }
-
-    /* ---------------- Таймлайн ---------------- */
-    .tl-wrap { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
-    .tl-scroll { overflow-x: auto; }
-    .tl-grid { display: grid; grid-template-columns: 16px repeat(var(--cols), var(--colw, 92px)); grid-auto-rows: 76px; position: relative; width: max-content; }
-
-    .tl-gutter { grid-column: 1; grid-row: 1; position: sticky; left: 0; background: var(--surface); z-index: 3; border-bottom: 1px solid var(--line); }
-    .tl-h { grid-row: 1; display: flex; align-items: center; padding: 0 12px; font-weight: 600; font-size: .85rem; color: var(--ink-2); border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-
-    .tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: linear-gradient(var(--warn), rgba(196, 125, 9, .15)); z-index: 4; display: none; pointer-events: none; }
-    .tl-now::before { content: ""; position: absolute; top: -1px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(196, 125, 9, .18); }
-    .tl-now-label { position: absolute; top: 8px; left: 8px; font-size: .7rem; font-weight: 700; color: var(--warn); background: var(--warn-weak); padding: 1px 6px; border-radius: var(--r-pill); white-space: nowrap; }
-
-    /* container-type: блок — контейнер для container-запросов ниже: содержимое адаптируется под
-       РЕАЛЬНУЮ ширину карточки (зависит от зума и длительности турнира), а не под брейкпоинт окна. */
-    .tlb { container-type: inline-size; margin: 6px; border-radius: 12px; padding: 7px 10px; display: flex; flex-direction: column; justify-content: center; gap: 3px; line-height: 1.2; text-decoration: none; border: 1px solid; box-shadow: var(--shadow-sm); overflow: hidden; transition: transform .1s, box-shadow .1s; }
-    a.tlb:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
-    .tlb.bullet { background: #f8ead9; border-color: #ecc39b; color: #6b4a2a; }
-    .tlb.blitz { background: #f6ecca; border-color: #e6cf86; color: #695717; }
-    .tlb.rapid { background: #dcecd6; border-color: #a9cf9a; color: #2f5a36; }
-    /* Завершённые — «выключенный» вид, но кликабельны (результаты) */
-    .tlb.tlb-past { opacity: .55; filter: grayscale(.4); }
-    .tlb.tlb-past:hover { opacity: .85; }
-    /* Идущие — акцент */
-    .tlb.tlb-live { box-shadow: 0 0 0 2px var(--danger-weak), var(--shadow-sm); }
-    .tlb-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-    .tlb-title { display: flex; align-items: center; gap: .35rem; font-weight: 680; font-size: .92rem; min-width: 0; flex: 1 1 auto; }
-    .tlb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* длинные имена не ломают вёрстку */
-    .tlb-ico { font-size: .9rem; line-height: 1; flex: none; }
-    .tlb-tc { flex: none; font-weight: 700; font-size: .8rem; opacity: .7; white-space: nowrap; } /* не сжимается → не налезает на заголовок */
-    .tlb-sub { display: flex; justify-content: space-between; gap: 6px; font-size: .76rem; opacity: .78; white-space: nowrap; }
-    .tlb-pop { font-variant-numeric: tabular-nums; }
-    .tlb .live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
-
-    /* Деградация содержимого по фактической ширине блока (узкие колонки на зуме «Всё»/много часов):
-       сначала прячем тайм-контроль, затем счётчики, в самом узком виде — только иконка (+ точка live)
-       и цвет карточки (тип турнира). Подробности — приблизив зум (1ч/4ч). */
-    @@container (max-width: 132px) { .tlb-tc { display: none; } }
-    @@container (max-width: 104px) { .tlb-pop { display: none; } }
-    @@container (max-width: 72px) {
-        .tlb-name { display: none; }
-        .tlb-sub { display: none; }
-        .tlb-head { justify-content: center; }
-        .tlb { padding: 7px 4px; }
-    }
-    /* Турниры, где участвует пользователь — насыщенный акцентный фон, рамка, без «гашения» прошедших */
-    .tlb.tlb-mine { background: #d6e4ff; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); color: var(--accent-hover); opacity: 1; filter: none; }
-    .tlb.tlb-mine:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow-md); }
-    .mine-badge { color: var(--accent); font-size: .8rem; line-height: 1; }
-
-    /* ---------------- Список ---------------- */
-    .view-list { margin-top: 20px; }
-    .lcat { margin-bottom: 12px; }
-    .lcat.lcat-gap { margin-top: 26px; }
-    .lcat span { font-size: .64rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; background: var(--surface-2); padding: 4px 9px; border-radius: var(--r-pill); }
-    .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-    .lcard { display: block; padding: 16px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); border-left: 4px solid var(--line-strong); transition: box-shadow .12s, transform .12s; }
-    .lcard:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); color: var(--ink); }
-    .lcard.bullet { border-left-color: #ecc39b; }
-    .lcard.blitz { border-left-color: #e6cf86; }
-    .lcard.rapid { border-left-color: #a9cf9a; }
-    .lcard.lcard-past { opacity: .6; }
-    .lcard.lcard-past:hover { opacity: 1; }
-    /* Участие пользователя — лёгкий акцентный фон (как в дизайне), рамка слева, без «гашения» */
-    .lcard.lcard-mine { background: var(--accent-weak); border-left-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); opacity: 1; }
-    .badge-mine { background: var(--accent); color: #fff; }
-    .up-item.up-mine { background: var(--accent-weak); border-left-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); }
-    .lcard-head { display: flex; align-items: center; gap: .5rem; }
-    .lcard-title { font-weight: 660; font-size: 1.05rem; flex: 1; min-width: 0; }
-    .lcard-meta { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem; color: var(--muted); font-size: .88rem; }
-
-    /* ---------------- Мобайл: список предстоящих ---------------- */
-    .sched-mobile { display: none; margin-top: 18px; }
-    .up-list { display: flex; flex-direction: column; gap: 8px; }
-    .up-item { display: flex; align-items: center; gap: .6rem; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line-strong); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--ink); }
-    .up-item.bullet { border-left-color: #ecc39b; }
-    .up-item.blitz { border-left-color: #e6cf86; }
-    .up-item.rapid { border-left-color: #a9cf9a; }
-    .up-time { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 46px; }
-    .up-title { font-weight: 620; flex: 1; min-width: 0; }
-    .up-pop { color: var(--muted); font-weight: 600; font-size: .82rem; font-variant-numeric: tabular-nums; }
-
-    @@media (max-width: 900px) {
-        .sched-bar, .view, .bt-rail { display: none !important; }
-        .sched-mobile { display: block; }
-    }
-
-    @@media (max-width: 700px) {
-        .sched-top { flex-direction: column; }
-    }
-</style>

@@ -29,6 +29,7 @@
     <ProjectReference Include="..\ChessSchool.ApiService\ChessSchool.ApiService.csproj" />
     <ProjectReference Include="..\ChessSchool.Auth\ChessSchool.Auth.csproj" />
     <ProjectReference Include="..\ChessSchool.Arena\ChessSchool.Arena.csproj" />
+    <ProjectReference Include="..\ChessSchool.GameServer\ChessSchool.GameServer.csproj" />
     <ProjectReference Include="..\tools\capacity\ChessSchool.Capacity.csproj" />
   </ItemGroup>
 

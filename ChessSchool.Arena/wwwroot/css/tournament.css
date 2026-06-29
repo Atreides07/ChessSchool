@@ -1,4 +1,6 @@
-/* Стили страницы турнира (вынесены из Tournament.razor; @@ → @ для plain CSS, scope — Blazor CSS isolation). */
+/* Стили страницы турнира. ГЛОБАЛЬНЫЙ файл (НЕ *.razor.css): вся страница /t/{id} строится браузерным
+   tournament.js через innerHTML внутри #t-root, у этих DOM-узлов нет Blazor-scope-атрибута (b-xxx),
+   поэтому scoped CSS-изоляция к ним не применяется — стили обязаны быть глобальными. Подключён в App.razor. */
     .crumbs { display: flex; align-items: center; gap: .5rem; font-size: .92rem; color: var(--ink-2); margin-bottom: 1rem; flex-wrap: wrap; }
     .crumbs a { color: var(--ink-2); font-weight: 600; }
     .crumbs a:hover { color: var(--accent); }

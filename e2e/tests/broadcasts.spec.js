@@ -49,6 +49,14 @@ test('трансляция: онлайн-доски грузятся при пе
   await expect(page.locator('#bd-boards .bd-card').first()).toBeVisible();
   expect(await page.locator('#bd-boards .bd-card').count()).toBeGreaterThan(0);
 
+  // Ориентация/окраска доски не инвертированы: a1 тёмная, светлое поле справа-снизу (h1).
+  // Ячейки мини-доски идут в порядке r8..r1, a..h → 0=a8, 7=h8, 56=a1, 63=h1.
+  const corners = await page.$$eval('#bd-boards .bd-card:first-child .bd-msq', (els) => {
+    const tone = (i) => (els[i].classList.contains('d') ? 'dark' : 'light');
+    return { a8: tone(0), h8: tone(7), a1: tone(56), h1: tone(63) };
+  });
+  expect(corners, 'цвета клеток инвертированы').toEqual({ a8: 'light', h8: 'dark', a1: 'dark', h1: 'light' });
+
   // Клик по доске открывает оверлей с навигацией по ходам.
   await page.locator('#bd-boards .bd-card').first().click();
   await expect(page.locator('#bd-overlay')).toBeVisible();

@@ -88,7 +88,7 @@ else
             const cols = flip ? [...files].reverse() : files;
             for (const r of ranks) for (const f of cols) {
                 const sq = f + r;
-                const dark = (files.indexOf(f) + r) % 2 === 0;
+                const dark = (files.indexOf(f) + r) % 2 === 1; // a1 тёмная (светлое поле справа-снизу)
                 const el = document.createElement('div');
                 el.className = 'sq ' + (dark ? 'dark' : 'light');
                 el.dataset.sq = sq;

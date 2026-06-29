@@ -59,7 +59,7 @@
         const pos = parseFen(fen);
         let html = '';
         for (let r = 8; r >= 1; r--) for (let fi = 0; fi < 8; fi++) {
-            const f = FILES[fi], sq = f + r, dark = (fi + r) % 2 === 0;
+            const f = FILES[fi], sq = f + r, dark = (fi + r) % 2 === 1; // a1 тёмная (light справа-снизу)
             const hl = (sq === from || sq === to) ? ' hl' : '';
             const ch = pos[sq];
             html += `<div class="bd-msq ${dark ? 'd' : 'l'}${hl}">${ch ? pieceImg(ch) : ''}</div>`;
@@ -105,7 +105,7 @@
         boardEl.innerHTML = '';
         for (const k in cells) delete cells[k];
         for (let r = 8; r >= 1; r--) for (let fi = 0; fi < 8; fi++) {
-            const f = FILES[fi], sq = f + r, dark = (fi + r) % 2 === 0, tone = dark ? 'on-dark' : 'on-light';
+            const f = FILES[fi], sq = f + r, dark = (fi + r) % 2 === 1, tone = dark ? 'on-dark' : 'on-light'; // a1 тёмная
             const el = document.createElement('div');
             el.className = 'sq ' + (dark ? 'dark' : 'light');
             let cd = '';

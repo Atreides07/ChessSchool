@@ -19,6 +19,7 @@ builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
 builder.Services.AddScoped<ArenaGameStore>();
 builder.Services.AddScoped<SubscriptionService>();
+builder.Services.AddScoped<StudentService>();
 // Провайдер эквайринга: Paddle при наличии конфига (секрет вебхука/API-ключ), иначе dev-заглушка
 // (оплата проходит локально). Выбор по конфигу — как S3↔MinIO.
 var paddleOptions = builder.Configuration.GetSection("Paddle").Get<PaddleOptions>() ?? new PaddleOptions();
@@ -47,6 +48,10 @@ builder.Services.AddHttpClient("auth", c => c.BaseAddress = new("https+http://au
 // Вне Development обязателен реальный секрет — иначе старт падает (см. ResolveInternalApiKey).
 var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
 
+// Клиент к IdP для резолва пользователей (привязка ученика по e-mail, обогащение списка подписок именами).
+builder.Services.AddSingleton(sp => new IdpUserClient(
+    sp.GetRequiredService<IHttpClientFactory>(), internalKey, sp.GetRequiredService<ILogger<IdpUserClient>>()));
+
 var app = builder.Build();
 
 // Применение схемы. В проде миграции — ОТДЕЛЬНЫМ шагом (тот же образ с аргументом `migrate` как k8s Job),
@@ -67,169 +72,55 @@ if (migrateRequested) return; // режим миграции: схему при�
 app.UseExceptionHandler();
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 
-// ---------- Маппинг доменных сущностей в DTO ----------
-static StudentDto ToDto(Student s) =>
-    new(s.Id, s.GroupId, s.DisplayName, s.Rating, s.RatingDeviation, s.GamesPlayed, s.Wins, s.Draws, s.Losses, s.LinkedUserSub);
-
-async Task<StudentProfileDto?> BuildProfileAsync(SchoolDbContext db, Guid studentId, CancellationToken ct)
-{
-    var student = await db.Students.FindAsync([studentId], ct);
-    if (student is null) return null;
-
-    var history = await db.RatingPoints.AsNoTracking()
-        .Where(r => r.StudentId == studentId)
-        .OrderBy(r => r.Date)
-        .Select(r => new RatingPointDto(r.Date, r.Rating))
-        .ToListAsync(ct);
-
-    // Берём только нужные колонки последних 10 партий (без трекинга и лишних полей).
-    var games = await db.Games.AsNoTracking()
-        .Where(g => g.WhiteStudentId == studentId || g.BlackStudentId == studentId)
-        .OrderByDescending(g => g.PlayedAt).Take(10)
-        .Select(g => new
-        {
-            g.Id,
-            g.PlayedAt,
-            g.WhiteStudentId,
-            g.BlackStudentId,
-            g.Result,
-            g.WhiteRatingChange,
-            g.BlackRatingChange,
-            g.Pgn
-        })
-        .ToListAsync(ct);
-
-    // Имена соперников — только по фактически встретившимся id (а не вся таблица учеников).
-    var oppIds = games
-        .Select(g => g.WhiteStudentId == studentId ? g.BlackStudentId : g.WhiteStudentId)
-        .OfType<Guid>().Distinct().ToList();
-    var names = await db.Students.AsNoTracking()
-        .Where(s => oppIds.Contains(s.Id))
-        .Select(s => new { s.Id, s.DisplayName })
-        .ToDictionaryAsync(s => s.Id, s => s.DisplayName, ct);
-
-    var summaries = games.Select(g =>
-    {
-        bool isWhite = g.WhiteStudentId == studentId;
-        var oppId = isWhite ? g.BlackStudentId : g.WhiteStudentId;
-        var oppName = oppId is { } id && names.TryGetValue(id, out var n) ? n : "Гость";
-        return new GameSummaryDto(g.Id, g.PlayedAt, oppName,
-            isWhite ? PieceColor.White : PieceColor.Black, g.Result,
-            isWhite ? g.WhiteRatingChange : g.BlackRatingChange, g.Pgn);
-    }).ToList();
-
-    return new StudentProfileDto(ToDto(student), history, summaries);
-}
-
-// Пагинация: единый разбор и ограничение страницы (защита от выборки «всё» на больших таблицах).
-static (int Skip, int Take) Page(int? skip, int? take, int maxTake = 200, int defaultTake = 100) =>
-    (Math.Max(0, skip ?? 0), Math.Clamp(take ?? defaultTake, 1, maxTake));
-
-// ---------- ЛК школы (чтение) ----------
+// ---------- ЛК школы (чтение) — тонкие эндпоинты над StudentService ----------
 app.MapGet("/schools/{schoolId:guid}/students",
-    async (Guid schoolId, int? skip, int? take, SchoolDbContext db, CancellationToken ct) =>
-{
-    var (s, t) = Page(skip, take);
-    // Один запрос с join, проекцией в DTO и пагинацией — без трекинга и без выборки всей таблицы.
-    var students = await (
-        from st in db.Students.AsNoTracking()
-        join g in db.Groups on st.GroupId equals g.Id
-        where g.SchoolId == schoolId
-        orderby st.Rating descending
-        select new StudentDto(st.Id, st.GroupId, st.DisplayName, st.Rating, st.RatingDeviation,
-            st.GamesPlayed, st.Wins, st.Draws, st.Losses, st.LinkedUserSub))
-        .Skip(s).Take(t).ToListAsync(ct);
-    return Results.Ok(students);
-});
+    async (Guid schoolId, int? skip, int? take, StudentService students, CancellationToken ct) =>
+    Results.Ok(await students.ListBySchoolAsync(schoolId, skip, take, ct)));
 
-app.MapGet("/students/{id:guid}", async (Guid id, SchoolDbContext db, CancellationToken ct) =>
-    await BuildProfileAsync(db, id, ct) is { } p ? Results.Ok(p) : Results.NotFound());
+app.MapGet("/students/{id:guid}", async (Guid id, StudentService students, CancellationToken ct) =>
+    await students.GetProfileAsync(id, ct) is { } p ? Results.Ok(p) : Results.NotFound());
 
 app.MapGet("/schools/{schoolId:guid}/pending-games",
-    async (Guid schoolId, int? skip, int? take, SchoolDbContext db, CancellationToken ct) =>
-{
-    var (s, t) = Page(skip, take);
-    var pending = await db.Games.AsNoTracking()
-        .Where(g => g.Source == AttributionSource.None && g.WhiteStudentId == null)
-        .OrderByDescending(g => g.PlayedAt)
-        .Skip(s).Take(t)
-        .Select(g => new PendingGameDto(g.Id, g.PlayedAt, g.DeviceRef ?? "—", g.Pgn))
-        .ToListAsync(ct);
-    return Results.Ok(pending);
-});
+    async (Guid schoolId, int? skip, int? take, StudentService students, CancellationToken ct) =>
+    Results.Ok(await students.ListPendingGamesAsync(schoolId, skip, take, ct)));
 
 // ---------- ЛК школы (мутации) ----------
 // Для локального демо открыты; в проде гейтятся JWT от IdP (см. docs).
 app.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStudentRequest req,
-    SchoolDbContext db, IAnalytics analytics, CancellationToken ct) =>
+    StudentService students, CancellationToken ct) =>
 {
-    if (!await db.Groups.AnyAsync(g => g.Id == req.GroupId && g.SchoolId == schoolId, ct))
-        return Results.BadRequest(new { error = "Группа не найдена в этой школе." });
-
-    var student = new Student { GroupId = req.GroupId, DisplayName = req.DisplayName, BirthDate = req.BirthDate };
-    db.Students.Add(student);
-    await db.SaveChangesAsync(ct);
-    analytics.Capture("student_created", schoolId.ToString(), new Dictionary<string, object?> { ["group_id"] = req.GroupId });
-    return Results.Created($"/students/{student.Id}", ToDto(student));
+    var (dto, error) = await students.CreateAsync(schoolId, req, ct);
+    return error is not null ? Results.BadRequest(new { error }) : Results.Created($"/students/{dto!.Id}", dto);
 });
 
 app.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest req,
-    SchoolDbContext db, GameArchiver archiver, IAnalytics analytics, CancellationToken ct) =>
-{
-    var game = await db.Games.FindAsync([id], ct);
-    if (game is null) return Results.NotFound();
-    var white = await db.Students.FindAsync([req.WhiteStudentId], ct);
-    var black = await db.Students.FindAsync([req.BlackStudentId], ct);
-    if (white is null || black is null) return Results.BadRequest(new { error = "Ученик не найден." });
-
-    await archiver.AttributeAsync(game, white, black, req.Result, ct);
-    analytics.Capture("game_attributed", id.ToString(), new Dictionary<string, object?> { ["result"] = req.Result.ToString() });
-    return Results.Ok();
-});
+    StudentService students, CancellationToken ct) =>
+    await students.AttributeAsync(id, req, ct) switch
+    {
+        StudentService.AttributeOutcome.GameNotFound => Results.NotFound(),
+        StudentService.AttributeOutcome.StudentNotFound => Results.BadRequest(new { error = "Ученик не найден." }),
+        _ => Results.Ok(),
+    });
 
 // ---------- Привязка ученика к онлайн-аккаунту (по email из IdP) ----------
-app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req, SchoolDbContext db,
-    IHttpClientFactory httpFactory, IAnalytics analytics, CancellationToken ct) =>
+app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req,
+    StudentService students, CancellationToken ct) =>
 {
-    var student = await db.Students.FindAsync([id], ct);
-    if (student is null) return Results.NotFound();
-
-    var client = httpFactory.CreateClient("auth");
-    var msg = new HttpRequestMessage(HttpMethod.Post, "/internal/users/by-email")
+    var (outcome, dto) = await students.LinkAsync(id, req.Email, ct);
+    return outcome switch
     {
-        Content = JsonContent.Create(new { email = req.Email })
+        StudentService.LinkOutcome.StudentNotFound => Results.NotFound(),
+        StudentService.LinkOutcome.UserNotFound => Results.BadRequest(new { error = "Пользователь с таким email не найден в IdP." }),
+        _ => Results.Ok(dto),
     };
-    msg.Headers.Add("X-Internal-Key", internalKey);
-    var resp = await client.SendAsync(msg, ct);
-    if (!resp.IsSuccessStatusCode)
-        return Results.BadRequest(new { error = "Пользователь с таким email не найден в IdP." });
-
-    var found = await resp.Content.ReadFromJsonAsync<ResolvedUser>(ct);
-    student.LinkedUserSub = found!.Sub;
-    await db.SaveChangesAsync(ct);
-    analytics.Capture("student_account_linked", found.Sub, new Dictionary<string, object?> { ["student_id"] = id });
-    return Results.Ok(ToDto(student));
 });
 
 // ---------- Шаринг профиля родителю ----------
-app.MapPost("/students/{id:guid}/share", async (Guid id, SchoolDbContext db, IAnalytics analytics, CancellationToken ct) =>
-{
-    if (!await db.Students.AnyAsync(s => s.Id == id, ct)) return Results.NotFound();
-    var token = Guid.NewGuid().ToString("N");
-    db.ShareLinks.Add(new ShareLink { StudentId = id, Token = token, ExpiresAt = DateTimeOffset.UtcNow.AddDays(90) });
-    await db.SaveChangesAsync(ct);
-    analytics.Capture("share_link_created", id.ToString());
-    return Results.Ok(new ShareLinkDto(token, $"/p/{token}", DateTimeOffset.UtcNow.AddDays(90)));
-});
+app.MapPost("/students/{id:guid}/share", async (Guid id, StudentService students, CancellationToken ct) =>
+    await students.CreateShareAsync(id, ct) is { } link ? Results.Ok(link) : Results.NotFound());
 
-app.MapGet("/share/{token}", async (string token, SchoolDbContext db, IAnalytics analytics, CancellationToken ct) =>
-{
-    var link = await db.ShareLinks.FirstOrDefaultAsync(s => s.Token == token && !s.Revoked, ct);
-    if (link is null || (link.ExpiresAt is { } e && e < DateTimeOffset.UtcNow)) return Results.NotFound();
-    if (await BuildProfileAsync(db, link.StudentId, ct) is not { } p) return Results.NotFound();
-    analytics.Capture("parent_profile_viewed", link.StudentId.ToString(), new Dictionary<string, object?> { ["source"] = "share_link" });
-    return Results.Ok(p);
-});
+app.MapGet("/share/{token}", async (string token, StudentService students, CancellationToken ct) =>
+    await students.GetSharedProfileAsync(token, ct) is { } p ? Results.Ok(p) : Results.NotFound());
 
 // ---------- Внутренний приём онлайн-партий от GameServer ----------
 app.MapPost("/internal/games/archive", async (ArchiveGameRequest req, HttpRequest http,
@@ -337,35 +228,15 @@ app.MapPost("/internal/subscriptions/reconcile-transaction", async (ReconcileTxn
 // Защита — внутренний ключ (вызывает только Arena из-под политики Admin). Это сознательный обход
 // провайдера: выданное вручную состояние — источник истины наравне с вебхуком (last-write-wins;
 // вебхук Paddle может его позже переписать). Резолв e-mail/имени — батчем в IdP (деградирует тихо).
-async Task<List<AdminSubscriptionDto>> EnrichWithUsersAsync(IReadOnlyList<AdminSubscriptionDto> rows,
-    IHttpClientFactory hf, CancellationToken ct)
-{
-    if (rows.Count == 0) return [];
-    var byEmail = new Dictionary<string, UserInfo>(StringComparer.Ordinal);
-    try
-    {
-        var client = hf.CreateClient("auth");
-        using var msg = new HttpRequestMessage(HttpMethod.Post, "/internal/users/by-subs")
-        { Content = JsonContent.Create(new BySubsRequest(rows.Select(r => r.UserSub).Distinct().ToList())) };
-        msg.Headers.Add("X-Internal-Key", internalKey);
-        using var resp = await client.SendAsync(msg, ct);
-        if (resp.IsSuccessStatusCode && await resp.Content.ReadFromJsonAsync<List<UserInfo>>(ct) is { } users)
-            foreach (var u in users) byEmail[u.Sub] = u;
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning(ex, "Не удалось резолвить пользователей по sub для админки подписок — список без имён.");
-    }
-    return rows.Select(r => byEmail.TryGetValue(r.UserSub, out var u)
-        ? r with { Email = u.Email, DisplayName = u.DisplayName } : r).ToList();
-}
-
 app.MapGet("/internal/admin/subscriptions", async (HttpRequest http, int? take,
-    SubscriptionService subs, IHttpClientFactory hf, CancellationToken ct) =>
+    SubscriptionService subs, IdpUserClient idp, CancellationToken ct) =>
 {
     if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var rows = await subs.ListAsync(take ?? 500, ct);
-    return Results.Ok(await EnrichWithUsersAsync(rows, hf, ct));
+    var users = await idp.ResolveBySubsAsync(rows.Select(r => r.UserSub).Distinct().ToList(), ct);
+    var enriched = rows.Select(r => users.TryGetValue(r.UserSub, out var u)
+        ? r with { Email = u.Email, DisplayName = u.DisplayName } : r).ToList();
+    return Results.Ok(enriched);
 });
 
 app.MapPost("/internal/admin/subscriptions/{sub}", async (string sub, AdminSetSubscriptionRequest req,
@@ -377,19 +248,12 @@ app.MapPost("/internal/admin/subscriptions/{sub}", async (string sub, AdminSetSu
 });
 
 app.MapPost("/internal/admin/subscriptions/by-email", async (AdminSetByEmailRequest req, HttpRequest http,
-    SubscriptionService subs, IHttpClientFactory hf, CancellationToken ct) =>
+    SubscriptionService subs, IdpUserClient idp, CancellationToken ct) =>
 {
     if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(req.Email)) return Results.BadRequest(new { error = "Не указан e-mail." });
 
-    var client = hf.CreateClient("auth");
-    using var msg = new HttpRequestMessage(HttpMethod.Post, "/internal/users/by-email")
-    { Content = JsonContent.Create(new { email = req.Email }) };
-    msg.Headers.Add("X-Internal-Key", internalKey);
-    using var resp = await client.SendAsync(msg, ct);
-    if (!resp.IsSuccessStatusCode)
-        return Results.NotFound(new { error = "Пользователь с таким e-mail не найден в IdP." });
-    var found = await resp.Content.ReadFromJsonAsync<ResolvedUser>(ct);
+    var found = await idp.ResolveByEmailAsync(req.Email, ct);
     if (found is null) return Results.NotFound(new { error = "Пользователь с таким e-mail не найден в IdP." });
 
     var dto = await subs.AdminSetAsync(found.Sub, req.Status, req.Plan, req.CurrentPeriodEnd, ct);
@@ -438,8 +302,6 @@ app.MapPost("/webhooks/paddle", async (HttpRequest http, SubscriptionService sub
 app.MapGet("/", () => "ChessSchool API. ЛК: /schools/{id}/students");
 app.MapDefaultEndpoints();
 app.Run();
-
-internal sealed record ResolvedUser(string Sub, string DisplayName);
 
 namespace ChessSchool.ApiService
 {

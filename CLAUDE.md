@@ -368,6 +368,19 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
     авто-высоту (ряды с фигурами выше пустых) → клетки разного размера («клетки не одинаковые»). Лечение:
     `grid-template-rows: repeat(8,1fr)` тоже + `min-width/height:0` на flex-ячейке. Оверлей и `/play` это
     задавали изначально. Защищено e2e-проверкой равенства размеров всех 64 клеток.
+16. **Холодная сборка Blazor-проектов (Web/Arena) валится сотнями ложных Razor-ошибок на .NET SDK 10.0.300.**
+    Симптом: `dotnet build` после удаления `obj/` (или сборка из Rider/CI на чистом дереве) выдаёт сотни
+    ошибок во ВСЕХ `.razor` (в т.ч. нетронутых): `ParameterAttribute/EventCallback/NavigationManager не
+    найдены`, `A compilation unit cannot directly contain members`, `__PrivateComponentRenderModeAttribute
+    does not exist`, `<h1>@_name</h1>` парсится как C# (`_name<,>`, `h1` как типы). Причина — **баг Razor
+    source-generator в SDK 10.0.300**: при полной генерации компонентов с `@rendermode` не эмитится партиал
+    render-mode-атрибута, дальше каскад. Инкрементальная сборка 1–2 файлов и `dotnet test` проходят (берут
+    кэш `.g.cs` в `obj/`), поэтому баг прячется до первой чистой сборки. Лечение (применено в
+    [Web](ChessSchool.Web/ChessSchool.Web.csproj)/[Arena](ChessSchool.Arena/ChessSchool.Arena.csproj).csproj):
+    `<UseRazorSourceGenerator>false</UseRazorSourceGenerator>` — классический компайл-тайм кодоген Razor
+    (идентичный рантайм, стабильная сборка). Убрать, когда SDK починят (или запинить рабочий 10.0.x в
+    `global.json`). Источник менять НЕ нужно — он валиден. **Не диагностировать инкрементальной сборкой:
+    проверять чистоту только через `--no-incremental` или удаление `obj/`.**
 
 ## Безопасность и конфигурация
 

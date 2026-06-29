@@ -23,6 +23,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UserSecretsId>d36eeab8-f3a7-4efe-a6dd-a2b8c33f2a30</UserSecretsId>
+    <!-- Обход бага Razor source-generator в .NET SDK 10.0.300: на холодной (полной) генерации
+         компонентов с @rendermode партиал render-mode-атрибута не эмитится, и сборка валится
+         сотнями ложных ошибок (валидная разметка парсится как C#). Классический компайл-тайм
+         кодоген Razor даёт идентичный рантайм и собирается стабильно. Убрать, когда SDK починят. -->
+    <UseRazorSourceGenerator>false</UseRazorSourceGenerator>
   </PropertyGroup>
 
 </Project>

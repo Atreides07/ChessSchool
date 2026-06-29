@@ -5,22 +5,17 @@
 
 ## Безопасность
 
-### Прод тонкого клиента `/play`: обновление access-токена (refresh)
-**Приоритет:** высокий (блокер для прода онлайн-игры).
-
-Браузерный тонкий клиент [Play.razor](../ChessSchool.Web/Components/Pages/Play.razor) подключается
-к SignalR-хабу GameServer напрямую, используя access-токен. Сейчас токен берётся разово и
-**протухает (~1 час)** — после этого reconnect к `/gamehub` падает на авторизации, и длинная
-партия рвётся.
-
-**Что сделать:** для SignalR-клиента задать `accessTokenFactory`, который тянет свежий токен с
-серверного эндпоинта (через `refresh_token`), а не использует статичный токен из cookie/claim.
-Тогда reconnect и долгие партии переживают истечение токена.
-
-**Затронуто:** `ChessSchool.Web` (клиент `/play`, эндпоинт выдачи game-токена),
-валидация в `ChessSchool.GameServer`.
-
-**Связанные грабли:** см. CLAUDE.md (раздел «Грабли») и память проекта про тонкий клиент.
+### ✅ Прод тонкого клиента `/play`: обновление access-токена (refresh)
+**Сделано** (пункт оказался уже закрыт в коде). SignalR-клиент в
+[Play.razor](../ChessSchool.Web/Components/Pages/Play.razor) подключается к `/gamehub` с
+`accessTokenFactory: getToken` + `withAutomaticReconnect()` — фабрика вызывается на каждом
+connect/reconnect и тянет свежий токен с серверного эндпоинта `GET /api/game-token`
+([Web/Program.cs](../ChessSchool.Web/Program.cs)). Эндпоинт читает токены из тикета сессии
+(`SaveTokens=true`), и при истечении (буфер 30 с) обновляет access-токен по `refresh_token`
+(grant `refresh_token` → `/connect/token`), сохраняя новые токены через `SignInAsync`
+(переживает несколько нод — общий ticket-store в Redis). GameServer валидирует JWT на
+(re)connect (`OnMessageReceived` берёт токен из query `access_token`). Итог: reconnect и
+долгие партии переживают истечение access-токена.
 
 ### ✅ Возвращён тест безопасности JWKS (runtime-проверка)
 **Сделано.** Добавлен интеграционный тест `AuthIntegrationTests.Jwks_ExposesOnlyPublicKeyMaterial`

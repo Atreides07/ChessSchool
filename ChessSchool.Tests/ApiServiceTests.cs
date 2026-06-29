@@ -60,6 +60,33 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
         Assert.NotEmpty(profile!.RatingHistory);
     }
 
+    // Гейт server-to-server: /internal/* закрыт фильтром RequireInternalKey (один на всю группу).
+    [Fact]
+    public async Task Internal_WithoutKey_Returns401()
+    {
+        var resp = await _client.GetAsync("/internal/subscriptions/some-user");
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Internal_WithWrongKey_Returns401()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, "/internal/subscriptions/some-user");
+        req.Headers.Add("X-Internal-Key", "wrong-key");
+        var resp = await _client.SendAsync(req);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Internal_WithValidKey_PassesGate()
+    {
+        // В тестовом окружении (Development без конфига) внутренний ключ = "dev-internal-key".
+        var req = new HttpRequestMessage(HttpMethod.Get, "/internal/subscriptions/some-user");
+        req.Headers.Add("X-Internal-Key", "dev-internal-key");
+        var resp = await _client.SendAsync(req);
+        Assert.Equal(System.Net.HttpStatusCode.OK, resp.StatusCode); // прошёл гейт, отдал entitlement
+    }
+
     public sealed class Factory : WebApplicationFactory<ChessSchool.ApiService.ApiServiceMarker>
     {
         private readonly string _dbName = $"chessschool-test-{Guid.NewGuid():N}";

@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using ChessSchool.ApiService;
 using ChessSchool.ApiService.Data;
 using ChessSchool.ApiService.Domain;
 using ChessSchool.ApiService.Services;
@@ -122,77 +123,51 @@ app.MapPost("/students/{id:guid}/share", async (Guid id, StudentService students
 app.MapGet("/share/{token}", async (string token, StudentService students, CancellationToken ct) =>
     await students.GetSharedProfileAsync(token, ct) is { } p ? Results.Ok(p) : Results.NotFound());
 
-// ---------- Внутренний приём онлайн-партий от GameServer ----------
-app.MapPost("/internal/games/archive", async (ArchiveGameRequest req, HttpRequest http,
-    GameArchiver archiver, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    var created = await archiver.ArchiveOnlineAsync(req, ct);
-    return Results.Ok(new { archived = created });
-});
+// ---------- Внутренние эндпоинты (server-to-server) — все под одним гейтом X-Internal-Key ----------
+// Гейт навешен на группу один раз (см. RequireInternalKey), а не дублируется в каждом обработчике.
+var internalApi = app.MapGroup("/internal").RequireInternalKey(internalKey);
 
-// --- Арена-партии (B2C): архив + история игрока + разбор. Всё под внутренним ключом (server-to-server). ---
-app.MapPost("/internal/arena-games/archive", async (ArenaGameArchiveRequest req, HttpRequest http,
-    ArenaGameStore store, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    return Results.Ok(new { archived = await store.ArchiveAsync(req, ct) });
-});
+// Приём онлайн-партий от GameServer.
+internalApi.MapPost("/games/archive", async (ArchiveGameRequest req, GameArchiver archiver, CancellationToken ct) =>
+    Results.Ok(new { archived = await archiver.ArchiveOnlineAsync(req, ct) }));
 
-app.MapGet("/internal/arena-games", async (string sub, int? skip, int? take, HttpRequest http,
-    ArenaGameStore store, CancellationToken ct) =>
+// --- Арена-партии (B2C): архив + история игрока + разбор. ---
+internalApi.MapPost("/arena-games/archive", async (ArenaGameArchiveRequest req, ArenaGameStore store, CancellationToken ct) =>
+    Results.Ok(new { archived = await store.ArchiveAsync(req, ct) }));
+
+internalApi.MapGet("/arena-games", async (string sub, int? skip, int? take, ArenaGameStore store, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var t = Math.Clamp(take ?? 20, 1, 100); // лимит выборки — без «отдай всё»
     return Results.Ok(await store.ListForPlayerAsync(sub, Math.Max(0, skip ?? 0), t, ct));
 });
 
-app.MapGet("/internal/arena-games/stats", async (string sub, HttpRequest http,
-    ArenaGameStore store, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    return Results.Ok(await store.GetStatsAsync(sub, ct));
-});
+internalApi.MapGet("/arena-games/stats", async (string sub, ArenaGameStore store, CancellationToken ct) =>
+    Results.Ok(await store.GetStatsAsync(sub, ct)));
 
-app.MapGet("/internal/arena-games/{id:guid}", async (Guid id, string sub, HttpRequest http,
-    ArenaGameStore store, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    var g = await store.GetForPlayerAsync(id, sub, ct);
-    return g is null ? Results.NotFound() : Results.Ok(g);
-});
+internalApi.MapGet("/arena-games/{id:guid}", async (Guid id, string sub, ArenaGameStore store, CancellationToken ct) =>
+    await store.GetForPlayerAsync(id, sub, ct) is { } g ? Results.Ok(g) : Results.NotFound());
 
-app.MapGet("/internal/arena-games/{id:guid}/analysis", async (Guid id, string sub, HttpRequest http,
-    ArenaGameStore store, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    var json = await store.GetAnalysisJsonAsync(id, sub, ct);
-    return json is null ? Results.NoContent() : Results.Content(json, "application/json");
-});
+internalApi.MapGet("/arena-games/{id:guid}/analysis", async (Guid id, string sub, ArenaGameStore store, CancellationToken ct) =>
+    await store.GetAnalysisJsonAsync(id, sub, ct) is { } json
+        ? Results.Content(json, "application/json") : Results.NoContent());
 
-app.MapPost("/internal/arena-games/{id:guid}/analysis", async (Guid id, HttpRequest http,
+internalApi.MapPost("/arena-games/{id:guid}/analysis", async (Guid id, HttpRequest http,
     ArenaGameStore store, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     using var reader = new StreamReader(http.Body);
     var json = await reader.ReadToEndAsync(ct);
     await store.SaveAnalysisJsonAsync(id, json, ct);
     return Results.Ok();
 });
 
-// Entitlement подписки для потребителей (Arena/Web) — server-to-server по внутреннему ключу.
-app.MapGet("/internal/subscriptions/{sub}", async (string sub, HttpRequest http,
-    SubscriptionService subs, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    return Results.Ok(await subs.GetAsync(sub, ct));
-});
+// Entitlement подписки для потребителей (Arena/Web).
+internalApi.MapGet("/subscriptions/{sub}", async (string sub, SubscriptionService subs, CancellationToken ct) =>
+    Results.Ok(await subs.GetAsync(sub, ct)));
 
 // Customer Portal: сессия hosted-портала провайдера (отмена/смена карты) для пользователя.
-app.MapGet("/internal/subscriptions/{sub}/portal", async (string sub, HttpRequest http,
+internalApi.MapGet("/subscriptions/{sub}/portal", async (string sub,
     SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var customerId = await subsSvc.GetProviderCustomerIdAsync(sub, ct);
     var url = string.IsNullOrEmpty(customerId) ? null : await billing.CreatePortalUrlAsync(customerId, ct);
     return Results.Ok(new PortalLinkDto(url));
@@ -201,10 +176,9 @@ app.MapGet("/internal/subscriptions/{sub}/portal", async (string sub, HttpReques
 // Вытягивание статуса (reconcile из API провайдера, если вебхук не дошёл). Сначала по сохранённой
 // подписке; если её нет/не дала результата — по e-mail пользователя (надёжное восстановление: работает,
 // даже когда строки подписки у нас нет — например, после ручного снятия в админке).
-app.MapPost("/internal/subscriptions/{sub}/refresh", async (string sub, string? email, HttpRequest http,
+internalApi.MapPost("/subscriptions/{sub}/refresh", async (string sub, string? email,
     SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     BillingEventDto? state = null;
     var subId = await subsSvc.GetProviderSubscriptionIdAsync(sub, ct);
     if (!string.IsNullOrEmpty(subId)) state = await billing.FetchSubscriptionAsync(subId, ct, sub);
@@ -215,10 +189,9 @@ app.MapPost("/internal/subscriptions/{sub}/refresh", async (string sub, string? 
 });
 
 // Reconcile по transaction id из success-URL checkout — активирует премиум без вебхука (user_sub из txn).
-app.MapPost("/internal/subscriptions/reconcile-transaction", async (ReconcileTxnRequest req, HttpRequest http,
+internalApi.MapPost("/subscriptions/reconcile-transaction", async (ReconcileTxnRequest req,
     SubscriptionService subsSvc, IBillingProvider billing, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var state = await billing.FetchByTransactionAsync(req.TransactionId, ct);
     if (state is not null) await subsSvc.ReconcileAsync(state, ct);
     return Results.Ok(state is null ? null : await subsSvc.GetAsync(state.UserSub, ct));
@@ -228,10 +201,9 @@ app.MapPost("/internal/subscriptions/reconcile-transaction", async (ReconcileTxn
 // Защита — внутренний ключ (вызывает только Arena из-под политики Admin). Это сознательный обход
 // провайдера: выданное вручную состояние — источник истины наравне с вебхуком (last-write-wins;
 // вебхук Paddle может его позже переписать). Резолв e-mail/имени — батчем в IdP (деградирует тихо).
-app.MapGet("/internal/admin/subscriptions", async (HttpRequest http, int? take,
+internalApi.MapGet("/admin/subscriptions", async (int? take,
     SubscriptionService subs, IdpUserClient idp, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     var rows = await subs.ListAsync(take ?? 500, ct);
     var users = await idp.ResolveBySubsAsync(rows.Select(r => r.UserSub).Distinct().ToList(), ct);
     var enriched = rows.Select(r => users.TryGetValue(r.UserSub, out var u)
@@ -239,18 +211,16 @@ app.MapGet("/internal/admin/subscriptions", async (HttpRequest http, int? take,
     return Results.Ok(enriched);
 });
 
-app.MapPost("/internal/admin/subscriptions/{sub}", async (string sub, AdminSetSubscriptionRequest req,
-    HttpRequest http, SubscriptionService subs, CancellationToken ct) =>
+internalApi.MapPost("/admin/subscriptions/{sub}", async (string sub, AdminSetSubscriptionRequest req,
+    SubscriptionService subs, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(sub)) return Results.BadRequest(new { error = "Пустой sub." });
     return Results.Ok(await subs.AdminSetAsync(sub, req.Status, req.Plan, req.CurrentPeriodEnd, ct));
 });
 
-app.MapPost("/internal/admin/subscriptions/by-email", async (AdminSetByEmailRequest req, HttpRequest http,
+internalApi.MapPost("/admin/subscriptions/by-email", async (AdminSetByEmailRequest req,
     SubscriptionService subs, IdpUserClient idp, CancellationToken ct) =>
 {
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(req.Email)) return Results.BadRequest(new { error = "Не указан e-mail." });
 
     var found = await idp.ResolveByEmailAsync(req.Email, ct);
@@ -260,20 +230,15 @@ app.MapPost("/internal/admin/subscriptions/by-email", async (AdminSetByEmailRequ
     return Results.Ok(new { sub = found.Sub, subscription = dto });
 });
 
-app.MapDelete("/internal/admin/subscriptions/{sub}", async (string sub, HttpRequest http,
-    SubscriptionService subs, CancellationToken ct) =>
-{
-    if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
-    return await subs.AdminRemoveAsync(sub, ct) ? Results.Ok() : Results.NotFound();
-});
+internalApi.MapDelete("/admin/subscriptions/{sub}", async (string sub, SubscriptionService subs, CancellationToken ct) =>
+    await subs.AdminRemoveAsync(sub, ct) ? Results.Ok() : Results.NotFound());
 
 // Dev-активация премиума без провайдера (только Development) — локальный тест гейтинга.
 if (app.Environment.IsDevelopment())
 {
-    app.MapPost("/internal/subscriptions/dev-activate", async (DevActivateRequest req, HttpRequest http,
+    internalApi.MapPost("/subscriptions/dev-activate", async (DevActivateRequest req,
         SubscriptionService subs, CancellationToken ct) =>
     {
-        if (http.Headers["X-Internal-Key"] != internalKey) return Results.Unauthorized();
         await subs.ApplyAsync(new BillingEventDto($"dev-{Guid.NewGuid():N}", req.UserSub,
             SubscriptionStatus.Active, req.Plan ?? "premium",
             CurrentPeriodEnd: DateTimeOffset.UtcNow.AddMonths(1)), ct);

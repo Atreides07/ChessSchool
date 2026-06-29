@@ -9,8 +9,12 @@ public sealed class SchoolApiClient(HttpClient http)
     public async Task<IReadOnlyList<StudentDto>> GetStudentsAsync(Guid schoolId, CancellationToken ct = default) =>
         await http.GetFromJsonAsync<List<StudentDto>>($"/schools/{schoolId}/students", ct) ?? [];
 
-    public async Task<StudentProfileDto?> GetProfileAsync(Guid studentId, CancellationToken ct = default) =>
-        await http.GetFromJsonAsync<StudentProfileDto>($"/students/{studentId}", ct);
+    // Несуществующий ученик → API отдаёт 404; не бросаем (иначе страница падает 500), отдаём null.
+    public async Task<StudentProfileDto?> GetProfileAsync(Guid studentId, CancellationToken ct = default)
+    {
+        var resp = await http.GetAsync($"/students/{studentId}", ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<StudentProfileDto>(ct) : null;
+    }
 
     public async Task<StudentProfileDto?> GetSharedAsync(string token, CancellationToken ct = default)
     {

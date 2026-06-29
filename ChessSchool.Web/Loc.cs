@@ -98,6 +98,7 @@ public static class Loc
 
         // --- Профили (StudentProfile / PublicProfile / ProfileView / RatingChart) ---
         ["profile.fallback"] = ("Профиль ученика", "Student profile"),
+        ["profile.notfound"] = ("Ученик не найден.", "Student not found."),
         ["profile.tolist"] = ("← К списку учеников", "← Back to students"),
         ["public.invalid"] = ("Ссылка недействительна или истекла.", "The link is invalid or has expired."),
         ["public.sub"] = ("Профиль ученика для родителя (только просмотр).", "Student profile for parents (view-only)."),

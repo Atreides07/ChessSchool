@@ -56,9 +56,14 @@
 Кто админ — решает **IdP** (ролевая модель): для админских e-mail он кладёт в токен claim `role=admin`
 ([AdminRoles](../ChessSchool.Auth/AdminRoles.cs)), а потребители гейтят админку политикой `RequireRole("admin")`
 ([Arena/Program.cs](../ChessSchool.Arena/Program.cs), `RoleClaimType="role"` в [SsoExtensions](../ChessSchool.WebAuth/SsoExtensions.cs)).
-По умолчанию админ — `akhmed@outlook.com`; список расширяется в Auth через `Admin:Emails` (через запятую).
-Ссылка «Админка» и все `/admin/*` видны/доступны только роли admin. После изменения состава админов
-пользователю нужно перелогиниться (роль едет в токене, выдаётся при входе).
+Кто админ — задаётся **только конфигом** `Admin:Emails` (через запятую): локально — user-secrets проекта
+Auth, в проде — env/KMS. В коде e-mail нет (никакой PII в git). Пустой список ⇒ админов нет (доступ к
+`/admin` закрыт — безопасный дефолт). Ссылка «Админка» и все `/admin/*` видны/доступны только роли admin.
+После изменения состава админов пользователю нужно перелогиниться (роль едет в токене, выдаётся при входе).
+
+```bash
+dotnet user-secrets set "Admin:Emails" "akhmed@outlook.com" --project ChessSchool.Auth
+```
 
 Открытие функционала под конкретные премиум-фичи — по мере продукта, через `IsPremiumAsync(sub)`.
 

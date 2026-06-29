@@ -9,14 +9,15 @@ namespace ChessSchool.Tests;
 public class AdminRolesTests
 {
     [Fact]
-    public void Resolve_EmptyConfig_DefaultsToBuiltInAdmin()
+    public void Resolve_EmptyConfig_NoAdmins_ClosedByDefault()
     {
+        // E-mail в коде нет: пустой конфиг ⇒ админов нет (в проде доступ закрыт). Админ задаётся
+        // только конфигом Admin:Emails (локально — user-secrets, в проде — env/KMS).
         foreach (var cfg in new[] { null, "", "   " })
         {
             var admins = AdminRoles.Resolve(cfg);
-            Assert.Single(admins);
-            Assert.Contains(AdminRoles.DefaultAdminEmail, admins);
-            Assert.True(AdminRoles.IsAdmin(admins, "akhmed@outlook.com"));
+            Assert.Empty(admins);
+            Assert.False(AdminRoles.IsAdmin(admins, "akhmed@outlook.com"));
         }
     }
 
@@ -27,8 +28,7 @@ public class AdminRolesTests
         Assert.Equal(3, admins.Count);
         Assert.True(AdminRoles.IsAdmin(admins, "a@x.com"));
         Assert.True(AdminRoles.IsAdmin(admins, "c@z.com"));
-        // Явный список — источник истины: дефолтный админ в нём не появляется автоматически.
-        Assert.False(AdminRoles.IsAdmin(admins, AdminRoles.DefaultAdminEmail));
+        Assert.False(AdminRoles.IsAdmin(admins, "nobody@x.com"));
     }
 
     [Fact]

@@ -53,8 +53,12 @@
 
 Премиум-статус **других** игроков не показывается (приватность) — бейдж виден только самому
 пользователю в его навигации. `IsPremiumAsync(sub)` гейтит фичи по текущему пользователю.
-Кто видит `/admin/*` — список e-mail в `Admin:Emails` (см. [Arena/Program.cs](../ChessSchool.Arena/Program.cs));
-в Development при пустом списке админ — любой аутентифицированный, в проде пустой список = доступ закрыт.
+Кто админ — решает **IdP** (ролевая модель): для админских e-mail он кладёт в токен claim `role=admin`
+([AdminRoles](../ChessSchool.Auth/AdminRoles.cs)), а потребители гейтят админку политикой `RequireRole("admin")`
+([Arena/Program.cs](../ChessSchool.Arena/Program.cs), `RoleClaimType="role"` в [SsoExtensions](../ChessSchool.WebAuth/SsoExtensions.cs)).
+По умолчанию админ — `akhmed@outlook.com`; список расширяется в Auth через `Admin:Emails` (через запятую).
+Ссылка «Админка» и все `/admin/*` видны/доступны только роли admin. После изменения состава админов
+пользователю нужно перелогиниться (роль едет в токене, выдаётся при входе).
 
 Открытие функционала под конкретные премиум-фичи — по мере продукта, через `IsPremiumAsync(sub)`.
 

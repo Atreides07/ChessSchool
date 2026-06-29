@@ -70,21 +70,10 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.IBrandTournaments>(
 // Каталог трансляций: источник истины — грейн (Redis grain storage), на ноде — кэш с TTL поверх него.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();
 
-// Авторизация админки (/admin): доступ только у e-mail из конфигурации Admin:Emails (через запятую).
-// В Development при пустом списке админом считается любой аутентифицированный пользователь (удобство dev);
-// вне Development пустой список = доступ закрыт всем (безопасный дефолт production-ready).
-var adminEmails = (builder.Configuration["Admin:Emails"] ?? "")
-    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-var adminFallbackAny = builder.Environment.IsDevelopment();
-builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy =>
-    policy.RequireAssertion(ctx =>
-    {
-        if (ctx.User.Identity?.IsAuthenticated != true) return false;
-        if (adminEmails.Length == 0) return adminFallbackAny;
-        var email = ctx.User.FindFirst("email")?.Value
-            ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
-        return email is not null && adminEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
-    }));
+// Авторизация админки (/admin): только роль "admin". Источник истины — IdP: он кладёт claim role=admin
+// в токен для админских e-mail (по умолчанию akhmed@outlook.com, список — Admin:Emails в Auth).
+// RoleClaimType="role" задаётся в AddChessSchoolSso, поэтому RequireRole видит этот claim.
+builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy => policy.RequireRole("admin"));
 
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();

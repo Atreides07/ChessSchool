@@ -55,6 +55,10 @@ public static class SsoExtensions
             o.GetClaimsFromUserInfoEndpoint = true;
             o.MapInboundClaims = false;
             o.TokenValidationParameters.NameClaimType = "name";
+            // Ролевая модель: роль приходит из IdP в claim "role" (id-токен + userinfo). Гейтим админку
+            // по ней (RequireRole). Маппим её и из userinfo (без дублей), т.к. это не стандартный OIDC-claim.
+            o.TokenValidationParameters.RoleClaimType = "role";
+            o.ClaimActions.MapUniqueJsonKey("role", "role");
 
             o.Scope.Clear();
             o.Scope.Add("openid");

@@ -147,6 +147,10 @@ var app = builder.Build();
 // Секрет server-to-server вызовов — резолвим на старте (вне Development падаем, если не задан).
 var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
 
+// Кто админ (источник истины — IdP): список e-mail из Admin:Emails, по умолчанию — akhmed@outlook.com.
+// Для этих пользователей в токен уходит claim role=admin; потребители гейтят админку по роли.
+var adminEmails = AdminRoles.Resolve(builder.Configuration["Admin:Emails"]);
+
 // Применение схемы. В проде миграции выкатываются ОТДЕЛЬНЫМ шагом (тот же образ с аргументом `migrate`
 // как k8s Job), а боевые реплики стартуют без авто-миграции (нет гонки нескольких реплик за первую
 // миграцию). Флаг Database:MigrateAtStartup (по умолчанию = Development) и режим `migrate` это включают.
@@ -236,6 +240,10 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext ctx, Au
             .SetClaim(Claims.Email, user.Email)
             .SetClaim(Claims.Name, user.DisplayName);
 
+    // Ролевая модель: админам выдаём claim role=admin (едет в токен — см. GetDestinations).
+    if (AdminRoles.IsAdmin(adminEmails, user.Email))
+        identity.SetClaim(Claims.Role, AdminRoles.Role);
+
     var principal = new ClaimsPrincipal(identity);
     principal.SetScopes(request.GetScopes());
 
@@ -276,14 +284,17 @@ app.MapMethods("/connect/userinfo", ["GET", "POST"], async (HttpContext ctx, Aut
 
     var sub = principal.GetClaim(Claims.Subject);
     var user = sub is not null ? await db.Users.FindAsync(Guid.Parse(sub)) : null;
-    return user is null
-        ? Results.Unauthorized()
-        : Results.Json(new Dictionary<string, object>
-        {
-            [Claims.Subject] = user.Id.ToString(),
-            [Claims.Email] = user.Email,
-            [Claims.Name] = user.DisplayName
-        });
+    if (user is null) return Results.Unauthorized();
+
+    var claims = new Dictionary<string, object>
+    {
+        [Claims.Subject] = user.Id.ToString(),
+        [Claims.Email] = user.Email,
+        [Claims.Name] = user.DisplayName
+    };
+    // Роль — и в userinfo (потребитель мапит её в principal через GetClaimsFromUserInfoEndpoint).
+    if (AdminRoles.IsAdmin(adminEmails, user.Email)) claims[Claims.Role] = AdminRoles.Role;
+    return Results.Json(claims);
 });
 
 // ---------------- Завершение SSO-сессии ----------------
@@ -340,7 +351,7 @@ static async Task SignInCookieAsync(HttpContext ctx, AppUser user)
 
 static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
 {
-    Claims.Name or Claims.Email or Claims.Subject => [Destinations.AccessToken, Destinations.IdentityToken],
+    Claims.Name or Claims.Email or Claims.Subject or Claims.Role => [Destinations.AccessToken, Destinations.IdentityToken],
     _ => [Destinations.AccessToken]
 };
 

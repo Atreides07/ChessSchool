@@ -101,6 +101,12 @@ else
                 <InputText class="adm-in" @bind-Value="_model.Url" />
             </label>
 
+            <label class="adm-field">
+                <span class="adm-lbl">@Loc.T("admin.f.pgn")</span>
+                <InputText class="adm-in" @bind-Value="_model.PgnUrl" />
+                <span class="adm-hint">@Loc.T("admin.f.pgn.hint")</span>
+            </label>
+
             <div class="adm-field">
                 <span class="adm-lbl">@Loc.T("admin.f.image")</span>
                 @* Обычный input с @bind:event="oninput" — на компоненте InputText модификатор

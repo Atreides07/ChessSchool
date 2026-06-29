@@ -19,7 +19,9 @@ public sealed record TournamentSuggestion(
     string Format,
     string Url,
     string? ImageUrl,
-    bool Live);
+    bool Live,
+    /// <summary>Ссылка на «живой» PGN-фид (PGN раунда lichess) — прикрепляется к трансляции автоматически.</summary>
+    string? PgnUrl = null);
 
 /// <summary>
 /// Поиск популярных шахматных турниров для админки трансляций: тянет курируемый топ официальных
@@ -57,7 +59,8 @@ public sealed class TournamentDiscovery(IHttpClientFactory httpFactory, ILogger<
             {
                 var client = httpFactory.CreateClient(HttpClientName);
                 var json = await client.GetStringAsync(TopPath, ct);
-                _cache = Parse(json, DateOnly.FromDateTime(DateTime.UtcNow), MaxSuggestions);
+                var baseUrl = client.BaseAddress?.GetLeftPart(UriPartial.Authority) ?? "https://lichess.org";
+                _cache = Parse(json, DateOnly.FromDateTime(DateTime.UtcNow), MaxSuggestions, baseUrl);
                 _expiresAt = DateTimeOffset.UtcNow + Ttl;
                 return _cache;
             }
@@ -79,7 +82,8 @@ public sealed class TournamentDiscovery(IHttpClientFactory httpFactory, ILogger<
     /// Разбор ответа lichess <c>/api/broadcast/top</c> в кандидатов. Берём секции <c>active</c> и
     /// <c>upcoming</c> (прошедшие не нужны), мапим только нужные поля. Чистая функция — тестируется без сети.
     /// </summary>
-    public static IReadOnlyList<TournamentSuggestion> Parse(string json, DateOnly fallbackDate, int max = MaxSuggestions)
+    public static IReadOnlyList<TournamentSuggestion> Parse(
+        string json, DateOnly fallbackDate, int max = MaxSuggestions, string lichessBase = "https://lichess.org")
     {
         var list = new List<TournamentSuggestion>();
         using var doc = JsonDocument.Parse(json);
@@ -95,13 +99,13 @@ public sealed class TournamentDiscovery(IHttpClientFactory httpFactory, ILogger<
                 if (list.Count >= max) break;
                 if (item.ValueKind != JsonValueKind.Object) continue;
                 if (!item.TryGetProperty("tour", out var tour) || tour.ValueKind != JsonValueKind.Object) continue;
-                if (MapTour(tour, live, fallbackDate) is { } s) list.Add(s);
+                if (MapTour(tour, item, live, fallbackDate, lichessBase) is { } s) list.Add(s);
             }
         }
         return list;
     }
 
-    private static TournamentSuggestion? MapTour(JsonElement tour, bool live, DateOnly fallback)
+    private static TournamentSuggestion? MapTour(JsonElement tour, JsonElement item, bool live, DateOnly fallback, string lichessBase)
     {
         var name = Str(tour, "name");
         if (string.IsNullOrWhiteSpace(name)) return null;
@@ -132,9 +136,19 @@ public sealed class TournamentDiscovery(IHttpClientFactory httpFactory, ILogger<
         var url = !string.IsNullOrWhiteSpace(website) ? website : Str(tour, "url");
         var image = Str(tour, "image");
 
+        // Live-PGN раунда: lichess отдаёт PGN всех досок раунда по /api/broadcast/round/{id}.pgn —
+        // прикрепляем автоматически, чтобы трансляция сразу показывала онлайн-доски.
+        string? pgnUrl = null;
+        if (item.TryGetProperty("round", out var round) && round.ValueKind == JsonValueKind.Object)
+        {
+            var roundId = Str(round, "id");
+            if (!string.IsNullOrWhiteSpace(roundId))
+                pgnUrl = $"{lichessBase.TrimEnd('/')}/api/broadcast/round/{roundId.Trim()}.pgn";
+        }
+
         return new TournamentSuggestion(
             slug.Trim(), name.Trim(), start, end, location.Trim(), format.Trim(), url.Trim(),
-            string.IsNullOrWhiteSpace(image) ? null : image.Trim(), live);
+            string.IsNullOrWhiteSpace(image) ? null : image.Trim(), live, pgnUrl);
     }
 
     /// <summary>«Wijk aan Zee, Netherlands» → ("Wijk aan Zee", "Netherlands"). Без запятой — всё в город.</summary>
@@ -167,6 +181,7 @@ public sealed class TournamentDiscovery(IHttpClientFactory httpFactory, ILogger<
             Format = s.Format,
             Url = s.Url,
             ImageUrl = s.ImageUrl,
+            PgnUrl = s.PgnUrl,
             Visible = false,
         };
     }

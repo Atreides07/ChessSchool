@@ -123,6 +123,21 @@ builder.Services.AddHttpClient(ChessSchool.Arena.Services.TournamentDiscovery.Ht
 });
 builder.Services.AddSingleton<ChessSchool.Arena.Services.TournamentDiscovery>();
 
+// Онлайн-доски трансляции: опрос «живого» PGN-фида и разбор в позиции. Без авто-редиректа (SSRF —
+// редирект мог бы увести во внутреннюю сеть); вызывается из request-контекста minimal-API, не из Blazor.
+builder.Services.AddHttpClient(ChessSchool.Arena.Services.BroadcastLive.HttpClientName, c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(10);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ChessArena/1.0 (broadcast live boards)");
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+    });
+builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastLive>();
+
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();
 
@@ -469,6 +484,63 @@ app.MapPost("/admin/api/discovery/add", async (
     await catalog.UpsertAsync(broadcast);
     return Results.Json(new { slug = broadcast.Slug, alreadyAdded = false });
 }).RequireAuthorization("Admin").DisableAntiforgery();
+
+// ---------------- Онлайн-доски трансляции (публичные: контент трансляции открыт и индексируем) ----------------
+// Сетевой опрос источника и разбор PGN — здесь, в request-контексте (не в лайфсайкле Blazor, грабля #12).
+// Тонкий клиент детальной страницы тянет это fetch'ем и рисует доски из FEN без внешних библиотек.
+
+// Сводка по всем доскам (для сетки): текущая позиция, участники, результат, последний ход. Без полуходов.
+app.MapGet("/api/broadcasts/{slug}/games", async (string slug,
+    ChessSchool.Arena.Services.BroadcastLive live, CancellationToken ct) =>
+{
+    IReadOnlyList<ChessSchool.Arena.Services.BroadcastBoard>? boards;
+    try { boards = await live.GetAsync(slug, ct); }
+    catch (ChessSchool.Arena.Services.BroadcastLiveException) { return Results.Json(new { error = true }, statusCode: 502); }
+    if (boards is null) return Results.NotFound();
+
+    return Results.Json(new
+    {
+        boards = boards.Select(b => new
+        {
+            board = b.Board,
+            white = b.White,
+            black = b.Black,
+            whiteElo = b.WhiteElo,
+            blackElo = b.BlackElo,
+            result = b.Result,
+            fen = b.Fen,
+            lastFrom = b.LastFrom,
+            lastTo = b.LastTo,
+            plyCount = b.PlyCount,
+            finished = b.Finished,
+        }),
+    });
+});
+
+// Полная партия одной доски (для просмотра ходов): стартовый FEN + все полуходы (SAN/FEN/клетки).
+app.MapGet("/api/broadcasts/{slug}/games/{board:int}", async (string slug, int board,
+    ChessSchool.Arena.Services.BroadcastLive live, CancellationToken ct) =>
+{
+    IReadOnlyList<ChessSchool.Arena.Services.BroadcastBoard>? boards;
+    try { boards = await live.GetAsync(slug, ct); }
+    catch (ChessSchool.Arena.Services.BroadcastLiveException) { return Results.Json(new { error = true }, statusCode: 502); }
+    if (boards is null) return Results.NotFound();
+
+    var b = boards.FirstOrDefault(x => x.Board == board);
+    if (b is null) return Results.NotFound();
+
+    return Results.Json(new
+    {
+        board = b.Board,
+        white = b.White,
+        black = b.Black,
+        whiteElo = b.WhiteElo,
+        blackElo = b.BlackElo,
+        result = b.Result,
+        startFen = b.StartFen,
+        plies = b.Plies.Select(p => new { san = p.San, fen = p.Fen, from = p.From, to = p.To }),
+    });
+});
 
 app.MapGet("/majors", () => Results.Redirect("/broadcasts", permanent: true));
 app.MapGet("/majors/{slug}", (string slug) => Results.Redirect($"/broadcasts/{slug}", permanent: true));

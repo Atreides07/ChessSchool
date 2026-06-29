@@ -24,7 +24,8 @@ public class TournamentDiscoveryTests
             "tier": 5,
             "image": "https://image.lichess1.org/cdn/croatia.jpg",
             "url": "https://lichess.org/broadcast/superunited/abc123"
-          }
+          },
+          "round": { "id": "rZ9kQ2" }
         }
       ],
       "upcoming": [
@@ -73,6 +74,15 @@ public class TournamentDiscoveryTests
         Assert.Equal("Рапид и блиц", active.Format);
         Assert.Equal("https://grandchesstour.org", active.Url); // info.website приоритетнее url трансляции
         Assert.Equal("https://image.lichess1.org/cdn/croatia.jpg", active.ImageUrl);
+        // Live-PGN раунда прикрепляется автоматически из round.id.
+        Assert.Equal("https://lichess.org/api/broadcast/round/rZ9kQ2.pgn", active.PgnUrl);
+    }
+
+    [Fact]
+    public void Parse_NoRound_LeavesPgnUrlNull()
+    {
+        var upcoming = TournamentDiscovery.Parse(Sample, Fallback)[1]; // у Biel нет round
+        Assert.Null(upcoming.PgnUrl);
     }
 
     [Fact]
@@ -126,7 +136,8 @@ public class TournamentDiscoveryTests
     {
         var s = new TournamentSuggestion("biel-chess-festival", "Biel Chess Festival",
             new DateOnly(2026, 7, 11), new DateOnly(2026, 7, 24), "Биль, Швейцария", "Классика",
-            "https://example.org", "https://img/x.jpg", Live: false);
+            "https://example.org", "https://img/x.jpg", Live: false,
+            PgnUrl: "https://lichess.org/api/broadcast/round/abc.pgn");
 
         var b = TournamentDiscovery.ToBroadcast(s);
 
@@ -135,6 +146,7 @@ public class TournamentDiscoveryTests
         Assert.Equal("Биль", b.City);
         Assert.Equal("Швейцария", b.Country);
         Assert.Equal("https://img/x.jpg", b.ImageUrl);
+        Assert.Equal("https://lichess.org/api/broadcast/round/abc.pgn", b.PgnUrl); // live-ссылка переносится
         Assert.True(BroadcastFormat.IsValidSlug(b.Slug));
     }
 

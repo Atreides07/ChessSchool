@@ -70,6 +70,234 @@ else
             </div>
         </div>
     </article>
+
+    @if (!string.IsNullOrWhiteSpace(t.PgnUrl))
+    {
+        var liveCfg = new
+        {
+            slug = t.Slug,
+            loc = new
+            {
+                live = Loc.T("detail.boards.live"),
+                ongoing = Loc.T("detail.boards.ongoing"),
+                moves = Loc.T("detail.boards.moves"),
+                empty = Loc.T("detail.boards.empty"),
+                error = Loc.T("detail.boards.error"),
+            },
+        };
+        @* Онлайн-доски трансляции — прогрессивное улучшение поверх SEO-каркаса: тонкий клиент тянет
+           разобранный PGN с /api/broadcasts/{slug}/games[/n] и рисует доски из FEN без внешних библиотек
+           (исходящий HTTP — в minimal-API, не в рендере; грабля #12). Доска открывается оверлеем с навигацией по ходам. *@
+        <section class="bd-live" aria-label="@Loc.T("detail.boards")">
+            <h2 class="bd-live-h">@Loc.T("detail.boards")</h2>
+            <div id="bd-boards" class="bd-grid"><p class="bd-muted">@Loc.T("detail.boards.loading")</p></div>
+        </section>
+
+        <div id="bd-overlay" class="bd-overlay" hidden>
+            <div class="bd-modal" role="dialog" aria-modal="true">
+                <button id="bd-close" class="bd-close" aria-label="@Loc.T("detail.boards.close")">✕</button>
+                <div class="bd-modal-grid">
+                    <div class="bd-board-col">
+                        <div class="bd-player" id="bd-top"></div>
+                        <div class="board-wrap"><div id="bd-board" class="board"></div></div>
+                        <div class="bd-player" id="bd-bottom"></div>
+                        <div class="bd-controls">
+                            <button class="btn btn-sm btn-outline" id="bd-first" aria-label="⏮">⏮</button>
+                            <button class="btn btn-sm btn-outline" id="bd-prev" aria-label="◀">◀</button>
+                            <span class="bd-counter" id="bd-counter">0 / 0</span>
+                            <button class="btn btn-sm btn-outline" id="bd-next" aria-label="▶">▶</button>
+                            <button class="btn btn-sm btn-outline" id="bd-last" aria-label="⏭">⏭</button>
+                        </div>
+                    </div>
+                    <div class="bd-side">
+                        <div id="bd-result" class="bd-result"></div>
+                        <div id="bd-moves" class="bd-moves"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script type="module">
+            const CFG = @((MarkupString)System.Text.Json.JsonSerializer.Serialize(liveCfg, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+            const L = CFG.loc;
+            const POLL_MS = 12000;
+            const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+            const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const gamesUrl = () => `/api/broadcasts/${encodeURIComponent(CFG.slug)}/games`;
+            const boardUrl = (n) => `${gamesUrl()}/${n}`;
+
+            const pieceImg = (ch) => {
+                const color = ch === ch.toUpperCase() ? 'w' : 'b';
+                return `<img class="cp" draggable="false" alt="" src="_content/ChessSchool.Design/pieces/${color}${ch.toUpperCase()}.svg">`;
+            };
+            function parseFen(fen) {
+                const map = {};
+                const rows = (fen || '').split(' ')[0].split('/');
+                for (let r = 0; r < 8; r++) {
+                    let file = 0;
+                    for (const ch of rows[r] || '') {
+                        if (ch >= '1' && ch <= '8') file += +ch;
+                        else { map[files[file] + (8 - r)] = ch; file++; }
+                    }
+                }
+                return map;
+            }
+
+            // --- Сетка досок ---
+            const gridEl = document.getElementById('bd-boards');
+
+            function miniBoard(fen, from, to) {
+                const pos = parseFen(fen);
+                let html = '';
+                for (let r = 8; r >= 1; r--) for (let fi = 0; fi < 8; fi++) {
+                    const f = files[fi], sq = f + r, dark = (fi + r) % 2 === 0;
+                    const hl = (sq === from || sq === to) ? ' hl' : '';
+                    const ch = pos[sq];
+                    html += `<div class="bd-msq ${dark ? 'd' : 'l'}${hl}">${ch ? pieceImg(ch) : ''}</div>`;
+                }
+                return `<div class="bd-mini">${html}</div>`;
+            }
+
+            function nameLine(name, elo) {
+                return `<span class="bd-pl-name">${esc(name)}</span>${elo ? `<span class="bd-pl-elo">${esc(elo)}</span>` : ''}`;
+            }
+
+            function gameCard(b) {
+                const tag = b.finished
+                    ? `<span class="bd-tag done">${esc(b.result)}</span>`
+                    : `<span class="bd-tag live">● ${esc(L.live)}</span>`;
+                return `<button class="bd-card" data-board="${b.board}">
+                    <div class="bd-card-top"><span class="bd-bn">#${b.board}</span>${tag}</div>
+                    ${miniBoard(b.fen, b.lastFrom, b.lastTo)}
+                    <div class="bd-card-pl">${nameLine(b.black, b.blackElo)}</div>
+                    <div class="bd-card-pl">${nameLine(b.white, b.whiteElo)}</div>
+                </button>`;
+            }
+
+            async function loadGrid() {
+                let data;
+                try {
+                    const r = await fetch(gamesUrl(), { credentials: 'include' });
+                    if (r.status === 404) { gridEl.innerHTML = `<p class="bd-muted">${esc(L.empty)}</p>`; return; }
+                    if (!r.ok) { gridEl.innerHTML = `<p class="bd-muted">${esc(L.error)}</p>`; return; }
+                    data = await r.json();
+                } catch { gridEl.innerHTML = `<p class="bd-muted">${esc(L.error)}</p>`; return; }
+
+                const boards = data.boards || [];
+                if (!boards.length) { gridEl.innerHTML = `<p class="bd-muted">${esc(L.empty)}</p>`; return; }
+                gridEl.innerHTML = boards.map(gameCard).join('');
+                gridEl.querySelectorAll('[data-board]').forEach(b => b.onclick = () => openBoard(+b.dataset.board));
+            }
+
+            // --- Оверлей одной доски с навигацией по ходам ---
+            const overlayEl = document.getElementById('bd-overlay');
+            const boardEl = document.getElementById('bd-board');
+            const movesEl = document.getElementById('bd-moves');
+            const counterEl = document.getElementById('bd-counter');
+            const resultEl = document.getElementById('bd-result');
+            const cells = {}, coordHtml = {};
+            let openId = null, fens = [], froms = [], tos = [], sans = [], total = 0, ply = 0;
+
+            function buildBoard() {
+                boardEl.innerHTML = '';
+                for (let r = 8; r >= 1; r--) for (let fi = 0; fi < 8; fi++) {
+                    const f = files[fi], sq = f + r, dark = (fi + r) % 2 === 0, tone = dark ? 'on-dark' : 'on-light';
+                    const el = document.createElement('div');
+                    el.className = 'sq ' + (dark ? 'dark' : 'light');
+                    let cd = '';
+                    if (fi === 0) cd += `<span class="coord rank ${tone}">${r}</span>`;
+                    if (r === 1) cd += `<span class="coord file ${tone}">${f}</span>`;
+                    coordHtml[sq] = cd;
+                    boardEl.appendChild(el);
+                    cells[sq] = el;
+                }
+            }
+
+            function renderBoard() {
+                const pos = parseFen(fens[ply]);
+                for (const f of files) for (let r = 1; r <= 8; r++) {
+                    const sq = f + r, el = cells[sq], ch = pos[sq];
+                    el.innerHTML = coordHtml[sq] + (ch ? pieceImg(ch) : '');
+                    el.classList.remove('hl');
+                }
+                if (froms[ply] && cells[froms[ply]]) cells[froms[ply]].classList.add('hl');
+                if (tos[ply] && cells[tos[ply]]) cells[tos[ply]].classList.add('hl');
+                counterEl.textContent = `${ply} / ${total}`;
+                movesEl.querySelectorAll('.bd-cell').forEach(c => c.classList.toggle('on', +c.dataset.ply === ply));
+                const onCell = movesEl.querySelector('.bd-cell.on');
+                if (onCell) onCell.scrollIntoView({ block: 'nearest' });
+            }
+
+            function renderMoves() {
+                let html = '';
+                for (let n = 1; n <= Math.ceil(total / 2); n++) {
+                    const w = 2 * n - 1, bl = 2 * n;
+                    html += `<span class="bd-rownum">${n}.</span>`;
+                    html += `<button class="bd-cell" data-ply="${w}">${esc(sans[w] || '')}</button>`;
+                    html += bl <= total ? `<button class="bd-cell" data-ply="${bl}">${esc(sans[bl] || '')}</button>` : `<span></span>`;
+                }
+                movesEl.innerHTML = html;
+                movesEl.querySelectorAll('.bd-cell').forEach(c => c.onclick = () => { ply = +c.dataset.ply; renderBoard(); });
+            }
+
+            function setGame(d) {
+                const plies = d.plies || [];
+                const atEnd = ply === total; // следим за «живым» концом, чтобы подтягивать новые ходы
+                fens = [d.startFen, ...plies.map(p => p.fen)];
+                froms = [null, ...plies.map(p => p.from)];
+                tos = [null, ...plies.map(p => p.to)];
+                sans = [null, ...plies.map(p => p.san)];
+                const wasTotal = total;
+                total = plies.length;
+                if (openId !== d.board || ply > total || (atEnd && total !== wasTotal)) ply = total;
+                document.getElementById('bd-top').innerHTML = nameLine(d.black, d.blackElo);
+                document.getElementById('bd-bottom').innerHTML = nameLine(d.white, d.whiteElo);
+                const ongoing = !(d.result === '1-0' || d.result === '0-1' || d.result === '1/2-1/2');
+                resultEl.textContent = ongoing ? L.ongoing : d.result;
+                resultEl.className = 'bd-result ' + (ongoing ? 'live' : 'done');
+                renderMoves();
+                renderBoard();
+            }
+
+            async function fetchBoard(n) {
+                const r = await fetch(boardUrl(n), { credentials: 'include' });
+                if (!r.ok) return null;
+                return await r.json();
+            }
+
+            async function openBoard(n) {
+                const d = await fetchBoard(n);
+                if (!d) return;
+                openId = n;
+                ply = -1; // setGame переустановит на конец при первой загрузке
+                total = -1;
+                setGame(d);
+                overlayEl.hidden = false;
+                document.body.style.overflow = 'hidden';
+            }
+
+            function closeOverlay() { overlayEl.hidden = true; openId = null; document.body.style.overflow = ''; }
+            document.getElementById('bd-close').onclick = closeOverlay;
+            overlayEl.onclick = (e) => { if (e.target === overlayEl) closeOverlay(); };
+            document.addEventListener('keydown', (e) => {
+                if (overlayEl.hidden) return;
+                if (e.key === 'Escape') closeOverlay();
+                else if (e.key === 'ArrowLeft') { if (ply > 0) { ply--; renderBoard(); } }
+                else if (e.key === 'ArrowRight') { if (ply < total) { ply++; renderBoard(); } }
+            });
+            document.getElementById('bd-first').onclick = () => { ply = 0; renderBoard(); };
+            document.getElementById('bd-prev').onclick = () => { if (ply > 0) { ply--; renderBoard(); } };
+            document.getElementById('bd-next').onclick = () => { if (ply < total) { ply++; renderBoard(); } };
+            document.getElementById('bd-last').onclick = () => { ply = total; renderBoard(); };
+
+            buildBoard();
+            loadGrid();
+            setInterval(async () => {
+                await loadGrid();
+                if (!overlayEl.hidden && openId !== null) { const d = await fetchBoard(openId); if (d) setGame(d); }
+            }, POLL_MS);
+        </script>
+    }
 }
 
 @code {
@@ -167,4 +395,75 @@ else
     .md-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     .md-back { color: var(--ink-2); font-weight: 600; font-size: .92rem; }
     .md-back:hover { color: var(--accent); }
+
+    /* --- Онлайн-доски трансляции --- */
+    .bd-live { margin-top: 2rem; }
+    .bd-live-h { font-size: 1.3rem; font-weight: 760; color: var(--ink); margin: 0 0 1rem; }
+    .bd-muted { color: var(--ink-2); }
+
+    .bd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1rem; }
+    .bd-card { display: flex; flex-direction: column; gap: .4rem; padding: .7rem; text-align: left; cursor: pointer;
+               background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+               transition: box-shadow .15s ease, transform .15s ease; font: inherit; }
+    .bd-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .bd-card-top { display: flex; align-items: center; justify-content: space-between; }
+    .bd-bn { font-size: .8rem; font-weight: 700; color: var(--muted); }
+    .bd-tag { font-size: .72rem; font-weight: 800; padding: .1rem .45rem; border-radius: var(--r-pill); }
+    .bd-tag.live { background: #fde7e7; color: #c0392b; }
+    .bd-tag.done { background: var(--surface-2); color: var(--ink-2); }
+    .bd-card-pl { display: flex; align-items: baseline; gap: .4rem; font-size: .85rem; min-width: 0; }
+    .bd-pl-name { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bd-pl-elo { color: var(--muted); font-size: .78rem; flex: none; }
+
+    .bd-mini { display: grid; grid-template-columns: repeat(8, 1fr); aspect-ratio: 1 / 1; width: 100%;
+               border-radius: 4px; overflow: hidden; }
+    .bd-msq { display: flex; align-items: center; justify-content: center; }
+    .bd-msq.l { background: #ecd6b3; }
+    .bd-msq.d { background: #b58863; }
+    .bd-msq.hl.l { background: #cdd279; }
+    .bd-msq.hl.d { background: #aaa23a; }
+    .bd-mini .cp { width: 100%; height: 100%; display: block; }
+
+    /* --- Оверлей одной доски --- */
+    .bd-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(15, 18, 22, .55);
+                  display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    .bd-overlay[hidden] { display: none; }
+    .bd-modal { position: relative; background: var(--surface); border-radius: var(--r-lg); box-shadow: 0 16px 48px rgba(0,0,0,.3);
+                padding: 1.4rem; max-width: 900px; width: 100%; max-height: 92vh; overflow: auto; }
+    .bd-close { position: absolute; top: .7rem; right: .8rem; border: none; background: transparent; font-size: 1.2rem;
+                color: var(--ink-2); cursor: pointer; line-height: 1; }
+    .bd-close:hover { color: var(--ink); }
+    .bd-modal-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 240px); gap: 1.4rem; align-items: start; }
+    .bd-board-col { display: flex; flex-direction: column; gap: .5rem; }
+    .bd-player { font-weight: 640; color: var(--ink); display: flex; align-items: baseline; gap: .4rem; }
+    .bd-controls { display: flex; align-items: center; gap: .4rem; justify-content: center; margin-top: .3rem; }
+    .bd-counter { font-variant-numeric: tabular-nums; font-size: .9rem; color: var(--ink-2); min-width: 56px; text-align: center; }
+    .bd-side { display: flex; flex-direction: column; gap: .7rem; min-width: 0; }
+    .bd-result { font-weight: 720; padding: .4rem .7rem; border-radius: var(--r-sm); text-align: center; }
+    .bd-result.live { background: #fde7e7; color: #c0392b; }
+    .bd-result.done { background: var(--surface-2); color: var(--ink); }
+    .bd-moves { display: grid; grid-template-columns: auto 1fr 1fr; gap: .15rem .35rem; align-content: start;
+                max-height: 360px; overflow: auto; font-size: .9rem; }
+    .bd-rownum { color: var(--muted); text-align: right; padding-right: .2rem; font-variant-numeric: tabular-nums; }
+    .bd-cell { text-align: left; border: none; background: transparent; cursor: pointer; padding: .1rem .35rem;
+               border-radius: 4px; color: var(--ink); font: inherit; }
+    .bd-cell:hover { background: var(--surface-2); }
+    .bd-cell.on { background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 700; }
+
+    .bd-overlay .board-wrap { width: min(78vw, 440px); margin: 0 auto; }
+    .bd-overlay .board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+                         width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-md); }
+    .bd-overlay .sq { position: relative; display: flex; align-items: center; justify-content: center; }
+    .bd-overlay .sq.light { background: #ecd6b3; }
+    .bd-overlay .sq.dark { background: #b58863; }
+    .bd-overlay .sq.hl.light { background: #cdd279; }
+    .bd-overlay .sq.hl.dark { background: #aaa23a; }
+    .bd-overlay .coord { position: absolute; font-size: clamp(8px, 2vw, 11px); font-weight: 700; line-height: 1; user-select: none; }
+    .bd-overlay .coord.rank { top: 3px; left: 4px; }
+    .bd-overlay .coord.file { bottom: 2px; right: 4px; }
+    .bd-overlay .coord.on-light { color: #b58863; }
+    .bd-overlay .coord.on-dark { color: #ecd6b3; }
+    .bd-overlay .cp { width: 90%; height: 90%; display: block; }
+
+    @@media (max-width: 680px) { .bd-modal-grid { grid-template-columns: 1fr; } .bd-moves { max-height: 200px; } }
 </style>

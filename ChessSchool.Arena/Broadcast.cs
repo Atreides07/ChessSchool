@@ -24,6 +24,13 @@ public sealed class Broadcast
     [Id(11)] public string? ImageUrl { get; set; }
     [Id(12)] public bool Visible { get; set; } = true;
 
+    /// <summary>
+    /// Ссылка на «живой» PGN-фид трансляции (мульти-партийный PGN всех досок, опрашивается приложением).
+    /// Для трансляций lichess подставляется автоматически при поиске популярных (PGN раунда); для прочих
+    /// источников редактор задаёт её вручную. Пусто → у трансляции нет онлайн-досок (только страница-анонс).
+    /// </summary>
+    [Id(13)] public string? PgnUrl { get; set; }
+
     public Broadcast Clone() => (Broadcast)MemberwiseClone();
 }
 

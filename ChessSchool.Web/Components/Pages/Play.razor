@@ -15,6 +15,13 @@
     // внутренний адрес из service discovery.
     var hub = Config["GameServer:PublicUrl"] ?? Config["services:gameserver:https:0"]
         ?? Config["services:gameserver:http:0"] ?? "";
+    // chess.js и SignalR — локальные (vendored в wwwroot/lib), а НЕ внешний CDN esm.sh: на медленном
+    // интернете обращение к esm.sh (DNS/TLS + цепочка под-импортов) надолго блокировало старт клиента
+    // (как уже исправлено для Arena — см. tournament.js). Со своего origin грузится быстро и immutable-кэшем.
+    // Ведущий «/» обязателен: dynamic import() трактует «lib/..» как bare-спецификатор модуля (ошибка),
+    // а не как относительный URL. @Assets отдаёт fingerprinted-путь без ведущего слэша.
+    var chessUrl = "/" + Assets["lib/chess.js"].TrimStart('/');
+    var signalrUrl = "/" + Assets["lib/signalr.js"].TrimStart('/');
 }
 
 <h1>@Loc.T("play.h1")</h1>
@@ -62,8 +69,8 @@ else
             return r.ok ? (await r.json()).access_token : '';
         };
 
-        const { Chess } = await import('https://esm.sh/chess.js@1');
-        const signalR = await import('https://esm.sh/@@microsoft/signalr@8');
+        const { Chess } = await import(@((MarkupString)System.Text.Json.JsonSerializer.Serialize(chessUrl)));
+        const signalR = await import(@((MarkupString)System.Text.Json.JsonSerializer.Serialize(signalrUrl)));
 
         // Фигуры — тот же набор Cburnett, что и на серверной доске (статика из дизайн-системы).
         const PIECE_SRC = (p) => `_content/ChessSchool.Design/pieces/${p.color}${p.type.toUpperCase()}.svg`;

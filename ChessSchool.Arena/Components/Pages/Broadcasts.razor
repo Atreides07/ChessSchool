@@ -51,7 +51,10 @@ else
                     <span class="mj-status @st.Cls">@Loc.StatusLabel(st.Kind, st.Days)</span>
                 </div>
                 <div class="mj-body">
-                    <h2 class="mj-name"><a class="mj-namelink" href="broadcasts/@t.Slug">@t.Name</a></h2>
+                    @* data-enhance-nav="false": страница трансляции — тонкий клиент с онлайн-досками
+                       (js/broadcast.js инициализируется при загрузке документа); enhanced-навигация
+                       подменяет DOM без полной загрузки и сетка «висла» на «Загружаем доски…» (грабли #12/#13). *@
+                    <h2 class="mj-name"><a class="mj-namelink" href="broadcasts/@t.Slug" data-enhance-nav="false">@t.Name</a></h2>
                     <div class="mj-meta">
                         <span class="mj-date">@BroadcastFormat.DateRange(t.Start, t.End)</span>
                         <span class="mj-dot">·</span>
@@ -59,7 +62,7 @@ else
                     </div>
                     <div class="mj-foot">
                         <span class="mj-format">@Loc.Tr(t.Format)</span>
-                        <a class="mj-link" href="broadcasts/@t.Slug">@Loc.T("bc.more")</a>
+                        <a class="mj-link" href="broadcasts/@t.Slug" data-enhance-nav="false">@Loc.T("bc.more")</a>
                     </div>
                 </div>
             </article>

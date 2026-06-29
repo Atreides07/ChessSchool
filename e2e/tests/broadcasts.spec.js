@@ -57,6 +57,14 @@ test('трансляция: онлайн-доски грузятся при пе
   });
   expect(corners, 'цвета клеток инвертированы').toEqual({ a8: 'light', h8: 'dark', a1: 'dark', h1: 'light' });
 
+  // Все 64 клетки одинакового размера (грабля: без grid-template-rows ряды разной высоты).
+  const sizes = await page.$$eval('#bd-boards .bd-card:first-child .bd-msq', (els) =>
+    els.map((e) => { const r = e.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
+  const spread = (vals) => Math.max(...vals) - Math.min(...vals);
+  expect(spread(sizes.map((s) => s.w)), 'ширины клеток неодинаковы').toBeLessThanOrEqual(1);
+  expect(spread(sizes.map((s) => s.h)), 'высоты клеток неодинаковы').toBeLessThanOrEqual(1);
+  expect(Math.abs(sizes[0].w - sizes[0].h), 'клетка не квадратная').toBeLessThanOrEqual(1);
+
   // Клик по доске открывает оверлей с навигацией по ходам.
   await page.locator('#bd-boards .bd-card').first().click();
   await expect(page.locator('#bd-overlay')).toBeVisible();

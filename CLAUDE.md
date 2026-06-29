@@ -363,6 +363,11 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
     раскорячило» — позиции легальные, но клетки не того цвета). Серверная [Chessboard.razor](ChessSchool.Arena/Components/Chessboard.razor)
     использует ДРУГУЮ индексацию (`(row + col) % 2 == 1`, где `row=0` — 8-я горизонталь, `col=0` — `a`)
     и корректна — сверять JS-доски с ней. Защищено проверкой цвета углов в e2e ([broadcasts.spec.js](e2e/tests/broadcasts.spec.js)).
+15. **CSS-сетка доски: задавать И строки, И столбцы.** Мини-доска трансляции (`.bd-mini`) имела только
+    `grid-template-columns: repeat(8,1fr)` без `grid-template-rows` → при `aspect-ratio:1/1` ряды получали
+    авто-высоту (ряды с фигурами выше пустых) → клетки разного размера («клетки не одинаковые»). Лечение:
+    `grid-template-rows: repeat(8,1fr)` тоже + `min-width/height:0` на flex-ячейке. Оверлей и `/play` это
+    задавали изначально. Защищено e2e-проверкой равенства размеров всех 64 клеток.
 
 ## Безопасность и конфигурация
 

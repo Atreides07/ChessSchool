@@ -129,7 +129,16 @@
         counterEl.textContent = `${ply} / ${total}`;
         movesEl.querySelectorAll('.bd-cell').forEach(c => c.classList.toggle('on', +c.dataset.ply === ply));
         const onCell = movesEl.querySelector('.bd-cell.on');
-        if (onCell) onCell.scrollIntoView({ block: 'nearest' });
+        // Скроллим ИМЕННО панель ходов (а не страницу/модал — scrollIntoView('nearest') это делал
+        // ненадёжно: на «живом» конце список оставался в начале и казался законченным). Центрируем
+        // текущий ход в видимой области, чтобы последние ходы были видны сразу и было понятно, что есть прокрутка.
+        // На следующем кадре: при первом открытии оверлея геометрия ещё не разложена (rect нулевые),
+        // поэтому считаем и скроллим после раскладки. На ручной навигации лишний кадр незаметен.
+        if (onCell) requestAnimationFrame(() => {
+            const c = movesEl.querySelector('.bd-cell.on'); if (!c) return;
+            const cr = c.getBoundingClientRect(), mr = movesEl.getBoundingClientRect();
+            movesEl.scrollTop += (cr.top - mr.top) - mr.height / 2 + cr.height / 2;
+        });
     }
     function renderMoves() {
         let html = '';

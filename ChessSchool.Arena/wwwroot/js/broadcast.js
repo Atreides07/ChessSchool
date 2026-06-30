@@ -234,21 +234,29 @@
         }, POLL_MS);
     }
 
-    // Старт при появлении #bd-root в DOM (enhanced-навигация не исполняет вставленный <script> и не всегда
-    // шлёт enhancedload — наблюдатель ловит вставку узла; скрипт глобальный, поэтому наблюдатель жив всегда).
+    // Инициализация ровно один раз на появившийся #bd-root (флаг на самом узле). setup() тут НЕ идемпотентен
+    // (всегда teardown+rebuild), поэтому гард обязателен: иначе перерисовка сетки/оверлея (мутации потомков)
+    // запускала бы setup() заново. Флаг на узле ловит и enhanced-навигацию с МОРФИНГОМ узла, при которой
+    // матч по addedNodes промахивался (грабля #13).
+    function tryInit() {
+        const root = document.getElementById('bd-root');
+        if (!root || root.dataset.bdReady === '1') return;
+        root.dataset.bdReady = '1';
+        setup();
+    }
+
+    // Скрипт глобальный (App.razor); инициализируется по любой мутации DOM, где появился новый #bd-root.
     function watch() {
         if (window.__bdObserver) return;
-        const relevant = (n) => n.nodeType === 1 && (n.matches?.('#bd-root') || n.querySelector?.('#bd-root'));
-        window.__bdObserver = new MutationObserver((records) => {
-            if (!records.some(r => Array.from(r.addedNodes).some(relevant))) return;
+        window.__bdObserver = new MutationObserver(() => {
             if (window.__bdRaf) return;
-            window.__bdRaf = requestAnimationFrame(() => { window.__bdRaf = 0; setup(); });
+            window.__bdRaf = requestAnimationFrame(() => { window.__bdRaf = 0; tryInit(); });
         });
         window.__bdObserver.observe(document.documentElement, { childList: true, subtree: true });
     }
 
     watch();
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup);
-    else setup();
-    document.addEventListener('enhancedload', setup);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryInit);
+    else tryInit();
+    document.addEventListener('enhancedload', tryInit);
 })();

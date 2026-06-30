@@ -219,14 +219,13 @@
         }
     }
 
+    // Реагируем на ЛЮБУЮ мутацию и зовём setup(): он идемпотентен (btn.__wired — повторный вызов выходит).
+    // Узкий матч по addedNodes промахивался, когда Blazor при enhanced-навигации МОРФИТ узел (грабля #13).
     function watch() {
         if (window.__premObs) return;
-        var relevant = function (n) {
-            return n.nodeType === 1 && (n.id === 'prem-root' || n.id === 'prem-refresh'
-                || (n.querySelector && n.querySelector('#prem-root, #prem-refresh')));
-        };
-        window.__premObs = new MutationObserver(function (recs) {
-            if (recs.some(function (r) { return Array.from(r.addedNodes).some(relevant); })) setup();
+        window.__premObs = new MutationObserver(function () {
+            if (window.__premRaf) return;
+            window.__premRaf = requestAnimationFrame(function () { window.__premRaf = 0; setup(); });
         });
         window.__premObs.observe(document.documentElement, { childList: true, subtree: true });
     }

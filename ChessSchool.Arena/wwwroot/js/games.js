@@ -188,12 +188,12 @@
     function avatar(name) { let h = 0; for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) & 0x7fffffff; return AVATARS[h % AVATARS.length]; }
 
     // Мгновенный старт при появлении #ag-root в DOM: enhanced-навигация Blazor НЕ исполняет вставленный
-    // <script> и не всегда шлёт enhancedload — ловим вставку узла. Скрипт глобальный (App.razor).
+    // <script>, не всегда шлёт enhancedload и часто МОРФИТ узел (меняет атрибуты, не добавляет новый) —
+    // матч по addedNodes промахивался (грабля #13). Реагируем на ЛЮБУЮ мутацию и зовём setup(): он
+    // идемпотентен (currentId+conn) и сам закрывает соединение, когда #ag-root исчез. Скрипт глобальный.
     function watchForRoot() {
         if (window.__gRootObserver) return;
-        const relevant = (n) => n.nodeType === 1 && (n.matches?.('#ag-root') || n.querySelector?.('#ag-root'));
-        window.__gRootObserver = new MutationObserver(records => {
-            if (!records.some(r => Array.from(r.addedNodes).some(relevant))) return;
+        window.__gRootObserver = new MutationObserver(() => {
             if (window.__gBootRaf) return;                 // дебаунс: один setup на пачку мутаций
             window.__gBootRaf = requestAnimationFrame(() => { window.__gBootRaf = 0; setup(); });
         });

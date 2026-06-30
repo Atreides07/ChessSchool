@@ -609,13 +609,13 @@
     }
 
     // Мгновенный старт при появлении #t-root в DOM. Blazor enhanced-navigation НЕ исполняет вставленный
-    // <script> и не всегда шлёт enhancedload на document — поэтому ловим именно вставку узла (как
-    // schedule.js ловит сетку). Скрипт подключён глобально в App.razor, так что наблюдатель жив всегда.
+    // <script> и не всегда шлёт enhancedload; вдобавок часто МОРФИТ существующий узел (меняет атрибуты,
+    // не добавляет новый) — поэтому матч по addedNodes промахивался (грабля #13). Реагируем на ЛЮБУЮ
+    // мутацию и зовём setup(): он идемпотентен (currentId+conn — повторный вызов сразу выходит) и сам
+    // закрывает соединение, когда #t-root исчез. Скрипт глобальный (App.razor), наблюдатель жив всегда.
     function watchForRoot() {
         if (window.__tRootObserver) return;
-        const relevant = (n) => n.nodeType === 1 && (n.matches?.('#t-root') || n.querySelector?.('#t-root'));
-        window.__tRootObserver = new MutationObserver((records) => {
-            if (!records.some(r => Array.from(r.addedNodes).some(relevant))) return;
+        window.__tRootObserver = new MutationObserver(() => {
             if (window.__tBootRaf) return;                 // дебаунс: один setup на пачку мутаций
             window.__tBootRaf = requestAnimationFrame(() => { window.__tBootRaf = 0; setup(); });
         });

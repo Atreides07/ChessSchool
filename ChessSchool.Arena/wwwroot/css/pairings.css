@@ -166,6 +166,12 @@
                                    background: color-mix(in srgb, var(--accent) 6%, var(--surface)); cursor: pointer; }
 .pr-editor.pr-selecting .pr-slot:hover { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border-color: var(--accent); }
 
+/* Обратная связь перетаскивания: что/кого затронет отпускание. */
+.pr-chip.dragging, .pr-pchip.dragging { opacity: .4; }
+.pr-slot.drop-target { border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+.pr-pchip.pair-target { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--r-sm); }
+.pr-pchip.pair-target::after { content: "↔"; margin-left: .3rem; color: var(--accent); font-weight: 800; }
+
 /* ---------- Форфейт ---------- */
 .pr-rbtn.pr-ff { min-width: 1.8rem; border-radius: 0 var(--r-sm) var(--r-sm) 0; color: var(--muted); }
 .pr-rbtn.pr-ff.on { background: #fff3cf; border-color: #e0ad00; color: #6e5200; }

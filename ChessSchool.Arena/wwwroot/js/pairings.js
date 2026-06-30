@@ -425,6 +425,16 @@
     function markDrop(bd) { clearDropMark(); bd.classList.add('drop-before'); }
     function clearDropMark() { boardsEl.querySelectorAll('.pr-bd.drop-before').forEach(b => b.classList.remove('drop-before')); }
 
+    // Обратная связь во время перетаскивания: подсветить, на кого/куда упадёт, если отпустить.
+    function markPairTarget(el) { clearPairTarget(); el.classList.add('pair-target'); }
+    function clearPairTarget() { if (poolEl) poolEl.querySelectorAll('.pr-pchip.pair-target').forEach(x => x.classList.remove('pair-target')); }
+    function markSlotTarget(slot) { clearSlotTarget(); slot.classList.add('drop-target'); }
+    function clearSlotTarget() { boardsEl.querySelectorAll('.pr-slot.drop-target').forEach(x => x.classList.remove('drop-target')); }
+    function clearDragMarks() {
+        clearDropMark(); clearPairTarget(); clearSlotTarget();
+        document.querySelectorAll('.pr-chip.dragging, .pr-pchip.dragging').forEach(x => x.classList.remove('dragging'));
+    }
+
     function statusOf(no) {
         const s = findSlot(no);
         if (!s) return 'free';
@@ -676,24 +686,26 @@
             const grip = e.target.closest('.pr-bd-n');     // тащим номер → меняем порядок доски
             if (grip) { dragBoardBi = +grip.closest('.pr-bd').dataset.bi; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'board'); return; }
             const chip = e.target.closest('.pr-chip');     // тащим фишку → двигаем игрока
-            if (chip) { dragNo = +chip.dataset.no; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragNo)); }
+            if (chip) { dragNo = +chip.dataset.no; chip.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragNo)); }
         });
         boardsEl.addEventListener('dragover', (e) => {
             if (dragBoardBi != null) { const bd = e.target.closest('.pr-bd'); if (bd) { e.preventDefault(); markDrop(bd); } return; }
-            if (e.target.closest('.pr-slot')) e.preventDefault();
+            const slot = e.target.closest('.pr-slot');
+            if (slot) { e.preventDefault(); markSlotTarget(slot); } else clearSlotTarget(); // подсветка слота, куда упадёт
         });
         boardsEl.addEventListener('drop', (e) => {
             if (dragBoardBi != null) {
                 const bd = e.target.closest('.pr-bd'); if (bd) { e.preventDefault(); moveBoard(dragBoardBi, +bd.dataset.bi); }
-                dragBoardBi = null; clearDropMark(); return;
+                dragBoardBi = null; clearDragMarks(); return;
             }
-            const slot = e.target.closest('.pr-slot'); if (!slot) return;
+            const slot = e.target.closest('.pr-slot'); if (!slot) { clearDragMarks(); return; }
             e.preventDefault();
             const no = dragNo != null ? dragNo : parseInt(e.dataTransfer.getData('text/plain'), 10);
+            clearDragMarks();
             if (!isNaN(no)) placePlayer(no, +slot.dataset.bi, slot.dataset.side);
             dragNo = null;
         });
-        boardsEl.addEventListener('dragend', () => { dragBoardBi = null; dragNo = null; clearDropMark(); });
+        boardsEl.addEventListener('dragend', () => { dragBoardBi = null; dragNo = null; clearDragMarks(); });
 
         poolEl.onclick = (e) => {
             const chip = e.target.closest('.pr-pchip');
@@ -707,16 +719,27 @@
         };
         poolEl.addEventListener('dragstart', (e) => {
             const chip = e.target.closest('.pr-pchip');
-            if (chip) { dragNo = +chip.dataset.no; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragNo)); }
+            if (chip) { dragNo = +chip.dataset.no; chip.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragNo)); }
         });
-        poolEl.addEventListener('dragover', (e) => e.preventDefault());
+        poolEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            // Подсветить игрока-цель: с ним образуется пара, если отпустить (оба свободны).
+            const t = e.target.closest('.pr-pchip');
+            if (t && dragNo != null) {
+                const tno = +t.dataset.no;
+                if (tno !== dragNo && statusOf(dragNo) === 'free' && statusOf(tno) === 'free') { markPairTarget(t); return; }
+            }
+            clearPairTarget();
+        });
+        poolEl.addEventListener('dragleave', (e) => { if (!e.relatedTarget || !poolEl.contains(e.relatedTarget)) clearPairTarget(); });
+        poolEl.addEventListener('dragend', clearDragMarks);
         poolEl.addEventListener('drop', (e) => {
             e.preventDefault();
             const no = dragNo != null ? dragNo : parseInt(e.dataTransfer.getData('text/plain'), 10);
-            dragNo = null;
+            const target = e.target.closest('.pr-pchip');
+            dragNo = null; clearDragMarks();
             if (isNaN(no)) return;
             // Дроп на другого СВОБОДНОГО → создать пару; иначе — снять с тура.
-            const target = e.target.closest('.pr-pchip');
             if (target) {
                 const tno = +target.dataset.no;
                 if (tno !== no && statusOf(no) === 'free' && statusOf(tno) === 'free') { createPair(no, tno); return; }

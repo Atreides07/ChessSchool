@@ -15,6 +15,7 @@
     let view = 'pairs';        // 'pairs' | 'standings'
     let sel = null;            // выбранный игрок (no) для клик-свапа
     let dragNo = null;         // перетаскиваемый игрок (no)
+    let dragBoardBi = null;    // перетаскиваемая доска (индекс) — смена порядка пар
     let undoStack = [], redoStack = [];
     let toastTimer = null;
     // DOM-узлы
@@ -24,7 +25,7 @@
 
     function teardown() {
         setupGen++; doc = null; byNo = new Map(); pts = new Map(); ri = 0; curRoundIdx = 0;
-        view = 'pairs'; sel = null; dragNo = null; undoStack = []; redoStack = [];
+        view = 'pairs'; sel = null; dragNo = null; dragBoardBi = null; undoStack = []; redoStack = [];
         if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
     }
 
@@ -188,6 +189,46 @@
         toast(L.byeMade || 'Bye assigned');
     }
 
+    function detach(no) {
+        const s = findSlot(no);
+        if (s) { const b = round().boards[s.bi]; if (s.side === 'white') b.whiteNo = null; else b.blackNo = null; }
+    }
+
+    // Создать новую пару из двух свободных игроков (перетаскивание/тап одного на другого). Перетащенный — белые.
+    function createPair(white, black) {
+        if (white === black) { clearSel(); renderAll(); return; }
+        pushUndo();
+        detach(white); detach(black);
+        round().boards.push({ board: 0, whiteNo: white, blackNo: black, result: '' });
+        clearSel(); renderAll();
+        toast(L.pairMade || 'Pair created');
+    }
+
+    // Сменить порядок доски: вставить перетащенную ПЕРЕД целевой.
+    function moveBoard(from, to) {
+        if (from === to) return;
+        pushUndo();
+        const arr = round().boards;
+        const item = arr.splice(from, 1)[0];
+        arr.splice(from < to ? to - 1 : to, 0, item);
+        clearSel(); renderAll();
+    }
+
+    // Упорядочить доски по силе пары (очки↓, рейтинг↓); баи/пустые — вниз. Как «правильный» порядок досок.
+    function sortBoards() {
+        pushUndo();
+        const sv = (no) => { const s = pts.get(no); return s ? s.pts : 0; };
+        const rv = (no) => { const p = byNo.get(no); return p && p.rating ? p.rating : 0; };
+        round().boards.sort((a, b) => {
+            const ea = (a.whiteNo == null || a.blackNo == null) ? 1 : 0;
+            const eb = (b.whiteNo == null || b.blackNo == null) ? 1 : 0;
+            return ea - eb
+                || Math.max(sv(b.whiteNo), sv(b.blackNo)) - Math.max(sv(a.whiteNo), sv(a.blackNo))
+                || Math.max(rv(b.whiteNo), rv(b.blackNo)) - Math.max(rv(a.whiteNo), rv(a.blackNo));
+        });
+        renderAll();
+    }
+
     function flipResult(res) {
         return res === '1-0' ? '0-1' : res === '0-1' ? '1-0'
             : res === '+/-' ? '-/+' : res === '-/+' ? '+/-' : res;
@@ -268,7 +309,8 @@
         const standings = view === 'standings';
         standingsEl.hidden = !standings;
         boardsEl.hidden = standings;
-        if (addBoardEl) addBoardEl.hidden = standings;
+        const tools = addBoardEl ? addBoardEl.parentElement : null;
+        if (tools) tools.hidden = standings;
         if (hintEl) hintEl.hidden = standings;
         if (roundHeadEl) roundHeadEl.hidden = standings;
         roundsEl.hidden = standings;
@@ -323,7 +365,7 @@
         const r = round(), dups = dupSet();
         boardsEl.innerHTML = r.boards.map((b, bi) => `
             <div class="pr-bd${(b.whiteNo != null && dups.has(b.whiteNo)) || (b.blackNo != null && dups.has(b.blackNo)) ? ' conflict' : ''}" data-bi="${bi}">
-                <span class="pr-bd-n">${bi + 1}</span>
+                <span class="pr-bd-n" draggable="true" title="${esc(L.reorder || '')}">${bi + 1}</span>
                 ${slotHtml(b.whiteNo, bi, 'white', dups)}
                 ${resultHtml(b, bi)}
                 ${slotHtml(b.blackNo, bi, 'black', dups)}
@@ -352,6 +394,9 @@
             <th>${esc(L.stLosses || 'L')}</th><th>${esc(L.stColors || 'W/B')}</th>
         </tr></thead><tbody>${rows}</tbody></table></div>`;
     }
+
+    function markDrop(bd) { clearDropMark(); bd.classList.add('drop-before'); }
+    function clearDropMark() { boardsEl.querySelectorAll('.pr-bd.drop-before').forEach(b => b.classList.remove('drop-before')); }
 
     function statusOf(no) {
         const s = findSlot(no);
@@ -533,22 +578,37 @@
             placePlayer(sel, bi, side);
         };
         boardsEl.addEventListener('dragstart', (e) => {
-            const chip = e.target.closest('.pr-chip');
+            const grip = e.target.closest('.pr-bd-n');     // тащим номер → меняем порядок доски
+            if (grip) { dragBoardBi = +grip.closest('.pr-bd').dataset.bi; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'board'); return; }
+            const chip = e.target.closest('.pr-chip');     // тащим фишку → двигаем игрока
             if (chip) { dragNo = +chip.dataset.no; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragNo)); }
         });
-        boardsEl.addEventListener('dragover', (e) => { if (e.target.closest('.pr-slot')) e.preventDefault(); });
+        boardsEl.addEventListener('dragover', (e) => {
+            if (dragBoardBi != null) { const bd = e.target.closest('.pr-bd'); if (bd) { e.preventDefault(); markDrop(bd); } return; }
+            if (e.target.closest('.pr-slot')) e.preventDefault();
+        });
         boardsEl.addEventListener('drop', (e) => {
+            if (dragBoardBi != null) {
+                const bd = e.target.closest('.pr-bd'); if (bd) { e.preventDefault(); moveBoard(dragBoardBi, +bd.dataset.bi); }
+                dragBoardBi = null; clearDropMark(); return;
+            }
             const slot = e.target.closest('.pr-slot'); if (!slot) return;
             e.preventDefault();
             const no = dragNo != null ? dragNo : parseInt(e.dataTransfer.getData('text/plain'), 10);
             if (!isNaN(no)) placePlayer(no, +slot.dataset.bi, slot.dataset.side);
             dragNo = null;
         });
+        boardsEl.addEventListener('dragend', () => { dragBoardBi = null; dragNo = null; clearDropMark(); });
 
         poolEl.onclick = (e) => {
             const chip = e.target.closest('.pr-pchip');
-            if (chip) { selectPlayer(+chip.dataset.no); return; }
-            if (sel != null) unassign(sel);
+            if (chip) {
+                const no = +chip.dataset.no;
+                // Выбран свободный + кликнули по другому свободному → новая пара (удобно и на тач).
+                if (sel != null && sel !== no && statusOf(sel) === 'free' && statusOf(no) === 'free') { createPair(sel, no); return; }
+                selectPlayer(no); return;
+            }
+            if (sel != null) unassign(sel); // клик по пустому месту пула — снять выбранного
         };
         poolEl.addEventListener('dragstart', (e) => {
             const chip = e.target.closest('.pr-pchip');
@@ -558,8 +618,15 @@
         poolEl.addEventListener('drop', (e) => {
             e.preventDefault();
             const no = dragNo != null ? dragNo : parseInt(e.dataTransfer.getData('text/plain'), 10);
-            if (!isNaN(no)) unassign(no);
             dragNo = null;
+            if (isNaN(no)) return;
+            // Дроп на другого СВОБОДНОГО → создать пару; иначе — снять с тура.
+            const target = e.target.closest('.pr-pchip');
+            if (target) {
+                const tno = +target.dataset.no;
+                if (tno !== no && statusOf(no) === 'free' && statusOf(tno) === 'free') { createPair(no, tno); return; }
+            }
+            unassign(no);
         });
         if (poolSearch) poolSearch.oninput = renderPool;
 
@@ -574,6 +641,7 @@
         undoBtn.onclick = undo;
         redoBtn.onclick = redo;
         addBoardEl.onclick = addBoard;
+        document.getElementById('pr-sortboards').onclick = sortBoards;
         document.getElementById('pr-print').onclick = printRound;
         document.getElementById('pr-pgn').onclick = exportPgn;
         document.getElementById('pr-csv').onclick = exportCsv;

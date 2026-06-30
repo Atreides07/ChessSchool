@@ -88,7 +88,10 @@
             <div class="pr-main">
                 <div class="pr-round-head" id="pr-round-head"></div>
                 <div class="pr-boards" id="pr-boards"></div>
-                <button class="pr-addboard" id="pr-addboard" type="button">+ @Loc.T("pr.addboard")</button>
+                <div class="pr-board-tools">
+                    <button class="pr-addboard" id="pr-addboard" type="button">+ @Loc.T("pr.addboard")</button>
+                    <button class="pr-addboard" id="pr-sortboards" type="button" title="@Loc.T("pr.sortboards.hint")">↕ @Loc.T("pr.sortboards")</button>
+                </div>
                 <p class="pr-hint">@Loc.T("pr.swaphint")</p>
                 <div class="pr-standings" id="pr-standings" hidden></div>
             </div>
@@ -139,6 +142,8 @@
         poolFree = Loc.T("pr.pool.free"),
         poolBye = Loc.T("pr.pool.bye"),
         poolPaired = Loc.T("pr.pool.paired"),
+        reorder = Loc.T("pr.reorder"),
+        pairMade = Loc.T("pr.pairmade"),
         selectHint = Loc.T("pr.selecthint"),
         unassign = Loc.T("pr.unassign"),
         okValid = Loc.T("pr.valid.ok"),

@@ -30,6 +30,7 @@ public interface IArenaTournamentGrain : IGrainWithStringKey
     Task SeekAsync(string sub);
     Task<ArenaStateDto> GetStateAsync(string sub);
     Task<TournamentSummaryDto> GetSummaryAsync(string? sub = null);
+    Task<TournamentSummaryDto> PeekSummaryAsync(string? sub = null);
     Task<IReadOnlyList<ArenaBoardDto>> GetBoardsAsync();
     Task<ArenaGameDto?> MoveAsync(string sub, MoveInput move);
     Task BerserkAsync(string sub);
@@ -83,7 +84,7 @@ public sealed class ArenaDirectoryGrain(IGrainFactory grains) : Grain, IArenaDir
 
         // Передаём sub, чтобы отметить турниры, где участвует пользователь.
         var live = await Task.WhenAll(liveIds.Select(id =>
-            grains.GetGrain<IArenaTournamentGrain>(id).GetSummaryAsync(sub)));
+            grains.GetGrain<IArenaTournamentGrain>(id).PeekSummaryAsync(sub)));
 
         var list = future.Concat(live).OrderBy(t => t.StartsAt).ToList();
 
@@ -555,6 +556,31 @@ public sealed class ArenaTournamentGrain(
         Tick();
         EnsureTimer();
         await FlushAsync();
+        return new TournamentSummaryDto(
+            Id, _name, _tc, Status(), _players.Count, SecondsLeft(),
+            _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds,
+            Joined: sub is not null && _players.ContainsKey(sub));
+    }
+
+    /// <summary>
+    /// Дешёвая сводка для ЛИСТИНГОВ (директория «/», бренд-каталог): продвигает турнир (Tick/настройки
+    /// ботов/запись) ТОЛЬКО при первом появлении грейна, чтобы счётчики были верны сразу. Дальше грейн
+    /// идёт своим таймером (EnsureTimer + DelayDeactivation), а листинг лишь читает текущее состояние —
+    /// без тика и записи на КАЖДЫЙ вызов. Иначе открытие «/» гоняло бы Tick+Flush по десяткам турниров
+    /// (3–10с TTFB и лаги в идущих партиях на том же силосе). Страница турнира по-прежнему зовёт
+    /// GetSummaryAsync/GetStateAsync (там продвигать на каждый запрос — правильно).
+    /// </summary>
+    public async Task<TournamentSummaryDto> PeekSummaryAsync(string? sub = null)
+    {
+        bool cold = !_configured;
+        EnsureConfigured();
+        EnsureTimer();
+        if (cold)
+        {
+            await RefreshBotSettingsAsync();
+            Tick();
+            await FlushAsync();
+        }
         return new TournamentSummaryDto(
             Id, _name, _tc, Status(), _players.Count, SecondsLeft(),
             _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds,

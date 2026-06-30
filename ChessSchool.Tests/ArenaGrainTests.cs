@@ -61,6 +61,30 @@ public class ArenaGrainTests
     }
 
     [Fact]
+    public async Task PeekSummary_OnRunningArena_FillsBotsOnFirstPeek_AndStaysConsistent()
+    {
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            long start = DateTimeOffset.UtcNow.AddSeconds(-5).ToUnixTimeSeconds();
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>($"blitz-{start}");
+
+            // Дешёвая сводка для листинга: при первом появлении грейна продвигает турнир (счётчики верны),
+            // дальше — чистое чтение. Идущий турнир без людей добирается ботами.
+            var first = await t.PeekSummaryAsync();
+            Assert.Equal(TournamentStatus.Running, first.Status);
+            Assert.True(first.BotCount >= 2, "холодный peek идущего турнира заполняет ботов");
+
+            // Повторный peek не ломает состояние и не теряет участников.
+            var second = await t.PeekSummaryAsync();
+            Assert.Equal(TournamentStatus.Running, second.Status);
+            Assert.True(second.PlayerCount >= first.PlayerCount);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
     public async Task RunningArena_WithoutHumans_FillsWithBots()
     {
         var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();

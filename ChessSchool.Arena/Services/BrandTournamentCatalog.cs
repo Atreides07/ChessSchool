@@ -52,7 +52,7 @@ public sealed class BrandTournamentCatalog(IGrainFactory grains) : IBrandTournam
     {
         var brands = await VisibleAsync();
         var views = await Task.WhenAll(brands.Select(async b =>
-            new BrandTournamentView(b, await grains.GetGrain<IArenaTournamentGrain>(b.Slug).GetSummaryAsync(sub))));
+            new BrandTournamentView(b, await grains.GetGrain<IArenaTournamentGrain>(b.Slug).PeekSummaryAsync(sub))));
         return views
             .OrderBy(v => v.Summary.Status switch
             {

@@ -9,14 +9,24 @@
     let L = {}, setupGen = 0;
     let doc = null;            // { title, sourceUrl, players:[{no,name,rating}], rounds:[{number,schedule,boards:[{whiteNo,blackNo,result}]}] }
     let byNo = new Map();      // no -> player
+    let pts = new Map();       // no -> {pts,games,wins,draws,losses,white,black} (по всем турам)
     let ri = 0;                // активный тур (индекс)
+    let curRoundIdx = 0;       // «текущий» тур (первый без результатов) — для метки и автооткрытия
+    let view = 'pairs';        // 'pairs' | 'standings'
     let sel = null;            // выбранный игрок (no) для клик-свапа
     let dragNo = null;         // перетаскиваемый игрок (no)
+    let undoStack = [], redoStack = [];
+    let toastTimer = null;
     // DOM-узлы
     let importEl, editorEl, msgEl, fileEl, dropEl, urlForm, roundsEl, headEl, boardsEl,
-        poolEl, poolSearch, validEl, titleEl, metaEl;
+        poolEl, poolSearch, validEl, titleEl, metaEl, standingsEl, selbarEl, toastEl,
+        undoBtn, redoBtn, addBoardEl, hintEl, roundHeadEl;
 
-    function teardown() { setupGen++; doc = null; byNo = new Map(); ri = 0; sel = null; dragNo = null; }
+    function teardown() {
+        setupGen++; doc = null; byNo = new Map(); pts = new Map(); ri = 0; curRoundIdx = 0;
+        view = 'pairs'; sel = null; dragNo = null; undoStack = []; redoStack = [];
+        if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+    }
 
     // ---------------- Импорт ----------------
 
@@ -69,24 +79,68 @@
         }
         doc = data;
         byNo = new Map((doc.players || []).map(p => [p.no, p]));
-        // Доски тура — по возрастанию номера (верхние доски сверху, как в жеребьёвке).
         doc.rounds.forEach(rd => rd.boards.sort((a, b) => (a.board || 0) - (b.board || 0)));
-        ri = 0; sel = null;
+        undoStack = []; redoStack = []; sel = null; view = 'pairs';
+        curRoundIdx = currentRoundIndex();
+        ri = curRoundIdx;                        // открываем текущий тур, а не первый
         showMsg('', '');
         importEl.hidden = true;
         editorEl.hidden = false;
         renderAll();
+        toast((L.loaded || 'Loaded: {0} players, {1} rounds')
+            .replace('{0}', (doc.players || []).length).replace('{1}', doc.rounds.length));
+    }
+
+    // Текущий тур = первый, где ещё нет ни одного результата (его и пейрят); иначе последний.
+    function currentRoundIndex() {
+        for (let i = 0; i < doc.rounds.length; i++) {
+            const b = doc.rounds[i].boards;
+            if (b.length && !b.some(x => x.whiteNo != null && x.blackNo != null && x.result)) return i;
+        }
+        return doc.rounds.length - 1;
     }
 
     function reset() {
         if (doc && !confirm(L.confirmReset || 'Start over?')) return;
-        doc = null; sel = null;
+        teardown();
         editorEl.hidden = true;
         importEl.hidden = false;
         if (fileEl) fileEl.value = '';
         const u = document.getElementById('pr-url'); if (u) u.value = '';
-        showMsg('', '');
+        showMsg('', ''); renderSelbar(); hideToast();
     }
+
+    // ---------------- Очки (по всем турам) ----------------
+
+    function blank() { return { pts: 0, games: 0, wins: 0, draws: 0, losses: 0, white: 0, black: 0 }; }
+
+    function computePoints() {
+        const m = new Map();
+        const get = (no) => { if (!m.has(no)) m.set(no, blank()); return m.get(no); };
+        for (const rd of doc.rounds) for (const b of rd.boards) {
+            const w = b.whiteNo, bl = b.blackNo, res = b.result;
+            if (w != null && bl != null) {
+                const W = get(w), B = get(bl); W.white++; B.black++;
+                if (res === '1-0' || res === '+/-') { W.pts += 1; W.games++; W.wins++; B.games++; B.losses++; }
+                else if (res === '0-1' || res === '-/+') { B.pts += 1; B.games++; B.wins++; W.games++; W.losses++; }
+                else if (res === '½-½') { W.pts += .5; B.pts += .5; W.games++; B.games++; W.draws++; B.draws++; }
+            } else if (w != null) { get(w).pts += 1; }       // бай белых
+            else if (bl != null) { get(bl).pts += 1; }       // бай чёрных
+        }
+        return m;
+    }
+
+    function fmtPts(p) {
+        const i = Math.floor(p), half = p - i >= 0.5;
+        return half ? (i ? i + '½' : '½') : String(i);
+    }
+
+    // ---------------- Undo / Redo ----------------
+
+    function snapshot() { return JSON.stringify(doc.rounds); }
+    function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 80) undoStack.shift(); redoStack = []; }
+    function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); doc.rounds = JSON.parse(undoStack.pop()); sel = null; renderAll(); }
+    function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); doc.rounds = JSON.parse(redoStack.pop()); sel = null; renderAll(); }
 
     // ---------------- Операции над моделью ----------------
 
@@ -104,23 +158,34 @@
     function placePlayer(no, bi, side) {
         const r = round(), b = r.boards[bi];
         const occ = side === 'white' ? b.whiteNo : b.blackNo;
-        if (occ === no) { clearSel(); return; }
+        if (occ === no) { clearSel(); renderAll(); return; }
+        pushUndo();
         const old = findSlot(no);
         if (side === 'white') b.whiteNo = no; else b.blackNo = no;
         if (old && !(old.bi === bi && old.side === side)) {
             const ob = r.boards[old.bi];
             if (old.side === 'white') ob.whiteNo = occ; else ob.blackNo = occ; // свап (occ может быть null)
         }
-        // Если игрок был из пула (old===null), вытесненный occ просто становится свободным (пул).
         clearSel(); renderAll();
     }
 
     function unassign(no) {
         const s = findSlot(no);
-        if (!s) { clearSel(); return; }
+        if (!s) { clearSel(); renderAll(); return; }
+        pushUndo();
         const b = round().boards[s.bi];
         if (s.side === 'white') b.whiteNo = null; else b.blackNo = null;
         clearSel(); renderAll();
+    }
+
+    // Бай: игрок садится на отдельную доску один (типичный случай — из пула, нечётный игрок).
+    function byePlayer(no) {
+        pushUndo();
+        const s = findSlot(no);
+        if (s) { const b = round().boards[s.bi]; if (s.side === 'white') b.whiteNo = null; else b.blackNo = null; }
+        round().boards.push({ board: 0, whiteNo: no, blackNo: null, result: '' });
+        clearSel(); renderAll();
+        toast(L.byeMade || 'Bye assigned');
     }
 
     function flipResult(res) {
@@ -129,29 +194,55 @@
     }
 
     function swapColors(bi) {
+        pushUndo();
         const b = round().boards[bi];
         const w = b.whiteNo; b.whiteNo = b.blackNo; b.blackNo = w;
         b.result = flipResult(b.result);
         renderAll();
     }
 
-    function removeBoard(bi) { round().boards.splice(bi, 1); clearSel(); renderAll(); }
-    function addBoard() { round().boards.push({ board: 0, whiteNo: null, blackNo: null, result: '' }); renderAll(); }
-    function setResult(bi, res) { const b = round().boards[bi]; b.result = b.result === res ? '' : res; renderAll(); }
+    function removeBoard(bi) {
+        pushUndo();
+        round().boards.splice(bi, 1);
+        clearSel(); renderAll();
+        toast(L.boardRemoved || 'Board removed', L.undo || 'Undo', undo);
+    }
+
+    function addBoard() { pushUndo(); round().boards.push({ board: 0, whiteNo: null, blackNo: null, result: '' }); renderAll(); }
+    function setResult(bi, res) { pushUndo(); const b = round().boards[bi]; b.result = b.result === res ? '' : res; renderAll(); }
+    // Форфейт-цикл: нет → победа белых (+/-) → победа чёрных (-/+) → нет.
+    function cycleForfeit(bi) { pushUndo(); const b = round().boards[bi]; b.result = b.result === '+/-' ? '-/+' : b.result === '-/+' ? '' : '+/-'; renderAll(); }
 
     function selectPlayer(no) { sel = (sel === no) ? null : no; renderAll(); }
     function clearSel() { sel = null; }
+
+    // ---------------- Тосты ----------------
+
+    function toast(text, actionLabel, actionFn) {
+        if (!toastEl) return;
+        toastEl.innerHTML = `<span>${esc(text)}</span>` + (actionLabel ? `<button class="pr-toast-act">${esc(actionLabel)}</button>` : '');
+        toastEl.hidden = false; toastEl.classList.add('show');
+        if (actionFn) toastEl.querySelector('.pr-toast-act').onclick = () => { actionFn(); hideToast(); };
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(hideToast, actionLabel ? 6000 : 3000);
+    }
+    function hideToast() { if (toastEl) { toastEl.classList.remove('show'); toastEl.hidden = true; } }
 
     // ---------------- Рендеринг ----------------
 
     function renderAll() {
         if (!doc) return;
+        pts = computePoints();
         renderBar();
         renderRounds();
         renderHead();
-        renderBoards();
+        renderView();
         renderPool();
         renderValidation();
+        renderSelbar();
+        editorEl.classList.toggle('pr-selecting', sel != null);
+        if (undoBtn) undoBtn.disabled = !undoStack.length;
+        if (redoBtn) redoBtn.disabled = !redoStack.length;
     }
 
     function renderBar() {
@@ -162,13 +253,28 @@
 
     function renderRounds() {
         roundsEl.innerHTML = doc.rounds.map((rd, i) =>
-            `<button class="pr-rtab${i === ri ? ' on' : ''}" data-ri="${i}" role="tab" aria-selected="${i === ri}">${esc(L.round || 'Round')} ${rd.number || i + 1}</button>`
+            `<button class="pr-rtab${i === ri ? ' on' : ''}" data-ri="${i}" role="tab" aria-selected="${i === ri}">${esc(L.round || 'Round')} ${rd.number || i + 1}${i === curRoundIdx ? ` · ${esc(L.current || 'current')}` : ''}</button>`
         ).join('');
     }
 
     function renderHead() {
         const rd = round();
-        headEl.textContent = rd.schedule ? `${L.round || 'Round'} ${rd.number || ri + 1} — ${rd.schedule}` : `${L.round || 'Round'} ${rd.number || ri + 1}`;
+        headEl.textContent = rd.schedule
+            ? `${L.round || 'Round'} ${rd.number || ri + 1} — ${rd.schedule}`
+            : `${L.round || 'Round'} ${rd.number || ri + 1}`;
+    }
+
+    function renderView() {
+        const standings = view === 'standings';
+        standingsEl.hidden = !standings;
+        boardsEl.hidden = standings;
+        if (addBoardEl) addBoardEl.hidden = standings;
+        if (hintEl) hintEl.hidden = standings;
+        if (roundHeadEl) roundHeadEl.hidden = standings;
+        roundsEl.hidden = standings;
+        document.getElementById('pr-view-pairs')?.classList.toggle('on', !standings);
+        document.getElementById('pr-view-standings')?.classList.toggle('on', standings);
+        if (standings) renderStandings(); else renderBoards();
     }
 
     function dupSet() {
@@ -182,23 +288,34 @@
     function chipHtml(no, dups) {
         const p = byNo.get(no);
         const name = p ? p.name : '#' + no;
+        const s = pts.get(no);
         const rtg = p && p.rating ? `<i class="pr-rtg">${p.rating}</i>` : '';
-        const cls = 'pr-chip' + (sel === no ? ' sel' : '') + (dups.has(no) ? ' dup' : '');
-        return `<span class="${cls}" draggable="true" data-no="${no}"><b>${no}</b> <span class="pr-nm">${esc(name)}</span> ${rtg}</span>`;
+        const ppill = (s && (s.games > 0 || s.pts > 0)) ? `<span class="pr-pts" title="${esc(L.stPts || 'Pts')}">${fmtPts(s.pts)}</span>` : '';
+        const cls = 'pr-chip' + (sel === no ? ' sel lifted' : '') + (dups.has(no) ? ' dup' : '');
+        return `<span class="${cls}" draggable="true" data-no="${no}"><b>${no}</b> <span class="pr-nm">${esc(name)}</span> ${rtg}${ppill}</span>`;
     }
 
     function slotHtml(no, bi, side, dups) {
+        const dot = `<span class="pr-dot pr-dot-${side === 'white' ? 'w' : 'b'}" aria-hidden="true"></span>`;
         const inner = no != null ? chipHtml(no, dups) : `<span class="pr-empty">+ ${esc(L.empty || 'empty')}</span>`;
-        return `<div class="pr-slot pr-${side === 'white' ? 'w' : 'b'}" data-bi="${bi}" data-side="${side}">${inner}</div>`;
+        return side === 'white'
+            ? `<div class="pr-slot pr-w" data-bi="${bi}" data-side="white">${dot}${inner}</div>`
+            : `<div class="pr-slot pr-b" data-bi="${bi}" data-side="black">${inner}${dot}</div>`;
+    }
+
+    function resDisp(res) {
+        return res === '1-0' ? '1–0' : res === '0-1' ? '0–1' : res === '½-½' ? '½'
+            : res === '+/-' ? '+ −' : res === '-/+' ? '− +' : '';
     }
 
     function resultHtml(b, bi) {
-        // Бай (одна сторона пуста) — результат не редактируем, показываем ярлык.
-        if (b.whiteNo == null || b.blackNo == null) return `<div class="pr-res pr-bye">${esc(L.bye || 'Bye')}</div>`;
-        const opt = (res, label) =>
-            `<button class="pr-rbtn${b.result === res ? ' on' : ''}" data-res="${res}" data-bi="${bi}">${label}</button>`;
+        if (b.whiteNo == null || b.blackNo == null) return `<div class="pr-res"><span class="pr-bye">${esc(L.bye || 'Bye')}</span></div>`;
+        const ff = b.result === '+/-' || b.result === '-/+';
+        const opt = (res, label) => `<button class="pr-rbtn${b.result === res ? ' on' : ''}" data-res="${res}" data-bi="${bi}">${label}</button>`;
         return `<div class="pr-res" role="group" aria-label="${esc(L.result || 'Result')}">
             ${opt('1-0', '1–0')}${opt('½-½', '½')}${opt('0-1', '0–1')}
+            <button class="pr-rbtn pr-ff${ff ? ' on' : ''}" data-ff="${bi}" title="${esc(L.forfeit || 'Forfeit')}" aria-label="${esc(L.forfeit || 'Forfeit')}">⚑</button>
+            ${ff ? `<span class="pr-ff-lbl">${resDisp(b.result)}</span>` : ''}
         </div>`;
     }
 
@@ -214,7 +331,26 @@
                     <button class="pr-iconbtn" data-act="swap" data-bi="${bi}" title="${esc(L.swapColors || 'Swap colors')}" aria-label="${esc(L.swapColors || 'Swap colors')}">⇄</button>
                     <button class="pr-iconbtn" data-act="rm" data-bi="${bi}" title="${esc(L.removeBoard || 'Remove board')}" aria-label="${esc(L.removeBoard || 'Remove board')}">✕</button>
                 </div>
-            </div>`).join('');
+            </div>`).join('') || `<p class="pr-muted">—</p>`;
+    }
+
+    function renderStandings() {
+        const arr = [...pts.entries()].map(([no, s]) => ({ no, ...s, p: byNo.get(no) }))
+            .sort((a, b) => b.pts - a.pts || b.wins - a.wins || (b.p?.rating || 0) - (a.p?.rating || 0)
+                || (a.p?.name || '').localeCompare(b.p?.name || ''));
+        if (!arr.length) { standingsEl.innerHTML = `<p class="pr-muted">${esc(L.stEmpty || '')}</p>`; return; }
+        const rows = arr.map((s, i) => `<tr>
+            <td class="pr-st-place">${i + 1}</td>
+            <td class="pr-st-name"><b>${s.no}</b> <span>${esc(s.p ? s.p.name : '#' + s.no)}</span>${s.p && s.p.rating ? ` <i>${s.p.rating}</i>` : ''}</td>
+            <td class="pr-st-pts">${fmtPts(s.pts)}</td>
+            <td>${s.games}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td>
+            <td class="pr-st-col">${s.white}/${s.black}</td>
+        </tr>`).join('');
+        standingsEl.innerHTML = `<div class="pr-st-wrap"><table class="pr-st-tbl"><thead><tr>
+            <th>#</th><th class="pr-st-name">${esc(L.stPlayer || 'Player')}</th><th>${esc(L.stPts || 'Pts')}</th>
+            <th>${esc(L.stGames || 'G')}</th><th>${esc(L.stWins || 'W')}</th><th>${esc(L.stDraws || 'D')}</th>
+            <th>${esc(L.stLosses || 'L')}</th><th>${esc(L.stColors || 'W/B')}</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`;
     }
 
     function statusOf(no) {
@@ -264,13 +400,22 @@
         validEl.innerHTML = issues.length
             ? issues.map(i => `<div class="pr-issue pr-issue-${i.kind}">${esc(i.text)}</div>`).join('')
             : `<div class="pr-issue pr-issue-ok">${esc(L.okValid || 'Looks valid ✓')}</div>`;
+    }
 
-        if (sel != null) {
-            const p = byNo.get(sel);
-            validEl.insertAdjacentHTML('afterbegin',
-                `<div class="pr-selbar"><b>${esc(p ? p.name : '#' + sel)}</b> ${esc(L.selectHint || '')}
-                 <button class="pr-unassign" id="pr-unassign-btn">${esc(L.unassign || 'Remove')}</button></div>`);
-        }
+    // Плавающая панель выбранного игрока (видна при выборе; удобна на телефоне).
+    function renderSelbar() {
+        if (!selbarEl) return;
+        if (sel == null) { selbarEl.hidden = true; selbarEl.classList.remove('show'); return; }
+        const p = byNo.get(sel);
+        selbarEl.innerHTML =
+            `<span class="pr-selbar-nm">${esc(p ? p.name : '#' + sel)}</span>
+             <span class="pr-selbar-hint">${esc(L.selectHint || '')}</span>
+             <span class="pr-selbar-acts">
+               <button data-sb="bye">${esc(L.giveBye || 'Bye')}</button>
+               <button data-sb="unassign">${esc(L.unassign || 'Remove')}</button>
+               <button data-sb="cancel">${esc(L.cancel || 'Cancel')}</button>
+             </span>`;
+        selbarEl.hidden = false; selbarEl.classList.add('show');
     }
 
     // ---------------- Экспорт ----------------
@@ -321,7 +466,7 @@
         const rows = rd.boards.map((b, i) => `<tr>
             <td class="n">${i + 1}</td>
             <td class="w">${esc(nm(b.whiteNo) || '—')}${rt(b.whiteNo) ? ` <span>(${rt(b.whiteNo)})</span>` : ''}</td>
-            <td class="r">${esc((b.whiteNo == null || b.blackNo == null) ? (L.bye || 'Bye') : (b.result || '–'))}</td>
+            <td class="r">${esc((b.whiteNo == null || b.blackNo == null) ? (L.bye || 'Bye') : (resDisp(b.result) || '–'))}</td>
             <td class="b">${esc(nm(b.blackNo) || '—')}${rt(b.blackNo) ? ` <span>(${rt(b.blackNo)})</span>` : ''}</td>
         </tr>`).join('');
         let area = document.getElementById('pr-print-area');
@@ -339,17 +484,28 @@
     function bindDocOnce() {
         if (window.__prBound) return;
         window.__prBound = true;
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sel != null) { clearSel(); renderAll(); } });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && sel != null) { clearSel(); renderAll(); return; }
+            if (!doc || !editorEl || editorEl.hidden) return;
+            const t = e.target;
+            if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
+            const mod = e.ctrlKey || e.metaKey;
+            if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+            else if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); }
+        });
     }
 
     function bindEditor() {
-        // Туры.
         roundsEl.onclick = (e) => { const t = e.target.closest('[data-ri]'); if (t) { ri = +t.dataset.ri; sel = null; renderAll(); } };
 
-        // Доски: выбор/свап игроков, результаты, действия.
+        document.getElementById('pr-view-pairs').onclick = () => { if (view !== 'pairs') { view = 'pairs'; sel = null; renderAll(); } };
+        document.getElementById('pr-view-standings').onclick = () => { if (view !== 'standings') { view = 'standings'; sel = null; renderAll(); } };
+
         boardsEl.onclick = (e) => {
             const act = e.target.closest('[data-act]');
             if (act) { act.dataset.act === 'swap' ? swapColors(+act.dataset.bi) : removeBoard(+act.dataset.bi); return; }
+            const ff = e.target.closest('[data-ff]');
+            if (ff) { cycleForfeit(+ff.dataset.ff); return; }
             const rb = e.target.closest('[data-res]');
             if (rb) { setResult(+rb.dataset.bi, rb.dataset.res); return; }
             const slot = e.target.closest('.pr-slot');
@@ -373,7 +529,6 @@
             dragNo = null;
         });
 
-        // Пул: выбор игрока; клик по пустому месту/дроп — снять с тура.
         poolEl.onclick = (e) => {
             const chip = e.target.closest('.pr-pchip');
             if (chip) { selectPlayer(+chip.dataset.no); return; }
@@ -392,11 +547,17 @@
         });
         if (poolSearch) poolSearch.oninput = renderPool;
 
-        // Снять выбранного с тура (кнопка в селект-баре валидации).
-        validEl.onclick = (e) => { if (e.target.closest('#pr-unassign-btn') && sel != null) unassign(sel); };
+        selbarEl.onclick = (e) => {
+            const b = e.target.closest('[data-sb]'); if (!b || sel == null) return;
+            const a = b.dataset.sb;
+            if (a === 'bye') byePlayer(sel);
+            else if (a === 'unassign') unassign(sel);
+            else { clearSel(); renderAll(); }
+        };
 
-        // Тулбар.
-        document.getElementById('pr-addboard').onclick = addBoard;
+        undoBtn.onclick = undo;
+        redoBtn.onclick = redo;
+        addBoardEl.onclick = addBoard;
         document.getElementById('pr-print').onclick = printRound;
         document.getElementById('pr-pgn').onclick = exportPgn;
         document.getElementById('pr-csv').onclick = exportCsv;
@@ -431,27 +592,33 @@
         dropEl = document.getElementById('pr-drop');
         urlForm = document.getElementById('pr-url-form');
         roundsEl = document.getElementById('pr-rounds');
-        headEl = document.getElementById('pr-round-head');
+        headEl = roundHeadEl = document.getElementById('pr-round-head');
         boardsEl = document.getElementById('pr-boards');
+        standingsEl = document.getElementById('pr-standings');
         poolEl = document.getElementById('pr-pool');
         poolSearch = document.getElementById('pr-pool-search');
         validEl = document.getElementById('pr-valid');
         titleEl = document.getElementById('pr-title');
         metaEl = document.getElementById('pr-meta');
-        if (!importEl || !editorEl || !boardsEl) return;
+        selbarEl = document.getElementById('pr-selbar');
+        toastEl = document.getElementById('pr-toast');
+        undoBtn = document.getElementById('pr-undo');
+        redoBtn = document.getElementById('pr-redo');
+        addBoardEl = document.getElementById('pr-addboard');
+        hintEl = document.querySelector('#pr-editor .pr-hint');
+        if (!importEl || !editorEl || !boardsEl || !standingsEl || !selbarEl) return;
 
-        // Чистое состояние при каждом заходе (новый импорт).
         editorEl.hidden = true; importEl.hidden = false; showMsg('', '');
+        if (selbarEl) { selbarEl.hidden = true; selbarEl.classList.remove('show'); }
+        hideToast();
 
         bindImport();
         bindEditor();
         bindDocOnce();
     }
 
-    // Инициализация ровно один раз на появившийся #pr-root. Флаг ставится на сам узел, поэтому:
-    // (1) ловится и enhanced-навигация, при которой Blazor МОРФИТ узел (меняет атрибуты, а не добавляет
-    //     новый — тогда match по addedNodes промахивался, грабля #13); (2) нет самозапуска на перерисовке
-    //     досок (она меняет потомков #pr-boards, но #pr-root остаётся тем же узлом и уже помечен).
+    // Инициализация ровно один раз на появившийся #pr-root. Флаг на самом узле ловит и enhanced-навигацию с
+    // морфингом узла (грабля #13), и не самозапускается на перерисовке досок (#pr-root тот же узел).
     function tryInit() {
         const root = document.getElementById('pr-root');
         if (!root || root.dataset.prReady === '1') return;
@@ -459,8 +626,6 @@
         setup();
     }
 
-    // Скрипт глобальный (App.razor); инициализируется по любой мутации DOM, где появился новый #pr-root —
-    // надёжнее узкого match по addedNodes (тот не видел морфинг узла при enhanced-навигации).
     function watch() {
         if (window.__prObserver) return;
         window.__prObserver = new MutationObserver(() => {

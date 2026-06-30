@@ -49,6 +49,14 @@
             </form>
         </div>
         <p class="pr-msg" id="pr-msg" hidden></p>
+        <details class="pr-guide">
+            <summary>@Loc.T("pr.guide.title")</summary>
+            <ol>
+                <li>@Loc.T("pr.guide.s1")</li>
+                <li>@Loc.T("pr.guide.s2")</li>
+                <li>@Loc.T("pr.guide.s3")</li>
+            </ol>
+        </details>
     </section>
 
     @* --- Редактор (строится JS после импорта) --- *@
@@ -59,11 +67,19 @@
                 <span class="pr-doc-meta" id="pr-meta"></span>
             </div>
             <div class="pr-bar-r">
+                <button class="btn btn-sm btn-outline pr-icontxt" id="pr-undo" disabled>↶ @Loc.T("pr.undo")</button>
+                <button class="btn btn-sm btn-outline pr-icontxt" id="pr-redo" disabled>↷ @Loc.T("pr.redo")</button>
+                <span class="pr-bar-sep"></span>
                 <button class="btn btn-sm btn-outline" id="pr-print">@Loc.T("pr.export.print")</button>
                 <button class="btn btn-sm btn-outline" id="pr-pgn">PGN</button>
                 <button class="btn btn-sm btn-outline" id="pr-csv">CSV</button>
                 <button class="btn btn-sm btn-outline pr-reset" id="pr-reset">@Loc.T("pr.reset")</button>
             </div>
+        </div>
+
+        <div class="pr-views" role="tablist" aria-label="@Loc.T("pr.editor")">
+            <button class="pr-vtab on" id="pr-view-pairs" data-view="pairs" role="tab">@Loc.T("pr.view.pairs")</button>
+            <button class="pr-vtab" id="pr-view-standings" data-view="standings" role="tab">@Loc.T("pr.view.standings")</button>
         </div>
 
         <div class="pr-rounds" id="pr-rounds" role="tablist" aria-label="@Loc.T("pr.rounds")"></div>
@@ -74,6 +90,7 @@
                 <div class="pr-boards" id="pr-boards"></div>
                 <button class="pr-addboard" id="pr-addboard" type="button">+ @Loc.T("pr.addboard")</button>
                 <p class="pr-hint">@Loc.T("pr.swaphint")</p>
+                <div class="pr-standings" id="pr-standings" hidden></div>
             </div>
             <aside class="pr-aside">
                 <div class="pr-valid" id="pr-valid"></div>
@@ -88,6 +105,10 @@
             </aside>
         </div>
     </section>
+
+    @* Плавающая панель выбранного игрока (видна при выборе; удобна и на телефоне) + тосты. *@
+    <div class="pr-selbar-float" id="pr-selbar" hidden></div>
+    <div class="pr-toast" id="pr-toast" hidden aria-live="polite"></div>
 
     @* Корень для инициализации глобального скрипта + локализованные строки для JS. *@
     <div id="pr-root"></div>
@@ -124,5 +145,20 @@
         byeExtra = Loc.T("pr.valid.byeextra"),
         printTitle = Loc.T("pr.print.title"),
         confirmReset = Loc.T("pr.confirm.reset"),
+        current = Loc.T("pr.current"),
+        giveBye = Loc.T("pr.givebye"),
+        cancel = Loc.T("pr.cancel"),
+        forfeit = Loc.T("pr.forfeit"),
+        loaded = Loc.T("pr.loaded"),
+        boardRemoved = Loc.T("pr.boardremoved"),
+        byeMade = Loc.T("pr.byemade"),
+        stPlayer = Loc.T("pr.st.player"),
+        stPts = Loc.T("pr.st.pts"),
+        stGames = Loc.T("pr.st.games"),
+        stWins = Loc.T("pr.st.wins"),
+        stDraws = Loc.T("pr.st.draws"),
+        stLosses = Loc.T("pr.st.losses"),
+        stColors = Loc.T("pr.st.colors"),
+        stEmpty = Loc.T("pr.st.empty"),
     }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
 }

@@ -56,12 +56,13 @@
 .pr-bd.conflict { border-color: #e0a0a0; background: color-mix(in srgb, #fde7e7 50%, var(--surface)); }
 .pr-bd-n { font-weight: 700; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
 
-.pr-slot { min-height: 40px; display: flex; align-items: center; border: 1px dashed transparent; border-radius: var(--r-sm); padding: .15rem; }
+.pr-slot { min-height: 40px; min-width: 0; display: flex; align-items: center; border: 1px dashed transparent; border-radius: var(--r-sm); padding: .15rem; }
 .pr-slot.pr-b { justify-content: flex-end; }
 .pr-slot:hover { border-color: var(--line); background: var(--surface-2); }
 
-.pr-chip { display: inline-flex; align-items: baseline; gap: .35rem; max-width: 100%; padding: .3rem .55rem; border-radius: var(--r-sm);
+.pr-chip { display: inline-flex; align-items: baseline; gap: .35rem; max-width: 100%; min-width: 0; padding: .3rem .55rem; border-radius: var(--r-sm);
            background: var(--surface-2); border: 1px solid var(--line); cursor: grab; user-select: none; }
+.pr-chip .pr-nm { min-width: 0; }
 .pr-chip:active { cursor: grabbing; }
 .pr-chip b { color: var(--muted); font-weight: 700; font-size: .78rem; font-variant-numeric: tabular-nums; flex: none; }
 .pr-chip .pr-nm { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -122,6 +123,81 @@
 .pr-st-free { background: var(--surface-2); color: var(--muted); }
 .pr-pchip.st-free .pr-nm { color: var(--ink-2); }
 
+/* ---------- Гид импорта ---------- */
+.pr-guide { margin-top: 1rem; font-size: .9rem; }
+.pr-guide > summary { cursor: pointer; color: var(--accent); font-weight: 600; list-style: none; display: inline-flex; align-items: center; gap: .3rem; }
+.pr-guide > summary::-webkit-details-marker { display: none; }
+.pr-guide > summary::before { content: "▸"; transition: transform .15s ease; display: inline-block; }
+.pr-guide[open] > summary::before { transform: rotate(90deg); }
+.pr-guide ol { margin: .6rem 0 0; padding-left: 1.3rem; color: var(--ink-2); line-height: 1.6; }
+
+/* ---------- Тулбар: undo/redo, разделитель ---------- */
+.pr-icontxt { font-variant-numeric: tabular-nums; }
+.pr-icontxt:disabled { opacity: .45; cursor: default; }
+.pr-bar-sep { width: 1px; height: 1.3rem; background: var(--line); margin: 0 .15rem; }
+
+/* ---------- Табы вида (Пары / Таблица) ---------- */
+.pr-views { display: inline-flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 3px; margin-bottom: 1rem; }
+.pr-vtab { border: none; background: transparent; color: var(--ink-2); font: inherit; font-weight: 600; font-size: .9rem; padding: .35rem .9rem; border-radius: var(--r-sm); cursor: pointer; }
+.pr-vtab:hover { color: var(--ink); }
+.pr-vtab.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+
+/* ---------- Цветовые кружки сторон + очки ---------- */
+.pr-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.pr-dot-w { border: 1.5px solid var(--ink-2); background: var(--surface); }
+.pr-dot-b { background: var(--ink); }
+.pr-slot { gap: .4rem; }
+.pr-pts { margin-left: auto; padding: 1px 7px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent);
+          border-radius: var(--r-pill); font-size: .76rem; font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
+
+/* ---------- Краска выбора: приподнятая фишка + подсветка мест ---------- */
+.pr-chip.lifted { box-shadow: 0 4px 12px rgba(0,0,0,.16); transform: translateY(-1px); position: relative; z-index: 2; }
+.pr-editor.pr-selecting .pr-slot { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); border-style: dashed;
+                                   background: color-mix(in srgb, var(--accent) 6%, var(--surface)); cursor: pointer; }
+.pr-editor.pr-selecting .pr-slot:hover { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border-color: var(--accent); }
+
+/* ---------- Форфейт ---------- */
+.pr-rbtn.pr-ff { min-width: 1.8rem; border-radius: 0 var(--r-sm) var(--r-sm) 0; color: var(--muted); }
+.pr-rbtn.pr-ff.on { background: #fff3cf; border-color: #e0ad00; color: #6e5200; }
+.pr-ff-lbl { font-size: .76rem; font-weight: 700; color: #6e5200; align-self: center; padding-left: .3rem; font-variant-numeric: tabular-nums; }
+
+/* ---------- Плавающая панель выбранного игрока ---------- */
+.pr-selbar-float { position: fixed; left: 50%; bottom: 1.1rem; transform: translateX(-50%) translateY(8px); z-index: 60;
+                   display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; max-width: calc(100vw - 2rem);
+                   background: var(--ink); color: #fff; border-radius: var(--r-pill); padding: .5rem .5rem .5rem 1rem;
+                   box-shadow: 0 10px 30px rgba(0,0,0,.28); opacity: 0; transition: opacity .15s ease, transform .15s ease; }
+.pr-selbar-float.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pr-selbar-float[hidden] { display: none; }
+.pr-selbar-nm { font-weight: 700; }
+.pr-selbar-hint { color: rgba(255,255,255,.7); font-size: .88rem; }
+.pr-selbar-acts { display: flex; gap: .3rem; }
+.pr-selbar-acts button { border: none; background: rgba(255,255,255,.15); color: #fff; font: inherit; font-size: .85rem; font-weight: 600;
+                         padding: .35rem .7rem; border-radius: var(--r-pill); cursor: pointer; }
+.pr-selbar-acts button:hover { background: rgba(255,255,255,.28); }
+.pr-selbar-acts button[data-sb="bye"] { background: #e0ad00; color: #3a2c00; }
+.pr-selbar-acts button[data-sb="bye"]:hover { background: #f0bd10; }
+
+/* ---------- Тост ---------- */
+.pr-toast { position: fixed; left: 50%; bottom: 1.1rem; transform: translateX(-50%) translateY(8px); z-index: 55;
+            display: flex; align-items: center; gap: .8rem; background: var(--ink); color: #fff; border-radius: var(--r-pill);
+            padding: .55rem 1rem; box-shadow: 0 10px 30px rgba(0,0,0,.28); opacity: 0; transition: opacity .15s ease, transform .15s ease; }
+.pr-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pr-toast[hidden] { display: none; }
+.pr-toast-act { border: none; background: transparent; color: #7fb0ff; font: inherit; font-weight: 700; cursor: pointer; }
+
+/* ---------- Таблица положения ---------- */
+.pr-st-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
+.pr-st-tbl { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.pr-st-tbl th, .pr-st-tbl td { padding: .5rem .6rem; text-align: center; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.pr-st-tbl thead th { color: var(--muted); font-weight: 700; font-size: .8rem; background: var(--surface-2); position: sticky; top: 0; }
+.pr-st-tbl tbody tr:last-child td { border-bottom: none; }
+.pr-st-tbl .pr-st-name { text-align: left; }
+.pr-st-tbl td.pr-st-name b { color: var(--muted); font-weight: 700; font-size: .78rem; margin-right: .3rem; }
+.pr-st-tbl td.pr-st-name i { color: var(--muted); font-style: normal; font-size: .8rem; }
+.pr-st-tbl .pr-st-place { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pr-st-tbl .pr-st-pts { font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pr-st-tbl .pr-st-col { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
 /* ---------- Печать ---------- */
 #pr-print-area { display: none; }
 @media print {
@@ -145,8 +221,12 @@
 @media (max-width: 640px) {
     .pr-import-grid { flex-direction: column; }
     .pr-or { justify-content: center; }
-    .pr-bd { grid-template-columns: 1.5rem 1fr auto; grid-auto-rows: auto; row-gap: .35rem; }
+    .pr-bd { grid-template-columns: 1.5rem minmax(0, 1fr) auto; grid-auto-rows: auto; row-gap: .35rem; }
     .pr-bd .pr-slot.pr-b { grid-column: 2 / 4; justify-content: flex-start; }
     .pr-bd-acts { grid-column: 3; grid-row: 1; }
     .pr-res { grid-column: 1 / 4; }
+    /* Плавающие панели — во всю ширину снизу, чтобы кнопки были под большим пальцем. */
+    .pr-selbar-float, .pr-toast { left: .6rem; right: .6rem; max-width: none; transform: translateY(8px); justify-content: space-between; }
+    .pr-selbar-float.show, .pr-toast.show { transform: translateY(0); }
+    .pr-selbar-hint { width: 100%; order: 3; }
 }

@@ -18,6 +18,7 @@
     let connecting = false, setupGen = 0; // защита от повторного входа в setup (иначе дубли соединений/таймеров)
     let lastHeroSig = null, lastPlayKey = null; // устойчивые секции: не пересобирать шапку/ожидание на каждый пуш
     let lastGameSig = null, drawDeclinedAt = 0;  // своя партия: не пересобирать доску на каждый пуш (иначе теряются клики)
+    let boardSig = null; // подпись отрисованной доски (позиция+выбор+предход): не перерисовывать, если ничего не изменилось
     let chessUrl = '/lib/chess.js', signalrUrl = '/lib/signalr.js'; // переопределяются fingerprinted-URL из #t-root
 
     async function ensureLibs() {
@@ -35,7 +36,7 @@
         if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
         if (conn) { try { conn.stop(); } catch (e) { } conn = null; }
         currentId = null; state = null; chess = null; sel = null; pendingPromo = null; premove = null;
-        lastHeroSig = null; lastPlayKey = null; lastGameSig = null; // следующий setup перестроит каркас заново
+        lastHeroSig = null; lastPlayKey = null; lastGameSig = null; boardSig = null; // следующий setup перестроит каркас заново
     }
 
     async function setup() {
@@ -409,6 +410,7 @@
     const cells = {}, coordHtml = {};
     function buildBoard(boardEl) {
         boardEl.innerHTML = '';
+        boardSig = null; // клетки пересозданы — следующая renderBoard обязана отрисовать
         for (const k in cells) delete cells[k];
         const ranks = flip ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
         const cols = flip ? [...FILES].reverse() : FILES;
@@ -426,6 +428,14 @@
 
     function renderBoard() {
         const g = state.myGame; if (!g) return;
+        // Защита от ложной перерисовки: арена шлёт пуш на ЛЮБОЕ событие турнира (в т.ч. ход бота в чужой
+        // партии), и без этого доска мигала бы на каждый пуш. Перерисовываем 64 клетки, только если реально
+        // изменились позиция / выбор / предход / подсветка хода. Выбор и предход — в подписи, чтобы клики
+        // (они зовут renderBoard) всё-таки перерисовывали.
+        const sig = chess.fen() + '|' + (sel || '') + '|' + (premove ? premove.from + premove.to : '') +
+            '|' + g.status + '|' + (g.lastFrom || '') + (g.lastTo || '') + (g.checkSquare || '');
+        if (sig === boardSig) return;
+        boardSig = sig;
         for (const f of FILES) for (let r = 1; r <= 8; r++) {
             const sq = f + r, el = cells[sq]; if (!el) continue;
             const p = chess.get(sq);

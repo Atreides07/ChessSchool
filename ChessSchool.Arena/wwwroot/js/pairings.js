@@ -448,20 +448,30 @@
         bindDocOnce();
     }
 
-    // Старт по появлению #pr-root (enhanced-навигация не исполняет вставленный <script>, см. App.razor).
+    // Инициализация ровно один раз на появившийся #pr-root. Флаг ставится на сам узел, поэтому:
+    // (1) ловится и enhanced-навигация, при которой Blazor МОРФИТ узел (меняет атрибуты, а не добавляет
+    //     новый — тогда match по addedNodes промахивался, грабля #13); (2) нет самозапуска на перерисовке
+    //     досок (она меняет потомков #pr-boards, но #pr-root остаётся тем же узлом и уже помечен).
+    function tryInit() {
+        const root = document.getElementById('pr-root');
+        if (!root || root.dataset.prReady === '1') return;
+        root.dataset.prReady = '1';
+        setup();
+    }
+
+    // Скрипт глобальный (App.razor); инициализируется по любой мутации DOM, где появился новый #pr-root —
+    // надёжнее узкого match по addedNodes (тот не видел морфинг узла при enhanced-навигации).
     function watch() {
         if (window.__prObserver) return;
-        const relevant = (n) => n.nodeType === 1 && (n.matches?.('#pr-root') || n.querySelector?.('#pr-root'));
-        window.__prObserver = new MutationObserver((records) => {
-            if (!records.some(r => Array.from(r.addedNodes).some(relevant))) return;
+        window.__prObserver = new MutationObserver(() => {
             if (window.__prRaf) return;
-            window.__prRaf = requestAnimationFrame(() => { window.__prRaf = 0; setup(); });
+            window.__prRaf = requestAnimationFrame(() => { window.__prRaf = 0; tryInit(); });
         });
         window.__prObserver.observe(document.documentElement, { childList: true, subtree: true });
     }
 
     watch();
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup);
-    else setup();
-    document.addEventListener('enhancedload', setup);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryInit);
+    else tryInit();
+    document.addEventListener('enhancedload', tryInit);
 })();

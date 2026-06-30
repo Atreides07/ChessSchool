@@ -1,0 +1,128 @@
+@page "/pairings"
+@inject NavigationManager Nav
+
+@* Публичный инструмент: импорт жеребьёвки из chess-results (.xlsx или ссылка) + ручная правка пар.
+   Статический SSR-каркас (без @@rendermode) — всю интерактивность ведёт ГЛОБАЛЬНЫЙ js/pairings.js
+   (инлайновый <script> не исполнится при enhanced-навигации — грабля #13; HTTP — в minimal-API, не в
+   рендере — грабля #12). CSS — глобальный css/pairings.css (scoped не достаёт JS-построенный DOM — грабля #17). *@
+
+<PageTitle>@Loc.T("pr.pagetitle")</PageTitle>
+<HeadContent>
+    <meta name="description" content="@Loc.T("pr.metadesc")" />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="@(Nav.BaseUri + "pairings")" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="@Loc.T("pr.ogtitle")" />
+    <meta property="og:description" content="@Loc.T("pr.metadesc")" />
+    <meta property="og:url" content="@(Nav.BaseUri + "pairings")" />
+</HeadContent>
+
+<div class="pr-wrap">
+    <header class="pr-intro">
+        <h1>@Loc.T("pr.h1")</h1>
+        <p class="pr-lead">@Loc.T("pr.lead")</p>
+    </header>
+
+    @* --- Импорт --- *@
+    <section class="pr-import" id="pr-import" aria-label="@Loc.T("pr.import")">
+        <div class="pr-import-grid">
+            <label class="pr-drop" id="pr-drop">
+                <input type="file" id="pr-file" accept=".xlsx" hidden />
+                <svg viewBox="0 0 24 24" class="pr-drop-ic" aria-hidden="true">
+                    <path d="M12 16V4m0 0L8 8m4-4l4 4M5 20h14" fill="none" stroke="currentColor"
+                          stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <span class="pr-drop-t">@Loc.T("pr.drop.title")</span>
+                <span class="pr-drop-s">@Loc.T("pr.drop.sub")</span>
+            </label>
+
+            <div class="pr-or"><span>@Loc.T("pr.or")</span></div>
+
+            <form class="pr-url" id="pr-url-form">
+                <label class="pr-url-lbl" for="pr-url">@Loc.T("pr.url.label")</label>
+                <div class="pr-url-row">
+                    <input type="url" id="pr-url" inputmode="url" autocomplete="off"
+                           placeholder="https://chess-results.com/tnr…aspx" />
+                    <button type="submit" class="btn btn-primary btn-sm" id="pr-url-btn">@Loc.T("pr.url.btn")</button>
+                </div>
+                <span class="pr-url-hint">@Loc.T("pr.url.hint")</span>
+            </form>
+        </div>
+        <p class="pr-msg" id="pr-msg" hidden></p>
+    </section>
+
+    @* --- Редактор (строится JS после импорта) --- *@
+    <section class="pr-editor" id="pr-editor" hidden aria-label="@Loc.T("pr.editor")">
+        <div class="pr-bar">
+            <div class="pr-bar-l">
+                <h2 class="pr-doc-title" id="pr-title"></h2>
+                <span class="pr-doc-meta" id="pr-meta"></span>
+            </div>
+            <div class="pr-bar-r">
+                <button class="btn btn-sm btn-outline" id="pr-print">@Loc.T("pr.export.print")</button>
+                <button class="btn btn-sm btn-outline" id="pr-pgn">PGN</button>
+                <button class="btn btn-sm btn-outline" id="pr-csv">CSV</button>
+                <button class="btn btn-sm btn-outline pr-reset" id="pr-reset">@Loc.T("pr.reset")</button>
+            </div>
+        </div>
+
+        <div class="pr-rounds" id="pr-rounds" role="tablist" aria-label="@Loc.T("pr.rounds")"></div>
+
+        <div class="pr-grid">
+            <div class="pr-main">
+                <div class="pr-round-head" id="pr-round-head"></div>
+                <div class="pr-boards" id="pr-boards"></div>
+                <button class="pr-addboard" id="pr-addboard" type="button">+ @Loc.T("pr.addboard")</button>
+                <p class="pr-hint">@Loc.T("pr.swaphint")</p>
+            </div>
+            <aside class="pr-aside">
+                <div class="pr-valid" id="pr-valid"></div>
+                <div class="pr-pool-card">
+                    <div class="pr-pool-head">
+                        <h3>@Loc.T("pr.pool")</h3>
+                        <input type="search" id="pr-pool-search" placeholder="@Loc.T("pr.pool.search")"
+                               aria-label="@Loc.T("pr.pool.search")" />
+                    </div>
+                    <div class="pr-pool" id="pr-pool"></div>
+                </div>
+            </aside>
+        </div>
+    </section>
+
+    @* Корень для инициализации глобального скрипта + локализованные строки для JS. *@
+    <div id="pr-root"></div>
+    <script id="pr-loc" type="application/json">@((MarkupString)LocJson())</script>
+</div>
+
+@code {
+    // Строки экрана → JSON для глобального js/pairings.js (как bd-loc для broadcast.js).
+    private static string LocJson() => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        loading = Loc.T("pr.loading"),
+        round = Loc.T("pr.round"),
+        board = Loc.T("pr.board"),
+        white = Loc.T("pr.white"),
+        black = Loc.T("pr.black"),
+        bye = Loc.T("pr.bye"),
+        empty = Loc.T("pr.empty"),
+        swapColors = Loc.T("pr.swapcolors"),
+        removeBoard = Loc.T("pr.removeboard"),
+        result = Loc.T("pr.result"),
+        notPlayed = Loc.T("pr.notplayed"),
+        rating = Loc.T("pr.rating"),
+        players = Loc.T("pr.players"),
+        roundsWord = Loc.T("pr.roundsword"),
+        statusPaired = Loc.T("pr.status.paired"),
+        statusBye = Loc.T("pr.status.bye"),
+        statusFree = Loc.T("pr.status.free"),
+        selectHint = Loc.T("pr.selecthint"),
+        unassign = Loc.T("pr.unassign"),
+        okValid = Loc.T("pr.valid.ok"),
+        dupConflict = Loc.T("pr.valid.dup"),
+        unpaired = Loc.T("pr.valid.unpaired"),
+        byeWarn = Loc.T("pr.valid.byewarn"),
+        byeExtra = Loc.T("pr.valid.byeextra"),
+        printTitle = Loc.T("pr.print.title"),
+        confirmReset = Loc.T("pr.confirm.reset"),
+    }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+}

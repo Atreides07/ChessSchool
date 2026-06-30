@@ -110,6 +110,10 @@
 .pr-pool-head input { border: 1px solid var(--line); border-radius: var(--r-sm); padding: .4rem .6rem; font: inherit; font-size: .88rem; background: var(--surface); color: var(--ink); }
 .pr-pool-head input:focus { outline: none; border-color: var(--accent); }
 .pr-pool { display: flex; flex-direction: column; gap: .25rem; max-height: 60vh; overflow-y: auto; scrollbar-width: thin; }
+.pr-pool-grp { display: flex; align-items: center; gap: .35rem; font-size: .72rem; font-weight: 800; text-transform: uppercase;
+               letter-spacing: .04em; color: var(--muted); padding: .5rem .2rem .15rem; position: sticky; top: 0; background: var(--surface); }
+.pr-pool-grp:first-child { padding-top: 0; }
+.pr-pool-grp span { color: var(--ink-2); background: var(--surface-2); border-radius: var(--r-pill); padding: 0 .4rem; font-weight: 700; }
 .pr-muted { color: var(--muted); }
 .pr-pchip { display: flex; align-items: baseline; gap: .35rem; padding: .35rem .5rem; border-radius: var(--r-sm); border: 1px solid transparent; cursor: grab; user-select: none; }
 .pr-pchip:hover { background: var(--surface-2); }

@@ -362,17 +362,33 @@
 
     function renderPool() {
         const q = (poolSearch && poolSearch.value || '').trim().toLowerCase();
-        const players = (doc.players || []).slice().sort((a, b) => a.no - b.no);
-        const items = players.filter(p => !q || p.name.toLowerCase().includes(q) || String(p.no) === q);
+        // Пул — рабочий список: свободные вверху (их надо посадить), затем баи, затем в паре. Внутри группы —
+        // по очкам↓, рейтингу↓, стартовому №↑ (пейринг идёт по очкам; без результатов это = «по рейтингу»).
+        const rank = { free: 0, bye: 1, paired: 2 };
+        let list = (doc.players || []).map(p => {
+            const st = statusOf(p.no), s = pts.get(p.no);
+            return { p, st, score: s ? s.pts : 0 };
+        });
+        if (q) list = list.filter(x => x.p.name.toLowerCase().includes(q) || String(x.p.no) === q);
+        list.sort((a, b) => rank[a.st] - rank[b.st] || b.score - a.score
+            || (b.p.rating || 0) - (a.p.rating || 0) || a.p.no - b.p.no);
+
         const badge = { paired: L.statusPaired || 'paired', bye: L.statusBye || 'bye', free: L.statusFree || 'free' };
-        poolEl.innerHTML = items.map(p => {
-            const st = statusOf(p.no);
-            const rtg = p.rating ? `<i class="pr-rtg">${p.rating}</i>` : '';
-            return `<div class="pr-pchip st-${st}${sel === p.no ? ' sel' : ''}" draggable="true" data-no="${p.no}">
+        const grp = { free: L.poolFree || 'Free', bye: L.poolBye || 'Byes', paired: L.poolPaired || 'Paired' };
+        const counts = { free: 0, bye: 0, paired: 0 };
+        for (const x of list) counts[x.st]++;
+
+        let html = '', lastGrp = null;
+        for (const x of list) {
+            // Заголовки групп — только без поиска (при поиске нужен плоский список совпадений).
+            if (!q && x.st !== lastGrp) { lastGrp = x.st; html += `<div class="pr-pool-grp">${esc(grp[x.st])} <span>${counts[x.st]}</span></div>`; }
+            const p = x.p, rtg = p.rating ? `<i class="pr-rtg">${p.rating}</i>` : '';
+            html += `<div class="pr-pchip st-${x.st}${sel === p.no ? ' sel' : ''}" draggable="true" data-no="${p.no}">
                 <b>${p.no}</b> <span class="pr-nm">${esc(p.name)}</span> ${rtg}
-                <span class="pr-st pr-st-${st}">${esc(badge[st])}</span>
+                <span class="pr-st pr-st-${x.st}">${esc(badge[x.st])}</span>
             </div>`;
-        }).join('') || `<p class="pr-muted">—</p>`;
+        }
+        poolEl.innerHTML = html || `<p class="pr-muted">—</p>`;
     }
 
     function renderValidation() {

@@ -242,12 +242,20 @@ else
             @if (_next.Count > 0)
             {
                 <div class="lcat lcat-gap"><span>@Loc.T("cat.next")</span></div>
-                <div class="lgrid">@foreach (var t in _next) { @card(t) }</div>
+                <div class="lgrid">@foreach (var t in _next.Take(NextCap)) { @card(t) }</div>
+                @if (_next.Count > NextCap)
+                {
+                    <p class="lmore text-muted">@string.Format(Loc.T("sched.morenext"), _next.Count - NextCap)</p>
+                }
             }
             @if (_finished.Count > 0)
             {
                 <div class="lcat lcat-gap"><span>@Loc.T("cat.finished")</span></div>
-                <div class="lgrid">@foreach (var t in _finished) { @card(t) }</div>
+                <div class="lgrid">@foreach (var t in _finished.Take(FinishedCap)) { @card(t) }</div>
+                @if (_finished.Count > FinishedCap)
+                {
+                    <p class="lmore text-muted">@string.Format(Loc.T("sched.more"), _finished.Count - FinishedCap)</p>
+                }
             }
         </div>
 
@@ -276,7 +284,7 @@ else
             else
             {
                 <div class="up-list">
-                    @foreach (var t in _upcoming)
+                    @foreach (var t in _upcoming.Take(UpcomingCap))
                     {
                         <a class='up-item @TypeOf(t.TimeControl) @(t.Joined ? "up-mine" : "")' href="/t/@t.Id">
                             <span class="up-time">@t.StartsAt.ToLocalTime().ToString("HH:mm")</span>
@@ -285,6 +293,10 @@ else
                             <span class="up-pop">@t.HumanCount 👤@(t.BotCount > 0 ? $" {t.BotCount} 🤖" : "")</span>
                             <span class='badge @(t.Joined ? "badge-mine" : "badge-warn")'>@(t.Joined ? Loc.T("mine.you") : Loc.T("reg.short"))</span>
                         </a>
+                    }
+                    @if (_upcoming.Count > UpcomingCap)
+                    {
+                        <p class="lmore text-muted">@string.Format(Loc.T("sched.more"), _upcoming.Count - UpcomingCap)</p>
                     }
                 </div>
             }
@@ -297,6 +309,9 @@ else
 
 @code {
     private const int Hours = ScheduleBuilder.Hours; // окно таймлайна (для разметки сетки)
+    // Боковые/мобильные списки показывают лишь несколько турниров — полную картину даёт таймлайн
+    // (он со скроллом). Иначе рендерились бы все ~37 турниров окна полными карточками (избыточно).
+    private const int NextCap = 6, FinishedCap = 6, UpcomingCap = 12;
 
     private IReadOnlyList<TournamentSummaryDto>? _tournaments; // null → состояние загрузки
     private IReadOnlyList<ScheduleBlock> _blocks = [];

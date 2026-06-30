@@ -313,6 +313,8 @@ public static class Loc
         ["cat.finished"] = ("Завершённые", "Finished"),
         ["cat.upcoming"] = ("Предстоящие", "Upcoming"),
         ["empty.upcoming"] = ("Нет предстоящих турниров в ближайшие часы.", "No upcoming tournaments in the next few hours."),
+        ["sched.morenext"] = ("ещё {0} — на таймлайне", "{0} more — on the timeline"),
+        ["sched.more"] = ("ещё {0}", "{0} more"),
         ["status.live"] = ("идёт", "live"),
         ["status.finished"] = ("завершён", "finished"),
         ["status.reg"] = ("регистрация", "registration"),

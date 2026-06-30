@@ -161,6 +161,8 @@
         .sched-mobile { display: block; }
     }
 
+    .lmore { font-size: .85rem; margin: .5rem 0 0; }
+
     @media (max-width: 700px) {
         .sched-top { flex-direction: column; }
     }

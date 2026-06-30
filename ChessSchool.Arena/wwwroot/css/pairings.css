@@ -54,6 +54,8 @@
 .pr-bd { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: .6rem;
          background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: .45rem .6rem; box-shadow: var(--shadow-sm); }
 .pr-bd.conflict { border-color: #e0a0a0; background: color-mix(in srgb, #fde7e7 50%, var(--surface)); }
+.pr-bd:focus { outline: none; }
+.pr-bd:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .pr-bd-n { font-weight: 700; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; cursor: grab; user-select: none; border-radius: var(--r-sm); }
 .pr-bd-n:hover { background: var(--surface-2); color: var(--ink-2); }
 .pr-bd-n:active { cursor: grabbing; }
@@ -192,6 +194,22 @@
 .pr-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .pr-toast[hidden] { display: none; }
 .pr-toast-act { border: none; background: transparent; color: #7fb0ff; font: inherit; font-weight: 700; cursor: pointer; }
+
+/* ---------- Поповер быстрого выбора свободного игрока ---------- */
+.pr-pick { position: fixed; z-index: 65; width: 260px; max-height: 320px; display: flex; flex-direction: column;
+           background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: 0 12px 32px rgba(0,0,0,.22); padding: .5rem; }
+.pr-pick[hidden] { display: none; }
+.pr-pick-search { border: 1px solid var(--line); border-radius: var(--r-sm); padding: .4rem .6rem; font: inherit; font-size: .9rem; background: var(--surface); color: var(--ink); margin-bottom: .4rem; }
+.pr-pick-search:focus { outline: none; border-color: var(--accent); }
+.pr-pick-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; scrollbar-width: thin; }
+.pr-pick-item { display: flex; align-items: baseline; gap: .35rem; width: 100%; text-align: left; border: none; background: transparent;
+                font: inherit; padding: .4rem .5rem; border-radius: var(--r-sm); cursor: pointer; color: var(--ink); }
+.pr-pick-item:hover { background: var(--surface-2); }
+.pr-pick-item b { color: var(--muted); font-weight: 700; font-size: .76rem; flex: none; font-variant-numeric: tabular-nums; }
+.pr-pick-item .pr-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-pick-item .pr-rtg { color: var(--muted); font-size: .76rem; font-style: normal; margin-left: auto; flex: none; }
+.pr-pick-empty { color: var(--muted); padding: .4rem .5rem; margin: 0; }
+.pr-hint-kbd { margin-top: .25rem; }
 
 /* ---------- Таблица положения ---------- */
 .pr-st-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-md); }

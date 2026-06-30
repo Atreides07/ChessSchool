@@ -90,9 +90,11 @@
                 <div class="pr-boards" id="pr-boards"></div>
                 <div class="pr-board-tools">
                     <button class="pr-addboard" id="pr-addboard" type="button">+ @Loc.T("pr.addboard")</button>
+                    <button class="pr-addboard" id="pr-pairrest" type="button" title="@Loc.T("pr.pairrest.hint")">⚡ @Loc.T("pr.pairrest")</button>
                     <button class="pr-addboard" id="pr-sortboards" type="button" title="@Loc.T("pr.sortboards.hint")">↕ @Loc.T("pr.sortboards")</button>
                 </div>
                 <p class="pr-hint">@Loc.T("pr.swaphint")</p>
+                <p class="pr-hint pr-hint-kbd">@Loc.T("pr.kbdhint")</p>
                 <div class="pr-standings" id="pr-standings" hidden></div>
             </div>
             <aside class="pr-aside">
@@ -109,9 +111,11 @@
         </div>
     </section>
 
-    @* Плавающая панель выбранного игрока (видна при выборе; удобна и на телефоне) + тосты. *@
+    @* Плавающая панель выбранного игрока (видна при выборе; удобна и на телефоне) + тосты + быстрый выбор. *@
     <div class="pr-selbar-float" id="pr-selbar" hidden></div>
     <div class="pr-toast" id="pr-toast" hidden aria-live="polite"></div>
+    @* Поповер быстрого выбора свободного игрока (по клику на пустое место доски). *@
+    <div class="pr-pick" id="pr-pick" hidden></div>
 
     @* Корень для инициализации глобального скрипта + локализованные строки для JS. *@
     <div id="pr-root"></div>
@@ -144,6 +148,9 @@
         poolPaired = Loc.T("pr.pool.paired"),
         reorder = Loc.T("pr.reorder"),
         pairMade = Loc.T("pr.pairmade"),
+        autoPaired = Loc.T("pr.autopaired"),
+        noFree = Loc.T("pr.nofree"),
+        pickSearch = Loc.T("pr.pick.search"),
         selectHint = Loc.T("pr.selecthint"),
         unassign = Loc.T("pr.unassign"),
         okValid = Loc.T("pr.valid.ok"),

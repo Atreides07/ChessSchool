@@ -16,17 +16,21 @@
     let sel = null;            // выбранный игрок (no) для клик-свапа
     let dragNo = null;         // перетаскиваемый игрок (no)
     let dragBoardBi = null;    // перетаскиваемая доска (индекс) — смена порядка пар
+    let pickBi = null, pickSide = null; // открытый поповер быстрого выбора (для какого слота)
+    let focusBi = null;        // вернуть фокус на эту доску после перерисовки (ввод результата с клавиатуры)
     let undoStack = [], redoStack = [];
     let toastTimer = null;
     // DOM-узлы
     let importEl, editorEl, msgEl, fileEl, dropEl, urlForm, roundsEl, headEl, boardsEl,
         poolEl, poolSearch, validEl, titleEl, metaEl, standingsEl, selbarEl, toastEl,
-        undoBtn, redoBtn, addBoardEl, hintEl, roundHeadEl;
+        undoBtn, redoBtn, addBoardEl, hintEl, roundHeadEl, pickEl;
 
     function teardown() {
         setupGen++; doc = null; byNo = new Map(); pts = new Map(); ri = 0; curRoundIdx = 0;
         view = 'pairs'; sel = null; dragNo = null; dragBoardBi = null; undoStack = []; redoStack = [];
+        pickBi = null; pickSide = null; focusBi = null;
         if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+        if (pickEl) { pickEl.hidden = true; pickEl.classList.remove('show'); }
     }
 
     // ---------------- Импорт ----------------
@@ -229,6 +233,27 @@
         renderAll();
     }
 
+    // Свободные игроки текущего тура, отсортированные как для пейринга: очки↓ → рейтинг↓ → стартовый №.
+    function freePlayers() {
+        return (doc.players || []).filter(p => statusOf(p.no) === 'free')
+            .map(p => ({ p, score: (pts.get(p.no)?.pts) || 0 }))
+            .sort((a, b) => b.score - a.score || (b.p.rating || 0) - (a.p.rating || 0) || a.p.no - b.p.no)
+            .map(x => x.p);
+    }
+
+    // Досадить остаток: спарить всех свободных соседними по силе (1-2, 3-4, …); нечётному — бай.
+    function autoPairRemaining() {
+        const free = freePlayers();
+        if (!free.length) { toast(L.noFree || 'No free players'); return; }
+        pushUndo();
+        const arr = round().boards;
+        let i = 0;
+        for (; i + 1 < free.length; i += 2) arr.push({ board: 0, whiteNo: free[i].no, blackNo: free[i + 1].no, result: '' });
+        if (i < free.length) arr.push({ board: 0, whiteNo: free[i].no, blackNo: null, result: '' }); // нечётный → бай
+        clearSel(); renderAll();
+        toast(L.autoPaired || 'Free players paired');
+    }
+
     function flipResult(res) {
         return res === '1-0' ? '0-1' : res === '0-1' ? '1-0'
             : res === '+/-' ? '-/+' : res === '-/+' ? '+/-' : res;
@@ -364,7 +389,7 @@
     function renderBoards() {
         const r = round(), dups = dupSet();
         boardsEl.innerHTML = r.boards.map((b, bi) => `
-            <div class="pr-bd${(b.whiteNo != null && dups.has(b.whiteNo)) || (b.blackNo != null && dups.has(b.blackNo)) ? ' conflict' : ''}" data-bi="${bi}">
+            <div class="pr-bd${(b.whiteNo != null && dups.has(b.whiteNo)) || (b.blackNo != null && dups.has(b.blackNo)) ? ' conflict' : ''}" data-bi="${bi}" tabindex="0">
                 <span class="pr-bd-n" draggable="true" title="${esc(L.reorder || '')}">${bi + 1}</span>
                 ${slotHtml(b.whiteNo, bi, 'white', dups)}
                 ${resultHtml(b, bi)}
@@ -374,6 +399,8 @@
                     <button class="pr-iconbtn" data-act="rm" data-bi="${bi}" title="${esc(L.removeBoard || 'Remove board')}" aria-label="${esc(L.removeBoard || 'Remove board')}">✕</button>
                 </div>
             </div>`).join('') || `<p class="pr-muted">—</p>`;
+        // Вернуть фокус на доску после ввода результата с клавиатуры (поток «1 → следующая доска»).
+        if (focusBi != null) { const el = boardsEl.querySelector(`.pr-bd[data-bi="${Math.min(focusBi, r.boards.length - 1)}"]`); focusBi = null; if (el) el.focus(); }
     }
 
     function renderStandings() {
@@ -479,6 +506,62 @@
         selbarEl.hidden = false; selbarEl.classList.add('show');
     }
 
+    // ---------------- Быстрый выбор свободного на пустое место ----------------
+
+    function openPick(bi, side, anchorEl) {
+        if (!pickEl) return;
+        pickBi = bi; pickSide = side;
+        pickEl.innerHTML = `<input class="pr-pick-search" type="search" placeholder="${esc(L.pickSearch || '')}" aria-label="${esc(L.pickSearch || '')}"><div class="pr-pick-list"></div>`;
+        renderPickList('');
+        const r = anchorEl.getBoundingClientRect();
+        const w = 260;
+        pickEl.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+        pickEl.style.top = Math.min(r.bottom + 4, window.innerHeight - 24) + 'px';
+        pickEl.hidden = false; pickEl.classList.add('show');
+        pickEl.querySelector('.pr-pick-search').oninput = (e) => renderPickList(e.target.value);
+        pickEl.querySelector('.pr-pick-search').focus();
+    }
+
+    function renderPickList(q) {
+        const query = (q || '').trim().toLowerCase();
+        const free = freePlayers().filter(p => !query || p.name.toLowerCase().includes(query) || String(p.no) === query);
+        const list = pickEl.querySelector('.pr-pick-list');
+        list.innerHTML = free.map(p =>
+            `<button class="pr-pick-item" data-no="${p.no}"><b>${p.no}</b> <span class="pr-nm">${esc(p.name)}</span>${p.rating ? ` <i class="pr-rtg">${p.rating}</i>` : ''}</button>`
+        ).join('') || `<p class="pr-muted pr-pick-empty">${esc(L.noFree || 'No free players')}</p>`;
+    }
+
+    function closePick() { if (pickEl) { pickEl.hidden = true; pickEl.classList.remove('show'); } pickBi = null; pickSide = null; }
+
+    // ---------------- Ввод результата с клавиатуры ----------------
+
+    function focusRow(idx) {
+        const n = round().boards.length; if (!n) return;
+        const i = Math.max(0, Math.min(idx, n - 1));
+        boardsEl.querySelector(`.pr-bd[data-bi="${i}"]`)?.focus();
+    }
+
+    function boardKeydown(e) {
+        const bd = e.target.closest('.pr-bd'); if (!bd) return;
+        const bi = +bd.dataset.bi, b = round().boards[bi];
+        if (e.key === 'ArrowDown') { e.preventDefault(); focusRow(bi + 1); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); focusRow(bi - 1); return; }
+        const both = b.whiteNo != null && b.blackNo != null;
+        if (!both) return; // на бай-доске результат не вводим
+        if (e.key === 'f' || e.key === 'F' || e.key === 'а' || e.key === 'А') { e.preventDefault(); focusBi = bi; cycleForfeit(bi); return; }
+        let res = null;
+        if (e.key === '1') res = '1-0';
+        else if (e.key === '0') res = '0-1';
+        else if (e.key === '=' || e.key === '5') res = '½-½';
+        else if (e.key === 'Backspace' || e.key === 'Delete') res = '';
+        else return;
+        e.preventDefault();
+        pushUndo();
+        b.result = res;                              // прямое присвоение (не toggle): «1» всегда = победа белых
+        focusBi = (res === '' ? bi : bi + 1);        // после ввода — к следующей доске (быстрый поток вниз)
+        renderAll();
+    }
+
     // ---------------- Экспорт ----------------
 
     function slugify(s) { return (s || 'pairings').toLowerCase().replace(/[^a-z0-9а-я]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'pairings'; }
@@ -546,13 +629,20 @@
         if (window.__prBound) return;
         window.__prBound = true;
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && sel != null) { clearSel(); renderAll(); return; }
+            if (e.key === 'Escape') {
+                if (pickEl && !pickEl.hidden) { closePick(); return; }
+                if (sel != null) { clearSel(); renderAll(); return; }
+            }
             if (!doc || !editorEl || editorEl.hidden) return;
             const t = e.target;
             if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
             const mod = e.ctrlKey || e.metaKey;
             if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? redo() : undo(); }
             else if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); }
+        });
+        // Закрыть поповер быстрого выбора по клику вне его (но не по пустому слоту, который его открывает).
+        document.addEventListener('pointerdown', (e) => {
+            if (pickEl && !pickEl.hidden && !e.target.closest('#pr-pick') && !e.target.closest('.pr-empty')) closePick();
         });
     }
 
@@ -573,10 +663,15 @@
             if (!slot) return;
             const bi = +slot.dataset.bi, side = slot.dataset.side;
             const chip = e.target.closest('.pr-chip');
-            if (sel == null) { if (chip) selectPlayer(+chip.dataset.no); return; }
+            if (sel == null) {
+                if (chip) selectPlayer(+chip.dataset.no);
+                else if (slot.querySelector('.pr-empty')) openPick(bi, side, slot); // пустое место → быстрый выбор
+                return;
+            }
             if (chip && +chip.dataset.no === sel) { clearSel(); renderAll(); return; }
             placePlayer(sel, bi, side);
         };
+        boardsEl.addEventListener('keydown', boardKeydown);
         boardsEl.addEventListener('dragstart', (e) => {
             const grip = e.target.closest('.pr-bd-n');     // тащим номер → меняем порядок доски
             if (grip) { dragBoardBi = +grip.closest('.pr-bd').dataset.bi; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'board'); return; }
@@ -638,9 +733,18 @@
             else { clearSel(); renderAll(); }
         };
 
+        // Поповер быстрого выбора: клик по игроку → посадить на запомненный слот.
+        pickEl.onclick = (e) => {
+            const it = e.target.closest('.pr-pick-item'); if (!it) return;
+            const no = +it.dataset.no, bi = pickBi, side = pickSide;
+            closePick();
+            if (bi != null) placePlayer(no, bi, side);
+        };
+
         undoBtn.onclick = undo;
         redoBtn.onclick = redo;
         addBoardEl.onclick = addBoard;
+        document.getElementById('pr-pairrest').onclick = autoPairRemaining;
         document.getElementById('pr-sortboards').onclick = sortBoards;
         document.getElementById('pr-print').onclick = printRound;
         document.getElementById('pr-pgn').onclick = exportPgn;
@@ -686,6 +790,7 @@
         metaEl = document.getElementById('pr-meta');
         selbarEl = document.getElementById('pr-selbar');
         toastEl = document.getElementById('pr-toast');
+        pickEl = document.getElementById('pr-pick');
         undoBtn = document.getElementById('pr-undo');
         redoBtn = document.getElementById('pr-redo');
         addBoardEl = document.getElementById('pr-addboard');

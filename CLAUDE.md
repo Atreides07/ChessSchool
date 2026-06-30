@@ -21,6 +21,8 @@ Docker). Онлайн-игра — **Microsoft Orleans** (грейн на пар
 [docs/BOARD_GAME_REQUIREMENTS.md](docs/BOARD_GAME_REQUIREMENTS.md). Демо за dev tunnels (логин+игра,
 шаринг тестировщикам) — [docs/DEMO_TUNNELS.md](docs/DEMO_TUNNELS.md). Подписки (B2C-премиум на Paddle
 Billing: модель, вебхук, настройка sandbox) — [docs/SUBSCRIPTIONS.md](docs/SUBSCRIPTIONS.md).
+Архитектурные решения Арены (грейн-на-турнир, co-hosting Orleans+Blazor, push без SignalR-backplane,
+тонкие клиенты, дешёвые листинги, боты, безопасность) — [docs/ARENA_ARCHITECTURE.md](docs/ARENA_ARCHITECTURE.md).
 
 ## Главный принцип: всё рассчитано на несколько серверов
 

@@ -9,6 +9,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbContext(
     public DbSet<AuthCode> AuthCodes => Set<AuthCode>();
     public DbSet<EmailToken> EmailTokens => Set<EmailToken>();
     public DbSet<AuthEvent> AuthEvents => Set<AuthEvent>();
+    public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -21,6 +22,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbContext(
         b.Entity<AuthEvent>().HasIndex(e => new { e.Email, e.CreatedAt });
         b.Entity<AuthEvent>().HasIndex(e => new { e.UserId, e.CreatedAt });
         b.Entity<AuthEvent>().HasIndex(e => e.CreatedAt);
+        b.Entity<MfaRecoveryCode>().HasIndex(c => c.UserId);
+        b.Entity<MfaRecoveryCode>().HasIndex(c => c.CodeHash);
         // DateTimeOffset хранится нативно в PostgreSQL (timestamptz) — конвертеры не нужны.
     }
 }

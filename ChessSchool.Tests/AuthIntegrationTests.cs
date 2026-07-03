@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ChessSchool.Auth;
 using ChessSchool.Auth.Data;
 using ChessSchool.Auth.Email;
 using Microsoft.AspNetCore.Hosting;
@@ -402,7 +403,61 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.True(await db.AuthEvents.AnyAsync(e => e.Email == email && e.Type == AuthEventType.NewDeviceLogin));
     }
 
+    [Fact]
+    public async Task Mfa_EnableThenLogin_RequiresSecondFactor_AndRecoveryCodeIsOneTime()
+    {
+        var email = $"mfa-{Guid.NewGuid():N}@test.local";
+        var enroll = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Register(enroll, email);
+
+        // Настройка: страница отдаёт секрет; включаем MFA, подтвердив код из «приложения».
+        var page = await enroll.GetStringAsync("/account/mfa");
+        var secret = Regex.Match(page, @"letter-spacing:\.06em[^>]*>([A-Z2-7]+)<").Groups[1].Value;
+        Assert.False(string.IsNullOrEmpty(secret));
+
+        var enableResp = await enroll.PostAsync("/account/mfa/enable", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["code"] = TotpNow(secret),
+            ["return"] = "/"
+        }));
+        Assert.Equal(HttpStatusCode.OK, enableResp.StatusCode); // страница с резервными кодами
+        var recovery = Regex.Matches(await enableResp.Content.ReadAsStringAsync(), @"<li>([0-9a-f-]{19})</li>")
+            .Select(m => m.Groups[1].Value).ToList();
+        Assert.NotEmpty(recovery);
+
+        // Вход: пароль верный, но MFA включена → уводит на второй фактор, полной сессии ещё нет.
+        var device = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var login = await Login(device, email);
+        Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+        Assert.Contains("/account/mfa/verify", login.Headers.Location!.OriginalString);
+        Assert.False(login.Headers.TryGetValues("Set-Cookie", out var c1) && c1.Any(c => c.StartsWith("idp_sso")));
+
+        // Верный TOTP → полный вход (ставится idp_sso).
+        var verify = await device.PostAsync("/account/mfa/verify", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["code"] = TotpNow(secret),
+            ["return"] = "/"
+        }));
+        Assert.Equal(HttpStatusCode.Redirect, verify.StatusCode);
+        Assert.Contains(verify.Headers.GetValues("Set-Cookie"), c => c.StartsWith("idp_sso"));
+
+        // Резервный код — одноразовый: первый раз пускает, повтор того же кода отклоняется.
+        var rc = recovery[0];
+        var d2 = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Login(d2, email);
+        var okRc = await d2.PostAsync("/account/mfa/verify", new FormUrlEncodedContent(new Dictionary<string, string> { ["code"] = rc, ["return"] = "/" }));
+        Assert.Contains(okRc.Headers.GetValues("Set-Cookie"), c => c.StartsWith("idp_sso"));
+
+        var d3 = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Login(d3, email);
+        var reuse = await d3.PostAsync("/account/mfa/verify", new FormUrlEncodedContent(new Dictionary<string, string> { ["code"] = rc, ["return"] = "/" }));
+        Assert.Contains("error", reuse.Headers.Location!.OriginalString);
+    }
+
     // ---- helpers ----
+
+    private static string TotpNow(string base32Secret) =>
+        Totp.ComputeCode(Base32.Decode(base32Secret), DateTimeOffset.UtcNow.ToUnixTimeSeconds() / Totp.DefaultPeriodSeconds);
 
     private async Task<HttpResponseMessage> LoginFromIp(string email, string ip)
     {

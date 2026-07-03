@@ -132,8 +132,13 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   нет → in-memory (dev/одна нода). **Аудит auth-событий** — таблица `AuthEvents` + [AuthAudit](ChessSchool.Auth/AuthAudit.cs);
   метрики `chessschool.auth.events` ([AuthMetrics](ChessSchool.Auth/AuthMetrics.cs)) через OTel для алертинга;
   вход с нового IP → письмо-уведомление владельцу (`NewSignIn`) + событие `NewDeviceLogin`.
+- **MFA (TOTP)** ([Totp.cs](ChessSchool.Auth/Totp.cs)/[MfaService.cs](ChessSchool.Auth/MfaService.cs)): опциональная
+  двухфакторка (RFC 6238, совместимо с Google Authenticator). Секрет в БД шифруется DataProtection; логин при
+  включённой MFA двухшаговый (пароль → второй фактор, между шагами короткоживущий маркер `idp_mfa`); резервные
+  коды одноразовые (в БД только хэш). Настройка — `/account/mfa`; миграция `AddMfa`.
 - **Полный реестр политик/настроек безопасности — [docs/SECURITY.md](docs/SECURITY.md)** (статус, место в коде,
-  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, готовые пороговые правила алертинга (в системе мониторинга).
+  параметры, компромиссы, отложенное). Весь исходный чек-лист безопасности внедрён; на будущее — обязательная
+  MFA для админов и готовые пороговые правила алертинга (в системе мониторинга).
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

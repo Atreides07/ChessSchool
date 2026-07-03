@@ -24,6 +24,27 @@ public class AppUser
     /// проходить валидацию (см. OnValidatePrincipal) — мгновенный логаут везде. Дополняет отзыв OIDC-токенов.
     /// </summary>
     public string SecurityStamp { get; set; } = Guid.NewGuid().ToString("N");
+
+    /// <summary>Включена ли двухфакторная аутентификация (TOTP). При включении логин требует второй фактор.</summary>
+    public bool MfaEnabled { get; set; }
+
+    /// <summary>
+    /// Секрет TOTP, зашифрованный DataProtection (в БД — не в открытом виде). null — MFA не настраивалась.
+    /// Присутствует и при <see cref="MfaEnabled"/>=false во время незавершённой настройки (pending enrollment).
+    /// </summary>
+    public string? MfaSecret { get; set; }
+}
+
+/// <summary>
+/// Резервный код восстановления MFA (на случай потери устройства-аутентификатора). Одноразовый; в БД — только
+/// SHA-256-хэш (как пароль/токены). Набор перегенерируется при включении MFA.
+/// </summary>
+public class MfaRecoveryCode
+{
+    public long Id { get; set; }
+    public Guid UserId { get; set; }
+    public string CodeHash { get; set; } = string.Empty;
+    public bool Used { get; set; }
 }
 
 /// <summary>Назначение одноразового e-mail-токена (ссылка из письма).</summary>
@@ -61,6 +82,9 @@ public enum AuthEventType
     PasswordResetRequested = 6,
     PasswordReset = 7,
     NewDeviceLogin = 8, // успешный вход с ранее не виденного IP (уведомили владельца)
+    MfaEnabled = 9,
+    MfaDisabled = 10,
+    MfaChallengeFailed = 11, // неверный второй фактор при входе
 }
 
 /// <summary>

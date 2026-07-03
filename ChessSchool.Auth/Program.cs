@@ -9,6 +9,7 @@ using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -93,6 +94,7 @@ else
 builder.Services.AddScoped<EmailTokenService>();
 builder.Services.AddScoped<AuthAudit>(); // аудит auth-событий (наблюдаемость/детект аномалий) в общий стор
 builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddMeter(AuthMetrics.MeterName)); // метрики auth для алертинга
+builder.Services.AddScoped<MfaService>(); // двухфакторка (TOTP): секрет шифруется DataProtection, recovery-коды
 
 // Политика паролей (NIST): минимальная длина из конфига (дефолт 8), проверка утечек по HIBP (k-anonymity).
 // CheckPwned выключается в тестах (не ходить в сеть). HttpClient к api.pwnedpasswords.com — короткий таймаут.
@@ -286,24 +288,15 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
     }
 
-    // Вход с нового устройства? Проверяем ДО записи текущего события (иначе текущий IP сразу «известен»).
-    var ip = ctx.Connection.RemoteIpAddress?.ToString();
-    var hadPriorLogins = await db.AuthEvents.AnyAsync(e => e.UserId == user.Id && e.Type == AuthEventType.LoginSuccess);
-    var knownIp = ip is not null &&
-        await db.AuthEvents.AnyAsync(e => e.UserId == user.Id && e.Type == AuthEventType.LoginSuccess && e.Ip == ip);
-
-    // Мягкий гейт: пускаем и с неподтверждённым e-mail (claim email_verified=false едет в токен;
-    // чувствительные действия приложения закрывают сами). Подтверждение — nudge-баннером в приложении.
-    await SignInCookieAsync(ctx, user);
-    await audit.LogAsync(ctx, AuthEventType.LoginSuccess, email, user.Id);
-
-    // Уведомляем владельца о входе с ранее не виденного IP (не на первом входе — тогда «прежних» нет).
-    if (hadPriorLogins && !knownIp)
+    // MFA включена → пароль пройден, но полноценно НЕ логиним: ставим короткоживущий pending-маркер
+    // (DataProtection, 5 мин) и уводим на ввод второго фактора. Полный вход — только после TOTP/recovery.
+    if (user.MfaEnabled)
     {
-        var (subject, html) = EmailTemplates.NewSignIn(user.DisplayName, ip, IsEnCulture());
-        await emailSender.SendAsync(user.Email, subject, html);
-        await audit.LogAsync(ctx, AuthEventType.NewDeviceLogin, email, user.Id, detail: ip);
+        SetMfaPendingCookie(ctx, user.Id);
+        return Results.Redirect($"/account/mfa/verify?return={Uri.EscapeDataString(ret)}");
     }
+
+    await CompleteLoginAsync(ctx, db, audit, emailSender, user);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 }).RequireRateLimiting("auth"); // защита от перебора пароля
 
@@ -459,6 +452,96 @@ app.MapGet("/account/confirm-email-change", async (HttpContext ctx, AuthDbContex
     await SignInCookieAsync(ctx, user); // обновляем e-mail и метку в текущей cookie
     return Results.Redirect(string.IsNullOrEmpty(@return) ? "/" : @return);
 }).RequireRateLimiting("auth"); // защита от перебора токена смены адреса
+
+// ---------------- MFA (TOTP): настройка ----------------
+app.MapGet("/account/mfa", async (HttpContext ctx, AuthDbContext db, MfaService mfa, string? @return, string? error) =>
+{
+    var auth = await ctx.AuthenticateAsync("idp");
+    var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
+    if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "/")}");
+
+    if (user.MfaEnabled)
+        return Results.Content(MfaSettingsPage(true, null, null, @return ?? "/", error), "text/html; charset=utf-8");
+
+    // Настройка: генерируем свежий секрет, сохраняем (зашифрованно, MfaEnabled=false), показываем для сканирования.
+    var secret = Totp.GenerateSecret();
+    user.MfaSecret = mfa.Protect(secret);
+    await db.SaveChangesAsync();
+    var uri = Totp.OtpAuthUri(MfaService.Issuer, user.Email, secret);
+    return Results.Content(MfaSettingsPage(false, Base32.Encode(secret), uri, @return ?? "/", error), "text/html; charset=utf-8");
+});
+
+app.MapPost("/account/mfa/enable", async (HttpContext ctx, AuthDbContext db, MfaService mfa, AuthAudit audit) =>
+{
+    var auth = await ctx.AuthenticateAsync("idp");
+    var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
+    var form = await ctx.Request.ReadFormAsync();
+    string ret = form["return"].ToString();
+    if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}");
+    if (user.MfaEnabled) return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
+
+    // Подтверждаем владение: код из приложения должен сойтись с только что сохранённым секретом.
+    if (string.IsNullOrEmpty(user.MfaSecret) || !mfa.VerifyTotp(user, form["code"], DateTimeOffset.UtcNow))
+        return Results.Redirect($"/account/mfa?return={Uri.EscapeDataString(ret)}&error=code");
+
+    user.MfaEnabled = true;
+    await db.SaveChangesAsync();
+    var codes = await mfa.ResetRecoveryCodesAsync(user.Id);
+    await audit.LogAsync(ctx, AuthEventType.MfaEnabled, user.Email, user.Id);
+    return Results.Content(MfaRecoveryCodesPage(codes, ret), "text/html; charset=utf-8");
+}).RequireRateLimiting("auth"); // анти-перебор кода подтверждения
+
+app.MapPost("/account/mfa/disable", async (HttpContext ctx, AuthDbContext db, MfaService mfa, AuthAudit audit) =>
+{
+    var auth = await ctx.AuthenticateAsync("idp");
+    var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
+    var form = await ctx.Request.ReadFormAsync();
+    string ret = form["return"].ToString();
+    if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}");
+    if (!user.MfaEnabled) return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
+
+    // Отключение — чувствительно: требуем действующий код (TOTP или резервный).
+    var code = form["code"].ToString();
+    var ok = mfa.VerifyTotp(user, code, DateTimeOffset.UtcNow) || await mfa.ConsumeRecoveryCodeAsync(user.Id, code);
+    if (!ok) return Results.Redirect($"/account/mfa?return={Uri.EscapeDataString(ret)}&error=code");
+
+    user.MfaEnabled = false;
+    user.MfaSecret = null;
+    await db.SaveChangesAsync();
+    await mfa.ClearRecoveryCodesAsync(user.Id);
+    await audit.LogAsync(ctx, AuthEventType.MfaDisabled, user.Email, user.Id);
+    return Results.Redirect($"/account/mfa?return={Uri.EscapeDataString(ret)}");
+}).RequireRateLimiting("auth");
+
+// ---------------- MFA: второй фактор при входе ----------------
+app.MapGet("/account/mfa/verify", (HttpContext ctx, string? @return, string? error) =>
+{
+    if (ReadMfaPendingUser(ctx) is null) // нет валидного pending-маркера → на обычный вход
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "/")}");
+    return Results.Content(MfaVerifyPage(@return ?? "/", error), "text/html; charset=utf-8");
+});
+
+app.MapPost("/account/mfa/verify", async (HttpContext ctx, AuthDbContext db, MfaService mfa, AuthAudit audit, IEmailSender emailSender) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    string ret = form["return"].ToString();
+    var uid = ReadMfaPendingUser(ctx);
+    var user = uid is { } id ? await db.Users.FindAsync(id) : null;
+    if (user is null || !user.MfaEnabled)
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}");
+
+    var code = form["code"].ToString();
+    var ok = mfa.VerifyTotp(user, code, DateTimeOffset.UtcNow) || await mfa.ConsumeRecoveryCodeAsync(user.Id, code);
+    if (!ok)
+    {
+        await audit.LogAsync(ctx, AuthEventType.MfaChallengeFailed, user.Email, user.Id);
+        return Results.Redirect($"/account/mfa/verify?return={Uri.EscapeDataString(ret)}&error=1");
+    }
+
+    ClearMfaPendingCookie(ctx);
+    await CompleteLoginAsync(ctx, db, audit, emailSender, user);
+    return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
+}).RequireRateLimiting("auth"); // анти-перебор второго фактора
 
 // ---------------- Сброс пароля: запрос ссылки (нейтральный ответ) ----------------
 app.MapGet("/account/forgot", (string? @return, bool sent, string? email, string? error) =>
@@ -683,6 +766,60 @@ static async Task SignInCookieAsync(HttpContext ctx, AppUser user)
     await ctx.SignInAsync("idp", new ClaimsPrincipal(identity));
 }
 
+// Полное завершение входа: cookie-сессия + аудит успеха + уведомление о входе с нового устройства.
+// Общая точка для пути без MFA и для пути после успешного второго фактора.
+static async Task CompleteLoginAsync(HttpContext ctx, AuthDbContext db, AuthAudit audit, IEmailSender emailSender, AppUser user)
+{
+    // Новый IP? Проверяем ДО записи текущего LoginSuccess (иначе текущий IP сразу «известен»).
+    var ip = ctx.Connection.RemoteIpAddress?.ToString();
+    var hadPriorLogins = await db.AuthEvents.AnyAsync(e => e.UserId == user.Id && e.Type == AuthEventType.LoginSuccess);
+    var knownIp = ip is not null &&
+        await db.AuthEvents.AnyAsync(e => e.UserId == user.Id && e.Type == AuthEventType.LoginSuccess && e.Ip == ip);
+
+    await SignInCookieAsync(ctx, user);
+    await audit.LogAsync(ctx, AuthEventType.LoginSuccess, user.Email, user.Id);
+
+    if (hadPriorLogins && !knownIp)
+    {
+        var (subject, html) = EmailTemplates.NewSignIn(user.DisplayName, ip, IsEnCulture());
+        await emailSender.SendAsync(user.Email, subject, html);
+        await audit.LogAsync(ctx, AuthEventType.NewDeviceLogin, user.Email, user.Id, detail: ip);
+    }
+}
+
+// ---- MFA pending-маркер: пароль пройден, ждём второй фактор (короткоживущий, DataProtection) ----
+const string MfaPendingCookie = "idp_mfa";
+static IDataProtector MfaPendingProtector(HttpContext ctx) =>
+    ctx.RequestServices.GetRequiredService<IDataProtectionProvider>().CreateProtector("ChessSchool.Auth.Mfa.Pending.v1");
+
+static void SetMfaPendingCookie(HttpContext ctx, Guid userId)
+{
+    var expires = DateTimeOffset.UtcNow.AddMinutes(5);
+    var payload = MfaPendingProtector(ctx).Protect($"{userId:N}|{expires.ToUnixTimeSeconds()}");
+    ctx.Response.Cookies.Append(MfaPendingCookie, payload, new CookieOptions
+    {
+        HttpOnly = true,
+        SameSite = SameSiteMode.Lax,
+        IsEssential = true,
+        Expires = expires,
+    });
+}
+
+static Guid? ReadMfaPendingUser(HttpContext ctx)
+{
+    if (!ctx.Request.Cookies.TryGetValue(MfaPendingCookie, out var raw) || string.IsNullOrEmpty(raw)) return null;
+    try
+    {
+        var parts = MfaPendingProtector(ctx).Unprotect(raw).Split('|');
+        if (parts.Length != 2 || !Guid.TryParseExact(parts[0], "N", out var uid)) return null;
+        if (!long.TryParse(parts[1], out var exp) || DateTimeOffset.FromUnixTimeSeconds(exp) < DateTimeOffset.UtcNow) return null;
+        return uid;
+    }
+    catch { return null; } // повреждённый/подделанный/старым ключом — считаем отсутствующим
+}
+
+static void ClearMfaPendingCookie(HttpContext ctx) => ctx.Response.Cookies.Delete(MfaPendingCookie);
+
 // Выпускает токен подтверждения и шлёт письмо со ссылкой (абсолютный URL — по forwarded-хосту запроса).
 static async Task SendConfirmationEmailAsync(HttpContext ctx, EmailTokenService tokens, IEmailSender email,
     AppUser user, string? ret)
@@ -845,6 +982,7 @@ static string AccountEmailPage(string email, bool confirmed, string? pendingEmai
     string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
     string title = en ? "Your email" : "Ваш e-mail";
     string back = en ? "← Back" : "← Назад";
+    string mfaLink = $"<p class=\"switch\"><a href=\"/account/mfa?return={Uri.EscapeDataString(ret)}\">{(en ? "Two-factor authentication →" : "Двухфакторная аутентификация →")}</a></p>";
     string resendBtn = en ? "Resend confirmation email" : "Отправить письмо ещё раз";
     string changeLbl = en ? "Wrong address? Change it" : "Не тот адрес? Изменить";
     string changeBtn = en ? "Change and resend" : "Изменить и переслать";
@@ -870,6 +1008,7 @@ static string AccountEmailPage(string email, bool confirmed, string? pendingEmai
 <div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlockTop}<p class="info">{okMsg} <b>{emailEnc}</b></p>{pendingBlock}
 <div class="resend"><label>{changeConfirmedLbl}</label>
 <form method="post" action="/account/change-email"><input type="hidden" name="return" value="{retEnc}"><input name="email" type="email" placeholder="new@example.com" required><button type="submit">{changeConfirmedBtn}</button></form></div>
+{mfaLink}
 <p class="switch"><a href="{retEnc}">{back}</a></p></div>
 """);
     }
@@ -883,7 +1022,91 @@ static string AccountEmailPage(string email, bool confirmed, string? pendingEmai
 <form method="post" action="/account/resend"><input type="hidden" name="return" value="{retEnc}"><input type="hidden" name="email" value="{emailEnc}"><button type="submit">{resendBtn}</button></form>
 <div class="resend"><label>{changeLbl}</label>
 <form method="post" action="/account/change-email"><input type="hidden" name="return" value="{retEnc}"><input name="email" type="email" value="{emailEnc}" placeholder="you@example.com" required><button type="submit">{changeBtn}</button></form></div>
+{mfaLink}
 <p class="switch"><a href="{retEnc}">{back}</a></p></div>
+""");
+}
+
+// Страница настройки MFA: включение (показ секрета/otpauth + подтверждение кодом) либо статус «включено».
+static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpauthUri, string ret, string? error)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string title = en ? "Two-factor authentication" : "Двухфакторная аутентификация";
+    string back = en ? "← Back" : "← Назад";
+    string errBlock = error == "code"
+        ? $"<p class=\"err\">{(en ? "Wrong code — try again." : "Неверный код — попробуйте ещё раз.")}</p>"
+        : "";
+
+    if (enabled)
+    {
+        string onMsg = en ? "Two-factor authentication is ON ✓" : "Двухфакторная аутентификация включена ✓";
+        string disableLbl = en ? "Turn it off? Enter a current code to confirm" : "Отключить? Введите текущий код для подтверждения";
+        string disableBtn = en ? "Disable 2FA" : "Отключить 2FA";
+        return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}<p class="info">{onMsg}</p>
+<div class="resend"><label>{disableLbl}</label>
+<form method="post" action="/account/mfa/disable"><input type="hidden" name="return" value="{retEnc}"><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required><button type="submit">{disableBtn}</button></form></div>
+<p class="switch"><a href="{retEnc}">{back}</a></p></div>
+""");
+    }
+
+    string secretEnc = System.Net.WebUtility.HtmlEncode(base32Secret ?? "");
+    string uriEnc = System.Net.WebUtility.HtmlEncode(otpauthUri ?? "");
+    string step1 = en ? "1. Add this key to your authenticator app (Google Authenticator, 1Password…):"
+                      : "1. Добавьте этот ключ в приложение-аутентификатор (Google Authenticator, 1Password…):";
+    string step2 = en ? "2. Enter the 6-digit code it shows to turn on 2FA:"
+                      : "2. Введите 6-значный код из приложения, чтобы включить 2FA:";
+    string enableBtn = en ? "Enable 2FA" : "Включить 2FA";
+    string linkLbl = en ? "Or open in app" : "Или открыть в приложении";
+    return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}
+<p class="info">{step1}</p>
+<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1rem;letter-spacing:.06em;word-break:break-all;background:#f6f7f9;border:1px solid var(--line);border-radius:8px;padding:.6rem .7rem;margin:0 0 .6rem">{secretEnc}</p>
+<p class="muted" style="text-align:left;margin:0 0 1rem"><a href="{uriEnc}" style="color:var(--accent)">{linkLbl}</a></p>
+<label>{step2}</label>
+<form method="post" action="/account/mfa/enable"><input type="hidden" name="return" value="{retEnc}"><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required><button type="submit">{enableBtn}</button></form>
+<p class="switch"><a href="{retEnc}">{back}</a></p></div>
+""");
+}
+
+// Одноразовый показ резервных кодов после включения MFA — их надо сохранить.
+static string MfaRecoveryCodesPage(IReadOnlyList<string> codes, string ret)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string title = en ? "Save your recovery codes" : "Сохраните резервные коды";
+    string lead = en
+        ? "2FA is on. Store these one-time codes somewhere safe — each lets you sign in once if you lose your authenticator. They won't be shown again."
+        : "2FA включена. Сохраните эти одноразовые коды в надёжном месте — каждый пускает в аккаунт один раз, если потеряете аутентификатор. Больше они не покажутся.";
+    string done = en ? "I saved them — continue" : "Я сохранил — продолжить";
+    string list = string.Join("", codes.Select(c => $"<li>{System.Net.WebUtility.HtmlEncode(c)}</li>"));
+    return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1><p class="info">{lead}</p>
+<ul style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.95rem;letter-spacing:.04em;columns:2;gap:1rem;list-style:none;padding:.7rem;margin:0 0 1rem;background:#f6f7f9;border:1px solid var(--line);border-radius:8px">{list}</ul>
+<p class="switch"><a href="{retEnc}">{done}</a></p></div>
+""");
+}
+
+// Страница второго фактора при входе.
+static string MfaVerifyPage(string ret, string? error)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string title = en ? "Two-factor verification" : "Второй фактор";
+    string lead = en ? "Enter the 6-digit code from your authenticator app (or a recovery code)."
+                     : "Введите 6-значный код из приложения-аутентификатора (или резервный код).";
+    string verifyBtn = en ? "Verify" : "Подтвердить";
+    string errBlock = error is null ? "" : $"<p class=\"err\">{(en ? "Wrong code — try again." : "Неверный код — попробуйте ещё раз.")}</p>";
+    return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}<p class="info">{lead}</p>
+<form method="post" action="/account/mfa/verify"><input type="hidden" name="return" value="{retEnc}"><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" autofocus required><button type="submit">{verifyBtn}</button></form></div>
 """);
 }
 

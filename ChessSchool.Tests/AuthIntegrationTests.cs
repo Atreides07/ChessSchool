@@ -322,7 +322,69 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.Contains("/account/login", after.Headers.Location!.OriginalString);
     }
 
+    [Fact]
+    public async Task ChangeEmail_AfterConfirmation_VerifyNewBeforeSwitch()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var oldEmail = $"conf-old-{Guid.NewGuid():N}@test.local";
+        var newEmail = $"conf-new-{Guid.NewGuid():N}@test.local";
+
+        // Регистрируемся и ПОДТВЕРЖДАЕМ старый адрес.
+        await Register(client, oldEmail);
+        await client.GetAsync($"/account/confirm?token={ConfirmToken(oldEmail)}");
+
+        // Запрашиваем смену на новый адрес (подтверждённый e-mail → verify-new-before-switch).
+        var change = await client.PostAsync("/account/change-email", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = newEmail,
+            ["return"] = "/"
+        }));
+        Assert.Equal(HttpStatusCode.Redirect, change.StatusCode);
+
+        // Пока новый адрес НЕ подтверждён: основной e-mail не изменился, новый висит в PendingEmail.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Assert.True(await db.Users.AnyAsync(u => u.Email == oldEmail));
+            Assert.False(await db.Users.AnyAsync(u => u.Email == newEmail));
+            Assert.Equal(newEmail, (await db.Users.FirstAsync(u => u.Email == oldEmail)).PendingEmail);
+        }
+
+        // Ссылка подтверждения ушла на НОВЫЙ адрес; уведомление — на СТАРЫЙ.
+        Assert.Contains(_factory.Sent, m => m.To == newEmail && m.Html.Contains("/account/confirm-email-change?token="));
+        Assert.Contains(_factory.Sent, m => m.To == oldEmail &&
+            (m.Subject.Contains("change", StringComparison.OrdinalIgnoreCase) || m.Subject.Contains("смена", StringComparison.OrdinalIgnoreCase)));
+
+        // Переходим по ссылке из письма на новый адрес → адрес переключается.
+        var changeToken = ChangeEmailToken(newEmail);
+        var confirmChange = await client.GetAsync($"/account/confirm-email-change?token={changeToken}");
+        Assert.Equal(HttpStatusCode.Redirect, confirmChange.StatusCode);
+        Assert.DoesNotContain("error", confirmChange.Headers.Location!.OriginalString);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Assert.True(await db.Users.AnyAsync(u => u.Email == newEmail));
+            Assert.False(await db.Users.AnyAsync(u => u.Email == oldEmail));
+            var user = await db.Users.FirstAsync(u => u.Email == newEmail);
+            Assert.Null(user.PendingEmail);
+            Assert.True(user.EmailConfirmed);
+        }
+
+        // Одноразовость: повторный переход по той же ссылке не срабатывает.
+        var replay = await client.GetAsync($"/account/confirm-email-change?token={changeToken}");
+        Assert.Contains("error=badtoken", replay.Headers.Location!.OriginalString);
+    }
+
     // ---- helpers ----
+
+    private string ChangeEmailToken(string email)
+    {
+        var html = _factory.Sent.Last(m => m.To == email && m.Html.Contains("/account/confirm-email-change?token=")).Html;
+        var m = Regex.Match(html, @"confirm-email-change\?token=([A-Za-z0-9_\-]+)");
+        Assert.True(m.Success, "в письме не найден токен смены адреса");
+        return m.Groups[1].Value;
+    }
 
     private static string AuthorizeUrl()
     {

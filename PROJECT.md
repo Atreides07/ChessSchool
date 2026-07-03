@@ -105,8 +105,10 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   идентичность — после подтверждения. В Арене: политика `ConfirmedEmail` на премиум + баннер в
   [MainLayout](ChessSchool.Arena/Components/Layout/MainLayout.razor); claim мапится в
   [WebAuth](ChessSchool.WebAuth/SsoExtensions.cs) (`MapUniqueJsonKey email_verified`). Переход по ссылке подтверждает
-  и логинит. **Смена e-mail до подтверждения** (исправить опечатку) — `/account/email` + `/account/change-email`
-  (обновляет адрес, гасит старый токен, шлёт новый). Одноразовые токены — [EmailTokenService](ChessSchool.Auth/EmailTokenService.cs)
+  и логинит. **Смена e-mail:** НЕподтверждённый адрес — `/account/change-email` меняет сразу (исправить опечатку).
+  **Подтверждённый** — verify-new-before-switch: адрес не меняется, пока владение новым не доказано ссылкой
+  (`AppUser.PendingEmail`, purpose `ChangeEmail`, `/account/confirm-email-change`); ссылка — на новый адрес,
+  уведомление — на старый; на confirm перевыпускается security-stamp. Одноразовые токены — [EmailTokenService](ChessSchool.Auth/EmailTokenService.cs)
   (в БД только SHA-256-хэш, срок 24ч, гасятся при использовании/перевыпуске). Почта — [IEmailSender](ChessSchool.Auth/Email/EmailSender.cs):
   есть `Email:Smtp:Host` → MailKit-SMTP (локально **mailpit** из AppHost; прод — реальный SMTP), нет → лог-фолбэк.
   Существующие аккаунты grandfather-нуты миграцией `AddEmailConfirmation`.
@@ -129,8 +131,7 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   распределённый `RedisFixedWindowRateLimiter` (общий счётчик на все ноды, атомарный Lua `INCRBY`+`PEXPIRE`, fail-open),
   нет → in-memory (dev/одна нода). **Аудит auth-событий** — таблица `AuthEvents` + [AuthAudit](ChessSchool.Auth/AuthAudit.cs).
 - **Полный реестр политик/настроек безопасности — [docs/SECURITY.md](docs/SECURITY.md)** (статус, место в коде,
-  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, смена подтверждённого e-mail
-  (verify-new-before-switch), алертинг по аудиту.
+  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, алертинг по аудиту.
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

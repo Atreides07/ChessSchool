@@ -369,7 +369,7 @@ app.MapGet("/account/email", async (HttpContext ctx, AuthDbContext db, string? @
     var auth = await ctx.AuthenticateAsync("idp");
     var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
     if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "/")}");
-    return Results.Content(AccountEmailPage(user.Email, user.EmailConfirmed, @return ?? "/", error), "text/html; charset=utf-8");
+    return Results.Content(AccountEmailPage(user.Email, user.EmailConfirmed, user.PendingEmail, @return ?? "/", error), "text/html; charset=utf-8");
 });
 
 app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email, AuthAudit audit) =>
@@ -379,7 +379,6 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
     var form = await ctx.Request.ReadFormAsync();
     string ret = form["return"].ToString();
     if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}");
-    if (user.EmailConfirmed) return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret); // подтверждённый так не меняем
 
     string newEmail = form["email"].ToString().Trim().ToLowerInvariant();
     if (string.IsNullOrWhiteSpace(newEmail) || !newEmail.Contains('@'))
@@ -387,6 +386,27 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
     if (await db.Users.AnyAsync(u => u.Email == newEmail && u.Id != user.Id))
         return Results.Redirect($"/account/email?return={Uri.EscapeDataString(ret)}&error=taken");
 
+    if (user.EmailConfirmed)
+    {
+        // ПОДТВЕРЖДЁННЫЙ адрес: verify-new-before-switch — основной e-mail не трогаем, пока владение новым
+        // не доказано переходом по ссылке. Ссылка уходит на НОВЫЙ адрес, уведомление — на СТАРЫЙ (OWASP).
+        if (newEmail == user.Email)
+            return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret); // адрес не изменился
+        user.PendingEmail = newEmail;
+        await db.SaveChangesAsync();
+
+        var raw = await tokens.CreateAsync(user.Id, EmailTokenPurpose.ChangeEmail, EmailTokenService.ConfirmLifetime);
+        var baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+        var link = $"{baseUrl}/account/confirm-email-change?token={Uri.EscapeDataString(raw)}&return={Uri.EscapeDataString(ret)}";
+        var (subject, html) = EmailTemplates.ConfirmEmailChange(user.DisplayName, link, newEmail, IsEnCulture());
+        await email.SendAsync(newEmail, subject, html);                        // подтверждение — на новый адрес
+        var (nSub, nHtml) = EmailTemplates.EmailChangeRequested(user.DisplayName, newEmail, IsEnCulture());
+        await email.SendAsync(user.Email, nSub, nHtml);                        // уведомление — на старый адрес
+        await audit.LogAsync(ctx, AuthEventType.EmailChanged, user.Email, user.Id, detail: $"requested:{newEmail}");
+        return Results.Redirect($"/account/login?mode=sent&email={Uri.EscapeDataString(newEmail)}&return={Uri.EscapeDataString(ret)}");
+    }
+
+    // НЕподтверждённый адрес: исправление опечатки — меняем сразу и шлём подтверждение на новый.
     var oldEmail = user.Email;
     user.Email = newEmail;
     await db.SaveChangesAsync();
@@ -395,6 +415,35 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);      // письмо на новый адрес
     return Results.Redirect($"/account/login?mode=sent&email={Uri.EscapeDataString(newEmail)}&return={Uri.EscapeDataString(ret)}");
 }).RequireRateLimiting("email-send"); // анти-бомбинг сменой адреса
+
+// ---------------- Смена ПОДТВЕРЖДЁННОГО e-mail: подтверждение нового адреса ----------------
+app.MapGet("/account/confirm-email-change", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens,
+    AuthAudit audit, string? token, string? @return) =>
+{
+    var userId = await tokens.ConsumeAsync(token, EmailTokenPurpose.ChangeEmail);
+    var user = userId is { } id ? await db.Users.FindAsync(id) : null;
+    if (user is null || string.IsNullOrEmpty(user.PendingEmail))
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "")}&error=badtoken");
+
+    var newEmail = user.PendingEmail;
+    // Пока ссылка «летела», адрес мог занять кто-то другой — тогда не переключаем.
+    if (await db.Users.AnyAsync(u => u.Email == newEmail && u.Id != user.Id))
+    {
+        user.PendingEmail = null;
+        await db.SaveChangesAsync();
+        return Results.Redirect($"/account/email?return={Uri.EscapeDataString(@return ?? "/")}&error=taken");
+    }
+
+    var oldEmail = user.Email;
+    user.Email = newEmail;
+    user.PendingEmail = null;
+    user.EmailConfirmed = true;
+    user.SecurityStamp = Guid.NewGuid().ToString("N"); // смена идентичности → инвалидируем прочие сессии
+    await db.SaveChangesAsync();
+    await audit.LogAsync(ctx, AuthEventType.EmailChanged, newEmail, user.Id, detail: $"confirmed-from:{oldEmail}");
+    await SignInCookieAsync(ctx, user); // обновляем e-mail и метку в текущей cookie
+    return Results.Redirect(string.IsNullOrEmpty(@return) ? "/" : @return);
+}).RequireRateLimiting("auth"); // защита от перебора токена смены адреса
 
 // ---------------- Сброс пароля: запрос ссылки (нейтральный ответ) ----------------
 app.MapGet("/account/forgot", (string? @return, bool sent, string? email, string? error) =>
@@ -772,7 +821,7 @@ static string LoginPage(string ret, string? error, bool register, bool sent, str
 }
 
 // Страница управления e-mail (вход есть): переотправка + смена адреса до подтверждения.
-static string AccountEmailPage(string email, bool confirmed, string ret, string? error)
+static string AccountEmailPage(string email, bool confirmed, string? pendingEmail, string ret, string? error)
 {
     var en = IsEnCulture();
     string lang = en ? "en" : "ru";
@@ -785,11 +834,27 @@ static string AccountEmailPage(string email, bool confirmed, string ret, string?
     string changeLbl = en ? "Wrong address? Change it" : "Не тот адрес? Изменить";
     string changeBtn = en ? "Change and resend" : "Изменить и переслать";
 
+    string errText = error switch
+    {
+        "taken" => en ? "This email is already in use." : "Этот e-mail уже занят.",
+        "invalid" => en ? "Enter a valid email." : "Укажите корректный e-mail.",
+        _ => "",
+    };
+    string errBlockTop = string.IsNullOrEmpty(errText) ? "" : $"<p class=\"err\">{errText}</p>";
+
     if (confirmed)
     {
+        // Подтверждённый адрес: смена по схеме verify-new-before-switch (ссылка на новый адрес; старый не меняется).
         string okMsg = en ? "Your e-mail is confirmed ✓" : "Ваш e-mail подтверждён ✓";
+        string changeConfirmedLbl = en ? "Change email" : "Изменить e-mail";
+        string changeConfirmedBtn = en ? "Send confirmation to new address" : "Отправить подтверждение на новый адрес";
+        string pendingBlock = string.IsNullOrEmpty(pendingEmail) ? "" : (en
+            ? $"<p class=\"info\">Pending confirmation at <b>{System.Net.WebUtility.HtmlEncode(pendingEmail)}</b>. The change applies once confirmed.</p>"
+            : $"<p class=\"info\">Ожидает подтверждения на <b>{System.Net.WebUtility.HtmlEncode(pendingEmail)}</b>. Смена вступит в силу после подтверждения.</p>");
         return AuthShell(lang, title, $"""
-<div class="card">{BrandHeader(sub)}<h1>{title}</h1><p class="info">{okMsg}</p>
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlockTop}<p class="info">{okMsg} <b>{emailEnc}</b></p>{pendingBlock}
+<div class="resend"><label>{changeConfirmedLbl}</label>
+<form method="post" action="/account/change-email"><input type="hidden" name="return" value="{retEnc}"><input name="email" type="email" placeholder="new@example.com" required><button type="submit">{changeConfirmedBtn}</button></form></div>
 <p class="switch"><a href="{retEnc}">{back}</a></p></div>
 """);
     }
@@ -797,15 +862,8 @@ static string AccountEmailPage(string email, bool confirmed, string ret, string?
     string pending = en
         ? $"We sent a confirmation link to <b>{emailEnc}</b>. Not confirmed yet — resend it or fix the address."
         : $"Мы отправили ссылку на <b>{emailEnc}</b>. Пока не подтверждён — переотправьте или исправьте адрес.";
-    string errText = error switch
-    {
-        "taken" => en ? "This email is already in use." : "Этот e-mail уже занят.",
-        "invalid" => en ? "Enter a valid email." : "Укажите корректный e-mail.",
-        _ => "",
-    };
-    string errBlock = string.IsNullOrEmpty(errText) ? "" : $"<p class=\"err\">{errText}</p>";
     return AuthShell(lang, title, $"""
-<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlockTop}
 <p class="info">{pending}</p>
 <form method="post" action="/account/resend"><input type="hidden" name="return" value="{retEnc}"><input type="hidden" name="email" value="{emailEnc}"><button type="submit">{resendBtn}</button></form>
 <div class="resend"><label>{changeLbl}</label>

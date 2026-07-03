@@ -12,6 +12,13 @@ public class AppUser
     public bool EmailConfirmed { get; set; }
 
     /// <summary>
+    /// Запрошенный новый адрес при смене ПОДТВЕРЖДЁННОГО e-mail (verify-new-before-switch): пока владение
+    /// новым адресом не доказано переходом по ссылке, основной <see cref="Email"/> не меняется. На confirm
+    /// значение переезжает в <see cref="Email"/> и обнуляется. null — смена не в процессе.
+    /// </summary>
+    public string? PendingEmail { get; set; }
+
+    /// <summary>
     /// Метка безопасности: значение попадает в claim cookie-сессии; при смене пароля (или иной чувствительной
     /// операции) перевыпускается, из-за чего ВСЕ ранее выданные cookie-сессии на всех устройствах перестают
     /// проходить валидацию (см. OnValidatePrincipal) — мгновенный логаут везде. Дополняет отзыв OIDC-токенов.
@@ -24,6 +31,7 @@ public enum EmailTokenPurpose
 {
     ConfirmEmail = 0,
     ResetPassword = 1,
+    ChangeEmail = 2, // подтверждение нового адреса при смене подтверждённого e-mail (verify-new-before-switch)
 }
 
 /// <summary>

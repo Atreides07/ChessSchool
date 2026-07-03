@@ -196,7 +196,121 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.False(await db.Users.AnyAsync(u => u.Email == email));
     }
 
+    [Fact]
+    public async Task Forgot_ThenReset_ChangesPassword_ConfirmsEmail_NotifiesOwner()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"reset-{Guid.NewGuid():N}@test.local";
+        await Register(client, email); // неподтверждённый, пароль "secret123"
+
+        // Запрос сброса — нейтральный ответ «письмо отправлено».
+        var forgot = await Forgot(client, email);
+        Assert.Equal(HttpStatusCode.Redirect, forgot.StatusCode);
+        Assert.Contains("sent=true", forgot.Headers.Location!.OriginalString);
+
+        // По ссылке из письма задаём новый пароль.
+        var token = ResetToken(email);
+        const string newPassword = "brand-new-passphrase";
+        var reset = await Reset(client, token, newPassword);
+        Assert.Equal(HttpStatusCode.Redirect, reset.StatusCode);
+        Assert.DoesNotContain("error", reset.Headers.Location!.OriginalString);
+
+        // Сброс доказал владение адресом → e-mail подтверждён.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Assert.True((await db.Users.FirstAsync(u => u.Email == email)).EmailConfirmed);
+        }
+
+        // Владельцу ушло уведомление о смене пароля (RU/EN — по культуре запроса).
+        Assert.Contains(_factory.Sent, m => m.To == email &&
+            (m.Subject.Contains("password", StringComparison.OrdinalIgnoreCase) || m.Subject.Contains("Пароль", StringComparison.OrdinalIgnoreCase)));
+
+        // Старый пароль больше не подходит, новый — работает.
+        var c2 = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var oldLogin = await LoginWith(c2, email, "secret123");
+        Assert.Contains("error", oldLogin.Headers.Location!.OriginalString);
+
+        var c3 = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var newLogin = await LoginWith(c3, email, newPassword);
+        Assert.DoesNotContain("error", newLogin.Headers.Location!.OriginalString);
+        Assert.Contains(newLogin.Headers.GetValues("Set-Cookie"), c => c.StartsWith("idp_sso"));
+    }
+
+    [Fact]
+    public async Task Forgot_ForUnknownEmail_IsNeutral_NoEmailSent()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"nobody-{Guid.NewGuid():N}@test.local";
+
+        var forgot = await Forgot(client, email);
+
+        Assert.Equal(HttpStatusCode.Redirect, forgot.StatusCode);
+        Assert.Contains("sent=true", forgot.Headers.Location!.OriginalString); // тот же нейтральный ответ
+        Assert.DoesNotContain(_factory.Sent, m => m.To == email);              // но письма нет
+    }
+
+    [Fact]
+    public async Task Reset_WithBadToken_RedirectsToForgot()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var reset = await Reset(client, "definitely-not-a-valid-token", "brand-new-passphrase");
+        Assert.Equal(HttpStatusCode.Redirect, reset.StatusCode);
+        Assert.Contains("/account/forgot", reset.Headers.Location!.OriginalString);
+        Assert.Contains("error=badtoken", reset.Headers.Location!.OriginalString);
+    }
+
+    [Fact]
+    public async Task Reset_RejectsShortPassword_TokenStaysUsable()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"resetshort-{Guid.NewGuid():N}@test.local";
+        await Register(client, email);
+        await Forgot(client, email);
+        var token = ResetToken(email);
+
+        // Короткий пароль отклоняется ДО погашения токена (форму можно повторить).
+        var weak = await Reset(client, token, "short");
+        Assert.Contains("error=weak", weak.Headers.Location!.OriginalString);
+
+        // Тот же токен всё ещё действует — задаём нормальный пароль.
+        var ok = await Reset(client, token, "brand-new-passphrase");
+        Assert.DoesNotContain("error", ok.Headers.Location!.OriginalString);
+    }
+
     // ---- helpers ----
+
+    private static Task<HttpResponseMessage> Forgot(HttpClient client, string email) =>
+        client.PostAsync("/account/forgot", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = email,
+            ["return"] = "/"
+        }));
+
+    private static Task<HttpResponseMessage> Reset(HttpClient client, string token, string password) =>
+        client.PostAsync("/account/reset", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["token"] = token,
+            ["password"] = password,
+            ["return"] = "/"
+        }));
+
+    private static Task<HttpResponseMessage> LoginWith(HttpClient client, string email, string password) =>
+        client.PostAsync("/account/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = email,
+            ["password"] = password,
+            ["return"] = "/"
+        }));
+
+    private string ResetToken(string email)
+    {
+        var html = _factory.Sent.Last(m => m.To == email && m.Html.Contains("/account/reset?token=")).Html;
+        var m = Regex.Match(html, @"reset\?token=([A-Za-z0-9_\-]+)");
+        Assert.True(m.Success, "в письме не найден токен сброса");
+        return m.Groups[1].Value;
+    }
+
 
     private static Task<HttpResponseMessage> Register(HttpClient client, string email) =>
         client.PostAsync("/account/register", new FormUrlEncodedContent(new Dictionary<string, string>

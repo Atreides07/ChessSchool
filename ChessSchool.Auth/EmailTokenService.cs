@@ -13,6 +13,8 @@ namespace ChessSchool.Auth;
 public sealed class EmailTokenService(AuthDbContext db)
 {
     public static readonly TimeSpan ConfirmLifetime = TimeSpan.FromHours(24);
+    // Сброс пароля — окно короче (OWASP): токен даёт доступ к смене пароля, живёт 1 час.
+    public static readonly TimeSpan ResetLifetime = TimeSpan.FromHours(1);
 
     /// <summary>Создаёт токен для пользователя, гасит прежние неиспользованные того же назначения,
     /// возвращает СЫРОЙ токен (для ссылки в письме).</summary>

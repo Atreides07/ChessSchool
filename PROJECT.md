@@ -109,8 +109,20 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   (обновляет адрес, гасит старый токен, шлёт новый). Одноразовые токены — [EmailTokenService](ChessSchool.Auth/EmailTokenService.cs)
   (в БД только SHA-256-хэш, срок 24ч, гасятся при использовании/перевыпуске). Почта — [IEmailSender](ChessSchool.Auth/Email/EmailSender.cs):
   есть `Email:Smtp:Host` → MailKit-SMTP (локально **mailpit** из AppHost; прод — реальный SMTP), нет → лог-фолбэк.
-  Существующие аккаунты grandfather-нуты миграцией `AddEmailConfirmation`. Отложено (OWASP/NIST): rate-limiting,
-  проверка паролей по HIBP, constant-time логин, сброс пароля, смена подтверждённого e-mail (verify-new-before-switch).
+  Существующие аккаунты grandfather-нуты миграцией `AddEmailConfirmation`.
+- **Пароли (NIST 800-63B)** ([Password.cs](ChessSchool.Auth/Password.cs)): решает длина (min из `Auth:Password:MinLength`,
+  дефолт 8; max 128 против DoS), без обязательной композиции/ротации; проверка по базе утечек **HIBP** (k-anonymity —
+  наружу только 5-символьный префикс SHA-1; `Auth:Password:CheckPwned`, дефолт вкл, **fail-open** при недоступности API;
+  в тестах выключено). **Constant-time логин**: при отсутствии пользователя всё равно считаем dummy-хэш (анти-энумерация
+  по таймингу). Проверка длины+утечки — на регистрации и на сбросе пароля.
+- **Сброс пароля (OWASP)** ([Program.cs](ChessSchool.Auth/Program.cs)): `/account/forgot` — **нейтральный** ответ
+  «письмо отправлено, если аккаунт есть» (анти-энумерация), rate-limit `email-send`; `/account/reset?token=…` —
+  форма нового пароля. Токен `ResetPassword` одноразовый, живёт **1ч** (в БД только хэш, [EmailTokenService](ChessSchool.Auth/EmailTokenService.cs)),
+  rate-limit `auth` (анти-перебор токена). При сбросе: пароль проходит NIST+HIBP; `EmailConfirmed=true` (ссылка из письма
+  доказывает владение адресом); **отзыв всех OIDC-токенов/разрешений** пользователя (`IOpenIddictTokenManager`/`…AuthorizationManager` —
+  краденые access/refresh умирают; cookie IdP короткоживущий, скользящий 8ч); **письмо-уведомление** владельцу о смене пароля.
+  Отложено (OWASP/NIST): MFA, security-stamp для мгновенной инвалидации cookie-сессий на всех устройствах,
+  распределённый rate-limiter (Redis), смена подтверждённого e-mail (verify-new-before-switch), аудит auth-событий.
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

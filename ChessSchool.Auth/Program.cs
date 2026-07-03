@@ -344,6 +344,76 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
     return Results.Redirect($"/account/login?mode=sent&email={Uri.EscapeDataString(newEmail)}&return={Uri.EscapeDataString(ret)}");
 }).RequireRateLimiting("email-send"); // анти-бомбинг сменой адреса
 
+// ---------------- Сброс пароля: запрос ссылки (нейтральный ответ) ----------------
+app.MapGet("/account/forgot", (string? @return, bool sent, string? email, string? error) =>
+    Results.Content(ForgotPasswordPage(@return ?? "/", sent, email, error), "text/html; charset=utf-8"));
+
+app.MapPost("/account/forgot", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    string em = form["email"].ToString().Trim().ToLowerInvariant();
+    string ret = form["return"].ToString();
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
+    if (user is not null)
+    {
+        var raw = await tokens.CreateAsync(user.Id, EmailTokenPurpose.ResetPassword, EmailTokenService.ResetLifetime);
+        var baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+        var link = $"{baseUrl}/account/reset?token={Uri.EscapeDataString(raw)}&return={Uri.EscapeDataString(ret)}";
+        var (subject, html) = EmailTemplates.ResetPassword(user.DisplayName, link, IsEnCulture());
+        await email.SendAsync(user.Email, subject, html);
+    }
+    // Нейтрально: всегда «письмо отправлено, если такой аккаунт есть» — не раскрываем существование почты.
+    return Results.Redirect($"/account/forgot?sent=true&return={Uri.EscapeDataString(ret)}&email={Uri.EscapeDataString(em)}");
+}).RequireRateLimiting("email-send"); // анти-бомбинг письмами сброса
+
+// ---------------- Сброс пароля: форма нового пароля по ссылке из письма ----------------
+app.MapGet("/account/reset", (string? token, string? @return, string? error) =>
+{
+    if (string.IsNullOrWhiteSpace(token)) // без токена форму не показываем
+        return Results.Redirect($"/account/forgot?return={Uri.EscapeDataString(@return ?? "/")}");
+    return Results.Content(ResetPasswordPage(token, @return ?? "/", error, minPasswordLength), "text/html; charset=utf-8");
+});
+
+app.MapPost("/account/reset", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens,
+    IPasswordHasher<AppUser> hasher, IEmailSender email, IPwnedPasswordChecker pwned,
+    IOpenIddictTokenManager tokenManager, IOpenIddictAuthorizationManager authManager, CancellationToken ct) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    string token = form["token"]!;
+    string ret = form["return"].ToString();
+    string password = form["password"]!;
+    string RetToReset(string err) => $"/account/reset?token={Uri.EscapeDataString(token)}&return={Uri.EscapeDataString(ret)}&error={err}";
+
+    // Проверяем пароль ДО погашения токена: при ошибке форму можно повторить по той же ссылке.
+    if (!PasswordPolicy.IsAcceptable(password, minPasswordLength, out _))
+        return Results.Redirect(RetToReset("weak"));
+
+    // Токен одноразовый: гасим и получаем пользователя. Недействителен/просрочен → просим новую ссылку.
+    var userId = await tokens.ConsumeAsync(token, EmailTokenPurpose.ResetPassword, ct);
+    var user = userId is { } id ? await db.Users.FindAsync([id], ct) : null;
+    if (user is null)
+        return Results.Redirect($"/account/forgot?return={Uri.EscapeDataString(ret)}&error=badtoken");
+
+    if (checkPwned && await pwned.IsPwnedAsync(password, ct))
+        return Results.Redirect(RetToReset("pwned"));
+
+    user.PasswordHash = hasher.HashPassword(user, password);
+    user.EmailConfirmed = true; // переход по ссылке из письма доказывает владение адресом
+    await db.SaveChangesAsync(ct);
+
+    // OWASP: смена пароля инвалидирует активные сессии — отзываем все OIDC-токены/разрешения пользователя,
+    // чтобы украденные access/refresh-токены умерли. (Cookie-сессии IdP короткоживущие, скользящие 8ч.)
+    var sub = user.Id.ToString();
+    await foreach (var t in tokenManager.FindBySubjectAsync(sub, ct)) await tokenManager.TryRevokeAsync(t, ct);
+    await foreach (var a in authManager.FindBySubjectAsync(sub, ct)) await authManager.TryRevokeAsync(a, ct);
+
+    var (subject, html) = EmailTemplates.PasswordChanged(user.DisplayName, IsEnCulture());
+    await email.SendAsync(user.Email, subject, html); // уведомление владельцу о смене пароля
+
+    await SignInCookieAsync(ctx, user); // новый вход после смены пароля
+    return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
+}).RequireRateLimiting("auth"); // защита от перебора reset-токена
+
 // ---------------- OpenIddict: authorization endpoint ----------------
 app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext ctx, AuthDbContext db,
     IOpenIddictScopeManager scopeManager) =>
@@ -593,6 +663,7 @@ static string LoginPage(string ret, string? error, bool register, bool sent, str
     string btnLogin = en ? "Sign in" : "Войти", btnCreate = en ? "Create account" : "Создать аккаунт";
     string noAcc = en ? "No account?" : "Нет аккаунта?", doReg = en ? "Sign up" : "Зарегистрироваться";
     string haveAcc = en ? "Already have an account?" : "Уже есть аккаунт?";
+    string forgot = en ? "Forgot password?" : "Забыли пароль?";
 
     string errText = error switch
     {
@@ -626,6 +697,7 @@ static string LoginPage(string ret, string? error, bool register, bool sent, str
 <label>Email</label><input name="email" type="email" value="{{emailEnc}}" placeholder="you@example.com" required>
 <label>{{lPassword}}</label><input name="password" type="password" placeholder="••••••••" required>
 <button type="submit">{{btnLogin}}</button></form>
+<p class="switch"><a href="/account/forgot?return={{retQ}}">{{forgot}}</a></p>
 <p class="switch">{{noAcc}} <label for="mode" class="as-link">{{doReg}}</label></p>
 </div>
 <div class="view-reg">
@@ -683,6 +755,83 @@ static string AccountEmailPage(string email, bool confirmed, string ret, string?
 <div class="resend"><label>{changeLbl}</label>
 <form method="post" action="/account/change-email"><input type="hidden" name="return" value="{retEnc}"><input name="email" type="email" value="{emailEnc}" placeholder="you@example.com" required><button type="submit">{changeBtn}</button></form></div>
 <p class="switch"><a href="{retEnc}">{back}</a></p></div>
+""");
+}
+
+// Страница запроса сброса пароля: ввод e-mail + нейтральное состояние «письмо отправлено».
+static string ForgotPasswordPage(string ret, bool sent, string? email, string? error)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string retQ = Uri.EscapeDataString(ret);
+    string emailEnc = System.Net.WebUtility.HtmlEncode(email ?? "");
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string secured = en ? "Secured by OpenID Connect" : "Защищено OpenID Connect";
+    string title = en ? "Reset password" : "Сброс пароля";
+    string back = en ? "Back to sign in" : "Вернуться ко входу";
+
+    if (sent)
+    {
+        string sBody = en
+            ? "If an account exists for that email, we've sent a link to reset the password. The link is valid for 1 hour."
+            : "Если аккаунт с таким e-mail существует, мы отправили ссылку для сброса пароля. Ссылка действительна 1 час.";
+        return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1><p class="info">{sBody}</p>
+<p class="switch"><a href="/account/login?return={retQ}">{back}</a></p>
+<p class="muted">{secured}</p></div>
+""");
+    }
+
+    string lead = en
+        ? "Enter your email and we'll send a link to reset your password."
+        : "Введите e-mail — пришлём ссылку для сброса пароля.";
+    string btn = en ? "Send reset link" : "Отправить ссылку";
+    string errText = error == "badtoken"
+        ? (en ? "The reset link is invalid or has expired. Request a new one:" : "Ссылка сброса недействительна или устарела. Запросите новую:")
+        : "";
+    string errBlock = string.IsNullOrEmpty(errText) ? "" : $"<p class=\"err\">{errText}</p>";
+    return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}
+<p class="sub">{lead}</p>
+<form method="post" action="/account/forgot">
+<input type="hidden" name="return" value="{retEnc}">
+<label>Email</label><input name="email" type="email" value="{emailEnc}" placeholder="you@example.com" required>
+<button type="submit">{btn}</button></form>
+<p class="switch"><a href="/account/login?return={retQ}">{back}</a></p>
+<p class="muted">{secured}</p></div>
+""");
+}
+
+// Страница ввода нового пароля по ссылке из письма (token в скрытом поле).
+static string ResetPasswordPage(string token, string ret, string? error, int minPw)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string tokenEnc = System.Net.WebUtility.HtmlEncode(token);
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string secured = en ? "Secured by OpenID Connect" : "Защищено OpenID Connect";
+    string title = en ? "New password" : "Новый пароль";
+    string lPassword = en ? "New password" : "Новый пароль";
+    string ph = en ? $"At least {minPw} characters" : $"Минимум {minPw} символов";
+    string btn = en ? "Save new password" : "Сохранить пароль";
+
+    string errText = error switch
+    {
+        "weak" => en ? $"Password too short — at least {minPw} characters." : $"Пароль слишком короткий — минимум {minPw} символов.",
+        "pwned" => en ? "This password appears in known data breaches. Choose another." : "Этот пароль есть в известных утечках — выберите другой.",
+        _ => "",
+    };
+    string errBlock = string.IsNullOrEmpty(errText) ? "" : $"<p class=\"err\">{errText}</p>";
+    return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}
+<form method="post" action="/account/reset">
+<input type="hidden" name="token" value="{tokenEnc}">
+<input type="hidden" name="return" value="{retEnc}">
+<label>{lPassword}</label><input name="password" type="password" placeholder="{ph}" required>
+<button type="submit">{btn}</button></form>
+<p class="muted">{secured}</p></div>
 """);
 }
 

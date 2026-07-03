@@ -1,8 +1,10 @@
 using System.Security.Claims;
+using System.Threading.RateLimiting;
 using ChessSchool.Auth;
 using ChessSchool.Auth.Data;
 using ChessSchool.Auth.Email;
 using ChessSchool.Contracts;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Localization;
@@ -89,6 +91,29 @@ if (!string.IsNullOrWhiteSpace(emailOptions.Host))
 else
     builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 builder.Services.AddScoped<EmailTokenService>();
+
+// Rate-limiting: против перебора пароля (login/confirm) и email-бомбинга (register/resend/change-email —
+// они шлют письма). Лимиты конфигурируемы (тесты поднимают их, чтобы не мешать). Партиция — по IP клиента
+// (за прокси корректен благодаря forwarded-заголовкам). ВАЖНО: лимитер in-memory ПОнодовый — при нескольких
+// нодах суммарный лимит = N×порог; распределённый вариант (Redis) — follow-up (см. принцип мультисерверности).
+var rlAuthPermit = builder.Configuration.GetValue("RateLimit:Auth:Permit", 20);
+var rlAuthWindow = builder.Configuration.GetValue("RateLimit:Auth:WindowMinutes", 5);
+var rlEmailPermit = builder.Configuration.GetValue("RateLimit:Email:Permit", 5);
+var rlEmailWindow = builder.Configuration.GetValue("RateLimit:Email:WindowMinutes", 15);
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    static string Ip(HttpContext c) => c.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    o.AddPolicy("auth", ctx => RateLimitPartition.GetFixedWindowLimiter(Ip(ctx),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = rlAuthPermit, Window = TimeSpan.FromMinutes(rlAuthWindow) }));
+    o.AddPolicy("email-send", ctx => RateLimitPartition.GetFixedWindowLimiter(Ip(ctx),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = rlEmailPermit, Window = TimeSpan.FromMinutes(rlEmailWindow) }));
+    o.OnRejected = (ctx, _) =>
+    {
+        ctx.HttpContext.Response.Headers.RetryAfter = ((int)TimeSpan.FromMinutes(rlAuthWindow).TotalSeconds).ToString();
+        return ValueTask.CompletedTask;
+    };
+});
 
 // Cookie-сессия IdP: единый вход (страница логина одна для всех приложений).
 builder.Services.AddAuthentication(options =>
@@ -179,6 +204,7 @@ app.UseForwardedHeaders(); // схема/хост из X-Forwarded-* до пос
 app.UseChessSchoolLocalization(); // культура страницы входа (Accept-Language/?culture)
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter(); // после аутентификации; политики навешены на account-эндпоинты ниже
 
 // ---------------- Страница входа / регистрации (cookie-сессия IdP) ----------------
 app.MapGet("/account/login", (string? @return, string? error, string? mode, string? email) =>
@@ -198,7 +224,7 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
     // чувствительные действия приложения закрывают сами). Подтверждение — nudge-баннером в приложении.
     await SignInCookieAsync(ctx, user);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
-});
+}).RequireRateLimiting("auth"); // защита от перебора пароля
 
 app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher,
     EmailTokenService tokens, IEmailSender email) =>
@@ -229,7 +255,7 @@ app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPass
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
     await SignInCookieAsync(ctx, user);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
-});
+}).RequireRateLimiting("email-send"); // регистрация шлёт письмо → анти-бомбинг
 
 // ---------------- Подтверждение e-mail по ссылке из письма ----------------
 app.MapGet("/account/confirm", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens,
@@ -244,7 +270,7 @@ app.MapGet("/account/confirm", async (HttpContext ctx, AuthDbContext db, EmailTo
     // Подтвердил → сразу вход и возврат туда, откуда пришёл (обычно /connect/authorize → назад в приложение).
     await SignInCookieAsync(ctx, user);
     return Results.Redirect(string.IsNullOrEmpty(@return) ? "/" : @return);
-});
+}).RequireRateLimiting("auth"); // защита от перебора токена подтверждения
 
 // ---------------- Переотправка письма подтверждения (нейтральный ответ) ----------------
 app.MapPost("/account/resend", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
@@ -257,7 +283,7 @@ app.MapPost("/account/resend", async (HttpContext ctx, AuthDbContext db, EmailTo
         await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
     // Нейтрально: всегда «письмо отправлено» (не раскрываем, есть ли такой аккаунт).
     return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
-});
+}).RequireRateLimiting("email-send"); // анти-бомбинг переотправкой
 
 // ---------------- Управление e-mail: смена адреса ДО подтверждения (исправить опечатку) ----------------
 // Требует входа (мягкий гейт → пользователь уже внутри). Подтверждённый адрес здесь не меняем.
@@ -289,7 +315,7 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
     await SignInCookieAsync(ctx, user);                                   // обновляем e-mail в cookie
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);      // письмо на новый адрес
     return Results.Redirect($"/account/login?mode=sent&email={Uri.EscapeDataString(newEmail)}&return={Uri.EscapeDataString(ret)}");
-});
+}).RequireRateLimiting("email-send"); // анти-бомбинг сменой адреса
 
 // ---------------- OpenIddict: authorization endpoint ----------------
 app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext ctx, AuthDbContext db,

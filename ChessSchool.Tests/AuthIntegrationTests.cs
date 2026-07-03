@@ -215,7 +215,10 @@ public class AuthIntegrationTests : IAsyncLifetime
             builder.ConfigureHostConfiguration(cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:authdb"] = connectionString,
-                ["Sso:Clients:chessschool-web"] = "https://localhost:5001"
+                ["Sso:Clients:chessschool-web"] = "https://localhost:5001",
+                // Эти тесты много раз шлют письма/логинятся — поднимаем лимиты, чтобы не упираться в rate-limiter.
+                ["RateLimit:Auth:Permit"] = "100000",
+                ["RateLimit:Email:Permit"] = "100000"
             }));
             return base.CreateHost(builder);
         }

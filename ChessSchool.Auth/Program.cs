@@ -113,14 +113,27 @@ var rlAuthPermit = builder.Configuration.GetValue("RateLimit:Auth:Permit", 20);
 var rlAuthWindow = builder.Configuration.GetValue("RateLimit:Auth:WindowMinutes", 5);
 var rlEmailPermit = builder.Configuration.GetValue("RateLimit:Email:Permit", 5);
 var rlEmailWindow = builder.Configuration.GetValue("RateLimit:Email:WindowMinutes", 15);
+// Есть Redis → распределённый лимитер (общий счётчик на все ноды, лимит не размножается на реплики);
+// нет (dev/одна нода) → in-memory fixed-window. Мультиплексор один на процесс (как в DataProtection).
+var rlRedis = builder.Configuration.GetRedisConnectionString() is { } rlConn
+    ? StackExchange.Redis.ConnectionMultiplexer.Connect(rlConn) : null;
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     static string Ip(HttpContext c) => c.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    o.AddPolicy("auth", ctx => RateLimitPartition.GetFixedWindowLimiter(Ip(ctx),
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = rlAuthPermit, Window = TimeSpan.FromMinutes(rlAuthWindow) }));
-    o.AddPolicy("email-send", ctx => RateLimitPartition.GetFixedWindowLimiter(Ip(ctx),
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = rlEmailPermit, Window = TimeSpan.FromMinutes(rlEmailWindow) }));
+
+    RateLimitPartition<string> Partition(HttpContext ctx, string policy, int permit, int windowMin)
+    {
+        var window = TimeSpan.FromMinutes(windowMin);
+        var ip = Ip(ctx);
+        if (rlRedis is null)
+            return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions { PermitLimit = permit, Window = window });
+        var log = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger<RedisFixedWindowRateLimiter>();
+        return RateLimitPartition.Get(ip, key => new RedisFixedWindowRateLimiter(rlRedis, $"rl:{policy}:{key}", permit, window, log));
+    }
+
+    o.AddPolicy("auth", ctx => Partition(ctx, "auth", rlAuthPermit, rlAuthWindow));
+    o.AddPolicy("email-send", ctx => Partition(ctx, "email", rlEmailPermit, rlEmailWindow));
     o.OnRejected = (ctx, _) =>
     {
         ctx.HttpContext.Response.Headers.RetryAfter = ((int)TimeSpan.FromMinutes(rlAuthWindow).TotalSeconds).ToString();

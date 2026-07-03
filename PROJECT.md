@@ -121,8 +121,12 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   rate-limit `auth` (анти-перебор токена). При сбросе: пароль проходит NIST+HIBP; `EmailConfirmed=true` (ссылка из письма
   доказывает владение адресом); **отзыв всех OIDC-токенов/разрешений** пользователя (`IOpenIddictTokenManager`/`…AuthorizationManager` —
   краденые access/refresh умирают; cookie IdP короткоживущий, скользящий 8ч); **письмо-уведомление** владельцу о смене пароля.
-  Отложено (OWASP/NIST): MFA, security-stamp для мгновенной инвалидации cookie-сессий на всех устройствах,
-  распределённый rate-limiter (Redis), смена подтверждённого e-mail (verify-new-before-switch), аудит auth-событий.
+- **Rate-limiting переключается по Redis** ([RedisRateLimiting.cs](ChessSchool.Auth/RedisRateLimiting.cs)): есть Redis →
+  распределённый `RedisFixedWindowRateLimiter` (общий счётчик на все ноды, атомарный Lua `INCRBY`+`PEXPIRE`, fail-open),
+  нет → in-memory (dev/одна нода). **Аудит auth-событий** — таблица `AuthEvents` + [AuthAudit](ChessSchool.Auth/AuthAudit.cs).
+- **Полный реестр политик/настроек безопасности — [docs/SECURITY.md](docs/SECURITY.md)** (статус, место в коде,
+  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, security-stamp для мгновенной инвалидации
+  cookie-сессий на всех устройствах, смена подтверждённого e-mail (verify-new-before-switch), алертинг по аудиту.
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

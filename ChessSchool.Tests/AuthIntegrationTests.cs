@@ -376,7 +376,45 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.Contains("error=badtoken", replay.Headers.Location!.OriginalString);
     }
 
+    [Fact]
+    public async Task Login_FromNewIp_NotifiesOwner()
+    {
+        var email = $"newip-{Guid.NewGuid():N}@test.local";
+        await Register(_factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }), email);
+
+        static bool IsNewSignIn((string To, string Subject, string Html) m) =>
+            m.Subject.Contains("sign-in", StringComparison.OrdinalIgnoreCase) || m.Subject.Contains("Новый вход", StringComparison.OrdinalIgnoreCase);
+
+        // Вход №1 с IP A: уведомления нет (первый успешный вход — «прежних» нет).
+        await LoginFromIp(email, "1.1.1.1");
+        Assert.DoesNotContain(_factory.Sent, m => m.To == email && IsNewSignIn(m));
+
+        // Вход №2 с того же IP: тоже нет (устройство уже известно).
+        await LoginFromIp(email, "1.1.1.1");
+        Assert.DoesNotContain(_factory.Sent, m => m.To == email && IsNewSignIn(m));
+
+        // Вход №3 с НОВОГО IP: владельцу уходит уведомление + фиксируется событие NewDeviceLogin.
+        await LoginFromIp(email, "2.2.2.2");
+        Assert.Contains(_factory.Sent, m => m.To == email && IsNewSignIn(m));
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Assert.True(await db.AuthEvents.AnyAsync(e => e.Email == email && e.Type == AuthEventType.NewDeviceLogin));
+    }
+
     // ---- helpers ----
+
+    private async Task<HttpResponseMessage> LoginFromIp(string email, string ip)
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Add("X-Forwarded-For", ip); // forwarded-headers → Connection.RemoteIpAddress
+        return await client.PostAsync("/account/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = email,
+            ["password"] = "secret123",
+            ["return"] = "/"
+        }));
+    }
 
     private string ChangeEmailToken(string email)
     {

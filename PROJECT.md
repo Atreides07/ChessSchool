@@ -129,9 +129,11 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   `Auth:SecurityStamp:ValidateMinutes` (дефолт 5; `0` = каждый запрос). Миграция `AddSecurityStamp` (grandfather).
 - **Rate-limiting переключается по Redis** ([RedisRateLimiting.cs](ChessSchool.Auth/RedisRateLimiting.cs)): есть Redis →
   распределённый `RedisFixedWindowRateLimiter` (общий счётчик на все ноды, атомарный Lua `INCRBY`+`PEXPIRE`, fail-open),
-  нет → in-memory (dev/одна нода). **Аудит auth-событий** — таблица `AuthEvents` + [AuthAudit](ChessSchool.Auth/AuthAudit.cs).
+  нет → in-memory (dev/одна нода). **Аудит auth-событий** — таблица `AuthEvents` + [AuthAudit](ChessSchool.Auth/AuthAudit.cs);
+  метрики `chessschool.auth.events` ([AuthMetrics](ChessSchool.Auth/AuthMetrics.cs)) через OTel для алертинга;
+  вход с нового IP → письмо-уведомление владельцу (`NewSignIn`) + событие `NewDeviceLogin`.
 - **Полный реестр политик/настроек безопасности — [docs/SECURITY.md](docs/SECURITY.md)** (статус, место в коде,
-  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, алертинг по аудиту.
+  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, готовые пороговые правила алертинга (в системе мониторинга).
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

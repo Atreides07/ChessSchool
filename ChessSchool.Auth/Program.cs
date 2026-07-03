@@ -92,6 +92,7 @@ else
     builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 builder.Services.AddScoped<EmailTokenService>();
 builder.Services.AddScoped<AuthAudit>(); // аудит auth-событий (наблюдаемость/детект аномалий) в общий стор
+builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddMeter(AuthMetrics.MeterName)); // метрики auth для алертинга
 
 // Политика паролей (NIST): минимальная длина из конфига (дефолт 8), проверка утечек по HIBP (k-anonymity).
 // CheckPwned выключается в тестах (не ходить в сеть). HttpClient к api.pwnedpasswords.com — короткий таймаут.
@@ -267,7 +268,7 @@ app.MapGet("/account/login", (string? @return, string? error, string? mode, stri
     Results.Content(LoginPage(@return ?? "/", error, mode == "register", mode == "sent", email, minPasswordLength),
         "text/html; charset=utf-8"));
 
-app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher, AuthAudit audit) =>
+app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher, AuthAudit audit, IEmailSender emailSender) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string email = form["email"].ToString().Trim().ToLowerInvariant();
@@ -285,10 +286,24 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
     }
 
+    // Вход с нового устройства? Проверяем ДО записи текущего события (иначе текущий IP сразу «известен»).
+    var ip = ctx.Connection.RemoteIpAddress?.ToString();
+    var hadPriorLogins = await db.AuthEvents.AnyAsync(e => e.UserId == user.Id && e.Type == AuthEventType.LoginSuccess);
+    var knownIp = ip is not null &&
+        await db.AuthEvents.AnyAsync(e => e.UserId == user.Id && e.Type == AuthEventType.LoginSuccess && e.Ip == ip);
+
     // Мягкий гейт: пускаем и с неподтверждённым e-mail (claim email_verified=false едет в токен;
     // чувствительные действия приложения закрывают сами). Подтверждение — nudge-баннером в приложении.
     await SignInCookieAsync(ctx, user);
     await audit.LogAsync(ctx, AuthEventType.LoginSuccess, email, user.Id);
+
+    // Уведомляем владельца о входе с ранее не виденного IP (не на первом входе — тогда «прежних» нет).
+    if (hadPriorLogins && !knownIp)
+    {
+        var (subject, html) = EmailTemplates.NewSignIn(user.DisplayName, ip, IsEnCulture());
+        await emailSender.SendAsync(user.Email, subject, html);
+        await audit.LogAsync(ctx, AuthEventType.NewDeviceLogin, email, user.Id, detail: ip);
+    }
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 }).RequireRateLimiting("auth"); // защита от перебора пароля
 

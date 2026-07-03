@@ -13,6 +13,7 @@ public sealed class AuthAudit(AuthDbContext db, ILogger<AuthAudit> log)
     public async Task LogAsync(HttpContext ctx, AuthEventType type, string? email = null, Guid? userId = null,
         string? detail = null, CancellationToken ct = default)
     {
+        AuthMetrics.Record(type); // метрика — независимо от записи в БД (агрегируется для алертов)
         try
         {
             db.AuthEvents.Add(new AuthEvent

@@ -138,6 +138,35 @@ public static class EmailTemplates
         return (subject, html);
     }
 
+    /// <summary>Уведомление о входе с нового устройства/IP (OWASP: сообщать о новом входе для детекта компрометации).</summary>
+    public static (string Subject, string Html) NewSignIn(string displayName, string? ip, bool en)
+    {
+        var name = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(displayName) ? (en ? "there" : "друг") : displayName);
+        var addr = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ip) ? (en ? "unknown" : "неизвестно") : ip);
+        var subject = en ? "New sign-in to your account — ChessSchool ID" : "Новый вход в аккаунт — ChessSchool ID";
+        var greeting = en ? $"Hi {name}," : $"Здравствуйте, {name}!";
+        var lead = en
+            ? $"We noticed a sign-in to your ChessSchool account from a new device (IP <b>{addr}</b>). If this was you, no action is needed."
+            : $"Зафиксирован вход в ваш аккаунт ChessSchool с нового устройства (IP <b>{addr}</b>). Если это были вы — делать ничего не нужно.";
+        var warn = en
+            ? "If this wasn't you, change your password immediately — someone may have access to your account."
+            : "Если это были не вы — немедленно смените пароль: возможно, кто-то получил доступ к аккаунту.";
+
+        var html = $$"""
+<!doctype html><html><body style="margin:0;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0e1116">
+<div style="max-width:480px;margin:0 auto;padding:32px 16px">
+  <div style="background:#fff;border:1px solid #d6dae1;border-radius:14px;padding:28px">
+    <div style="font-weight:700;font-size:18px;letter-spacing:-.02em;margin-bottom:16px">♟ ChessSchool ID</div>
+    <p style="margin:0 0 8px;font-size:15px">{{greeting}}</p>
+    <p style="margin:0 0 16px;color:#5b6470;font-size:14px;line-height:1.55">{{lead}}</p>
+    <p style="margin:0;color:#e5484d;font-size:13px;line-height:1.55">{{warn}}</p>
+  </div>
+</div>
+</body></html>
+""";
+        return (subject, html);
+    }
+
     // Общий каркас письма с кнопкой-ссылкой (подтверждение/сброс).
     private static string Card(string greeting, string lead, string url, string button, string fallback, string linkText, string expiry) => $$"""
 <!doctype html><html><body style="margin:0;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0e1116">

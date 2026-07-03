@@ -60,6 +60,7 @@ public enum AuthEventType
     EmailChanged = 5,
     PasswordResetRequested = 6,
     PasswordReset = 7,
+    NewDeviceLogin = 8, // успешный вход с ранее не виденного IP (уведомили владельца)
 }
 
 /// <summary>

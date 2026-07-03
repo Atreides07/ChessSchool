@@ -97,6 +97,14 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
 
 ## Архитектурные решения
 
+- **Регистрация с подтверждением e-mail** ([ChessSchool.Auth/Program.cs](ChessSchool.Auth/Program.cs)): регистрация
+  создаёт пользователя **неподтверждённым и без входа** → письмо со ссылкой (`/account/confirm?token=…`); переход
+  подтверждает e-mail и логинит. Логин заблокирован до подтверждения (с кнопкой «отправить письмо ещё раз»).
+  Одноразовые токены — [EmailTokenService](ChessSchool.Auth/EmailTokenService.cs) (в БД только SHA-256-хэш,
+  срок 24ч, гасятся при использовании/перевыпуске). Почта — [IEmailSender](ChessSchool.Auth/Email/EmailSender.cs):
+  есть `Email:Smtp:Host` → MailKit-SMTP (локально **mailpit** из AppHost, письма в его веб-UI из дашборда; прод —
+  реальный SMTP), нет → лог-фолбэк (dev без почты). Существующие аккаунты grandfather-нуты миграцией
+  `AddEmailConfirmation` (`EmailConfirmed=true`). Пароль-ресет на той же токен-инфраструктуре — отложен.
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

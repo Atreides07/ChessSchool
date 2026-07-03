@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ChessSchool.Auth;
 using ChessSchool.Auth.Data;
+using ChessSchool.Auth.Email;
 using ChessSchool.Contracts;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
@@ -78,6 +79,16 @@ builder.Services.AddDbContext<AuthDbContext>(o =>
 
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddProblemDetails();
+
+// Почта: подтверждение e-mail при регистрации. Есть SMTP-хост (mailpit локально / реальный SMTP в проде) →
+// шлём по-настоящему; нет → лог-фолбэк (dev без почтового сервера/тесты). Одноразовые токены — EmailTokenService.
+var emailOptions = EmailOptions.FromConfig(builder.Configuration);
+builder.Services.AddSingleton(emailOptions);
+if (!string.IsNullOrWhiteSpace(emailOptions.Host))
+    builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+else
+    builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
+builder.Services.AddScoped<EmailTokenService>();
 
 // Cookie-сессия IdP: единый вход (страница логина одна для всех приложений).
 builder.Services.AddAuthentication(options =>
@@ -170,8 +181,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // ---------------- Страница входа / регистрации (cookie-сессия IdP) ----------------
-app.MapGet("/account/login", (string? @return, string? error, string? mode) =>
-    Results.Content(LoginPage(@return ?? "/", error, mode == "register"), "text/html; charset=utf-8"));
+app.MapGet("/account/login", (string? @return, string? error, string? mode, string? email) =>
+    Results.Content(LoginPage(@return ?? "/", error, mode == "register", mode == "sent", email),
+        "text/html; charset=utf-8"));
 
 app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher) =>
 {
@@ -182,25 +194,69 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
     if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, form["password"]!) == PasswordVerificationResult.Failed)
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
 
+    // Гейт: без подтверждённого e-mail вход запрещён — предлагаем переотправить письмо.
+    if (!user.EmailConfirmed)
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=unconfirmed&email={Uri.EscapeDataString(email)}");
+
     await SignInCookieAsync(ctx, user);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 });
 
-app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher) =>
+app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher,
+    EmailTokenService tokens, IEmailSender email) =>
 {
     var form = await ctx.Request.ReadFormAsync();
-    string email = form["email"].ToString().Trim().ToLowerInvariant();
+    string em = form["email"].ToString().Trim().ToLowerInvariant();
     string ret = form["return"].ToString();
     string password = form["password"]!;
-    if (string.IsNullOrWhiteSpace(email) || password.Length < 6 || await db.Users.AnyAsync(u => u.Email == email))
+    if (string.IsNullOrWhiteSpace(em) || !em.Contains('@') || password.Length < 6)
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1&mode=register");
 
-    var user = new AppUser { Email = email, DisplayName = form["name"].ToString() };
+    var existing = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
+    if (existing is not null)
+    {
+        // Уже подтверждён → e-mail занят, ведём на вход. Не подтверждён → переотправляем письмо.
+        if (existing.EmailConfirmed)
+            return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=exists&mode=register");
+        await SendConfirmationEmailAsync(ctx, tokens, email, existing, ret);
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
+    }
+
+    // Регистрация: пользователь создаётся НЕподтверждённым и БЕЗ входа — сначала письмо со ссылкой.
+    var user = new AppUser { Email = em, DisplayName = form["name"].ToString() };
     user.PasswordHash = hasher.HashPassword(user, password);
     db.Users.Add(user);
     await db.SaveChangesAsync();
+    await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
+    return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
+});
+
+// ---------------- Подтверждение e-mail по ссылке из письма ----------------
+app.MapGet("/account/confirm", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens,
+    string? token, string? @return) =>
+{
+    var userId = await tokens.ConsumeAsync(token, EmailTokenPurpose.ConfirmEmail);
+    var user = userId is { } id ? await db.Users.FindAsync(id) : null;
+    if (user is null) // ссылка недействительна/устарела/использована → на вход с предложением новой ссылки
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "")}&error=badtoken");
+
+    if (!user.EmailConfirmed) { user.EmailConfirmed = true; await db.SaveChangesAsync(); }
+    // Подтвердил → сразу вход и возврат туда, откуда пришёл (обычно /connect/authorize → назад в приложение).
     await SignInCookieAsync(ctx, user);
-    return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
+    return Results.Redirect(string.IsNullOrEmpty(@return) ? "/" : @return);
+});
+
+// ---------------- Переотправка письма подтверждения (нейтральный ответ) ----------------
+app.MapPost("/account/resend", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    string em = form["email"].ToString().Trim().ToLowerInvariant();
+    string ret = form["return"].ToString();
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
+    if (user is not null && !user.EmailConfirmed)
+        await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
+    // Нейтрально: всегда «письмо отправлено» (не раскрываем, есть ли такой аккаунт).
+    return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
 });
 
 // ---------------- OpenIddict: authorization endpoint ----------------
@@ -349,29 +405,29 @@ static async Task SignInCookieAsync(HttpContext ctx, AppUser user)
     await ctx.SignInAsync("idp", new ClaimsPrincipal(identity));
 }
 
+// Выпускает токен подтверждения и шлёт письмо со ссылкой (абсолютный URL — по forwarded-хосту запроса).
+static async Task SendConfirmationEmailAsync(HttpContext ctx, EmailTokenService tokens, IEmailSender email,
+    AppUser user, string? ret)
+{
+    var raw = await tokens.CreateAsync(user.Id, EmailTokenPurpose.ConfirmEmail, EmailTokenService.ConfirmLifetime);
+    var baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    var link = $"{baseUrl}/account/confirm?token={Uri.EscapeDataString(raw)}&return={Uri.EscapeDataString(ret ?? "")}";
+    var (subject, html) = EmailTemplates.ConfirmEmail(user.DisplayName, link, IsEnCulture());
+    await email.SendAsync(user.Email, subject, html);
+}
+
+static bool IsEnCulture() => System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "en";
+
 static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
 {
     Claims.Name or Claims.Email or Claims.Subject or Claims.Role => [Destinations.AccessToken, Destinations.IdentityToken],
     _ => [Destinations.AccessToken]
 };
 
-static string LoginPage(string ret, string? error, bool register)
-{
-    var en = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "en";
-    // Локализованные строки страницы входа.
-    string lang = en ? "en" : "ru";
-    string titleReg = en ? "Sign up" : "Регистрация", titleLogin = en ? "Sign in" : "Вход";
-    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
-    string err = en ? "Invalid credentials or email already taken." : "Неверные данные или email уже занят.";
-    string lPassword = en ? "Password" : "Пароль", lName = en ? "Name" : "Имя";
-    string phName = en ? "Your name" : "Ваше имя", phPass6 = en ? "At least 6 characters" : "Минимум 6 символов";
-    string btnLogin = en ? "Sign in" : "Войти", btnCreate = en ? "Create account" : "Создать аккаунт";
-    string noAcc = en ? "No account?" : "Нет аккаунта?", doReg = en ? "Sign up" : "Зарегистрироваться";
-    string haveAcc = en ? "Already have an account?" : "Уже есть аккаунт?";
-    string secured = en ? "Secured by OpenID Connect" : "Защищено OpenID Connect";
-    return $$"""
+// Единый каркас страниц аккаунта (CSS/шапка один раз). bodyInner — готовая разметка карточки.
+static string AuthShell(string lang, string title, string bodyInner) => $$"""
 <!doctype html><html lang="{{lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{(register ? titleReg : titleLogin)}} — ChessSchool ID</title>
+<title>{{title}} — ChessSchool ID</title>
 <style>
 :root{--ink:#0e1116;--ink2:#5b6470;--muted:#8b93a1;--line:#d6dae1;--accent:#2b6ef2;--accent-h:#1f5ad8;--bg:#f6f7f9;--surface:#fff}
 *{box-sizing:border-box}
@@ -387,11 +443,13 @@ input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px #eaf1fe}
 button{width:100%;padding:.65rem;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:.95rem;cursor:pointer;margin-top:.3rem}
 button:hover{background:var(--accent-h)}
 .err{color:#e5484d;font-size:.85rem;background:#fdecec;padding:.5rem .7rem;border-radius:8px;margin:0 0 1rem}
+.info{color:#0e6b52;font-size:.88rem;background:#e7f6ef;padding:.6rem .7rem;border-radius:8px;margin:0 0 1rem;line-height:1.5}
 .switch{color:var(--ink2);font-size:.85rem;text-align:center;margin:1.1rem 0 0}
 .switch a{color:var(--accent);font-weight:600;text-decoration:none}
 .switch a:hover{text-decoration:underline}
 .muted{color:var(--muted);font-size:.78rem;text-align:center;margin:1.1rem 0 0}
-/* Переключение вход/регистрация без JS: чекбокс хранит режим */
+.resend{margin:0 0 1rem;padding:.6rem .7rem;background:#f6f7f9;border:1px solid var(--line);border-radius:8px}
+.resend button{margin-top:.4rem}
 #mode{display:none}
 .view-reg{display:none}
 #mode:checked ~ .card .view-login{display:none}
@@ -400,35 +458,99 @@ button:hover{background:var(--accent-h)}
 .switch .as-link:hover{background:none;text-decoration:underline}
 </style></head>
 <body>
+{{bodyInner}}
+</body></html>
+""";
+
+static string BrandHeader(string sub) =>
+    $"""<div class="brand"><span class="logo"><svg viewBox="0 0 45 45" width="18" height="18" fill="#fff"><path d="M18 10c1-1 3-2 5-2 7 0 12 6 12 16v14H13c0-6 3-9 7-12-2 1-5 2-7 1-2-1-2-3-1-5-2 1-4 1-5-1-1-3 1-5 4-7 .5-1 1-2 0-3 1-1 2-1 3 0z"/></svg></span> ChessSchool ID</div><p class="sub">{sub}</p>""";
+
+static string LoginPage(string ret, string? error, bool register, bool sent, string? email)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string retQ = Uri.EscapeDataString(ret);
+    string emailEnc = System.Net.WebUtility.HtmlEncode(email ?? "");
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string secured = en ? "Secured by OpenID Connect" : "Защищено OpenID Connect";
+    string resendBtn = en ? "Resend confirmation email" : "Отправить письмо ещё раз";
+
+    // Состояние «письмо отправлено» — отдельная карточка (без переключателя вход/регистрация).
+    if (sent)
+    {
+        string sTitle = en ? "Check your email" : "Проверьте почту";
+        string sBody = en
+            ? $"We sent a confirmation link to <b>{emailEnc}</b>. Open it to activate your account and finish signing in."
+            : $"Мы отправили ссылку для подтверждения на <b>{emailEnc}</b>. Перейдите по ней, чтобы активировать аккаунт и войти.";
+        string back = en ? "Back to sign in" : "Вернуться ко входу";
+        string sentInner = $"""
+<div class="card">
+{BrandHeader(sub)}
+<h1>{sTitle}</h1>
+<p class="info">{sBody}</p>
+<form method="post" action="/account/resend">
+<input type="hidden" name="return" value="{retEnc}">
+<input type="hidden" name="email" value="{emailEnc}">
+<button type="submit">{resendBtn}</button></form>
+<p class="switch"><a href="/account/login?return={retQ}">{back}</a></p>
+<p class="muted">{secured}</p></div>
+""";
+        return AuthShell(lang, sTitle, sentInner);
+    }
+
+    string titleReg = en ? "Sign up" : "Регистрация", titleLogin = en ? "Sign in" : "Вход";
+    string lPassword = en ? "Password" : "Пароль", lName = en ? "Name" : "Имя";
+    string phName = en ? "Your name" : "Ваше имя", phPass6 = en ? "At least 6 characters" : "Минимум 6 символов";
+    string btnLogin = en ? "Sign in" : "Войти", btnCreate = en ? "Create account" : "Создать аккаунт";
+    string noAcc = en ? "No account?" : "Нет аккаунта?", doReg = en ? "Sign up" : "Зарегистрироваться";
+    string haveAcc = en ? "Already have an account?" : "Уже есть аккаунт?";
+
+    string errText = error switch
+    {
+        "unconfirmed" => en ? "Please confirm your email first — we can resend the link." : "Сначала подтвердите e-mail — можем отправить ссылку ещё раз.",
+        "badtoken" => en ? "The confirmation link is invalid or has expired. Request a new one:" : "Ссылка подтверждения недействительна или устарела. Запросите новую:",
+        "exists" => en ? "This email is already registered. Sign in instead." : "Этот e-mail уже зарегистрирован. Войдите.",
+        null => "",
+        _ => en ? "Invalid credentials or email already taken." : "Неверные данные или email уже занят.",
+    };
+    string errBlock = error is null ? "" : $"<p class=\"err\">{errText}</p>";
+    // Форма повторной отправки письма: при unconfirmed — email известен (скрытое поле), при badtoken — вводится.
+    string resendBlock = error switch
+    {
+        "unconfirmed" => $"""<form class="resend" method="post" action="/account/resend"><input type="hidden" name="return" value="{retEnc}"><input type="hidden" name="email" value="{emailEnc}"><button type="submit">{resendBtn}</button></form>""",
+        "badtoken" => $"""<form class="resend" method="post" action="/account/resend"><input type="hidden" name="return" value="{retEnc}"><label>Email</label><input name="email" type="email" value="{emailEnc}" placeholder="you@example.com" required><button type="submit">{resendBtn}</button></form>""",
+        _ => "",
+    };
+
+    string inner = $$"""
 <input type="checkbox" id="mode" {{(register ? "checked" : "")}}>
 <div class="card">
-<div class="brand"><span class="logo"><svg viewBox="0 0 45 45" width="18" height="18" fill="#fff"><path d="M18 10c1-1 3-2 5-2 7 0 12 6 12 16v14H13c0-6 3-9 7-12-2 1-5 2-7 1-2-1-2-3-1-5-2 1-4 1-5-1-1-3 1-5 4-7 .5-1 1-2 0-3 1-1 2-1 3 0z"/></svg></span> ChessSchool ID</div>
-<p class="sub">{{sub}}</p>
-{{(error is not null ? $"<p class=\"err\">{err}</p>" : "")}}
-
+{{BrandHeader(sub)}}
+{{errBlock}}
+{{resendBlock}}
 <div class="view-login">
 <h1>{{titleLogin}}</h1>
 <form method="post" action="/account/login">
-<input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
-<label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
+<input type="hidden" name="return" value="{{retEnc}}">
+<label>Email</label><input name="email" type="email" value="{{emailEnc}}" placeholder="you@example.com" required>
 <label>{{lPassword}}</label><input name="password" type="password" placeholder="••••••••" required>
 <button type="submit">{{btnLogin}}</button></form>
 <p class="switch">{{noAcc}} <label for="mode" class="as-link">{{doReg}}</label></p>
 </div>
-
 <div class="view-reg">
 <h1>{{titleReg}}</h1>
 <form method="post" action="/account/register">
-<input type="hidden" name="return" value="{{System.Net.WebUtility.HtmlEncode(ret)}}">
+<input type="hidden" name="return" value="{{retEnc}}">
 <label>{{lName}}</label><input name="name" placeholder="{{phName}}">
-<label>Email</label><input name="email" type="email" placeholder="you@example.com" required>
+<label>Email</label><input name="email" type="email" value="{{emailEnc}}" placeholder="you@example.com" required>
 <label>{{lPassword}}</label><input name="password" type="password" placeholder="{{phPass6}}" required>
 <button type="submit">{{btnCreate}}</button></form>
 <p class="switch">{{haveAcc}} <label for="mode" class="as-link">{{btnLogin}}</label></p>
 </div>
-
-<p class="muted">{{secured}}</p></div></body></html>
+<p class="muted">{{secured}}</p></div>
 """;
+    return AuthShell(lang, register ? titleReg : titleLogin, inner);
 }
 
 record ByEmailRequest(string Email);

@@ -35,14 +35,27 @@ var minio = builder.AddContainer("minio", "minio/minio")
     .WithVolume("minio-data", "/data");
 var minioS3 = minio.GetEndpoint("s3");
 
+// Mailpit — локальная SMTP-ловушка для тестирования почтовых флоу (подтверждение e-mail, сброс пароля):
+// принимает всю исходящую почту и показывает её в веб-UI (ссылка «mailpit» в дашборде Aspire, порт 8025).
+// SMTP на 1025 (без auth/TLS). Прод-путь тот же код — там задаётся реальный SMTP через конфиг Email:Smtp.
+var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
+    .WithHttpEndpoint(targetPort: 8025, name: "ui")
+    .WithEndpoint(targetPort: 1025, name: "smtp", scheme: "tcp");
+var mailSmtp = mailpit.GetEndpoint("smtp");
+
 // Отдельный сервис авторизации (IdP) — переиспользуемый, как Google Auth.
 var auth = builder.AddProject<Projects.ChessSchool_Auth>("auth")
     .WithEnvironment("InternalApiKey", internalKey)
     .WithReference(authDb)
     .WithReference(redis) // общий DataProtection-keyring (cookie IdP расшифровывается любой нодой)
     .WithReference(seq)
+    // Почта подтверждения e-mail: локально шлём в mailpit (см. дашборд); прод задаёт реальный SMTP конфигом.
+    .WithEnvironment("Email__Smtp__Host", mailSmtp.Property(Aspire.Hosting.ApplicationModel.EndpointProperty.Host))
+    .WithEnvironment("Email__Smtp__Port", mailSmtp.Property(Aspire.Hosting.ApplicationModel.EndpointProperty.Port))
+    .WithEnvironment("Email__From", "ChessSchool ID <no-reply@chessschool.local>")
     .WaitFor(authDb)
-    .WaitFor(redis);
+    .WaitFor(redis)
+    .WaitFor(mailpit);
 
 // Доменный API: школы, ученики, рейтинг, архив партий, шаринг.
 var apiService = builder.AddProject<Projects.ChessSchool_ApiService>("apiservice")

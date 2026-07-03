@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | { read -r f; case \"$f\" in *ChessSchool.Auth/*|*WebAuth*|*[Aa]uth*|*[Ll]ogin*|*[Pp]assword*|*[Tt]oken*|*[Ss]ession*|*[Ii]dentity*) printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"auth/security-файл изменён — прогони чек-лист безопасности из CLAUDE.md (§Безопасность): пароли NIST+HIBP; rate-limit (в т.ч. письма); анти-энумерация/constant-time; одноразовые токены; матрица доступа по подтверждению e-mail; сессия; уведомления/MFA; сброс пароля; аудит.\"}}' ;; esac; } 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -92,6 +92,18 @@ else
     builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 builder.Services.AddScoped<EmailTokenService>();
 
+// Политика паролей (NIST): минимальная длина из конфига (дефолт 8), проверка утечек по HIBP (k-anonymity).
+// CheckPwned выключается в тестах (не ходить в сеть). HttpClient к api.pwnedpasswords.com — короткий таймаут.
+var minPasswordLength = builder.Configuration.GetValue("Auth:Password:MinLength", 8);
+var checkPwned = builder.Configuration.GetValue("Auth:Password:CheckPwned", true);
+builder.Services.AddHttpClient(PwnedPasswordChecker.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri("https://api.pwnedpasswords.com/");
+    c.Timeout = TimeSpan.FromSeconds(5);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ChessSchool-Auth/1.0 (pwned-check)");
+});
+builder.Services.AddSingleton<IPwnedPasswordChecker, PwnedPasswordChecker>();
+
 // Rate-limiting: против перебора пароля (login/confirm) и email-бомбинга (register/resend/change-email —
 // они шлют письма). Лимиты конфигурируемы (тесты поднимают их, чтобы не мешать). Партиция — по IP клиента
 // (за прокси корректен благодаря forwarded-заголовкам). ВАЖНО: лимитер in-memory ПОнодовый — при нескольких
@@ -183,6 +195,10 @@ var app = builder.Build();
 // Секрет server-to-server вызовов — резолвим на старте (вне Development падаем, если не задан).
 var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
 
+// Фиктивный хэш для constant-time логина: при отсутствии пользователя всё равно выполняем VerifyHashedPassword,
+// чтобы время ответа не выдавало существование аккаунта (анти-энумерация по таймингу).
+var dummyPasswordHash = new PasswordHasher<AppUser>().HashPassword(new AppUser(), "constant-time-dummy");
+
 // Кто админ (источник истины — IdP): список e-mail из Admin:Emails, по умолчанию — akhmed@outlook.com.
 // Для этих пользователей в токен уходит claim role=admin; потребители гейтят админку по роли.
 var adminEmails = AdminRoles.Resolve(builder.Configuration["Admin:Emails"]);
@@ -208,7 +224,7 @@ app.UseRateLimiter(); // после аутентификации; политик
 
 // ---------------- Страница входа / регистрации (cookie-сессия IdP) ----------------
 app.MapGet("/account/login", (string? @return, string? error, string? mode, string? email) =>
-    Results.Content(LoginPage(@return ?? "/", error, mode == "register", mode == "sent", email),
+    Results.Content(LoginPage(@return ?? "/", error, mode == "register", mode == "sent", email, minPasswordLength),
         "text/html; charset=utf-8"));
 
 app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher) =>
@@ -217,7 +233,12 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
     string email = form["email"].ToString().Trim().ToLowerInvariant();
     string ret = form["return"].ToString();
     var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
-    if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, form["password"]!) == PasswordVerificationResult.Failed)
+    if (user is null)
+    {
+        hasher.VerifyHashedPassword(new AppUser(), dummyPasswordHash, form["password"]!); // выравниваем тайминг
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
+    }
+    if (hasher.VerifyHashedPassword(user, user.PasswordHash, form["password"]!) == PasswordVerificationResult.Failed)
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
 
     // Мягкий гейт: пускаем и с неподтверждённым e-mail (claim email_verified=false едет в токен;
@@ -227,14 +248,16 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
 }).RequireRateLimiting("auth"); // защита от перебора пароля
 
 app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher,
-    EmailTokenService tokens, IEmailSender email) =>
+    EmailTokenService tokens, IEmailSender email, IPwnedPasswordChecker pwned, CancellationToken ct) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string em = form["email"].ToString().Trim().ToLowerInvariant();
     string ret = form["return"].ToString();
     string password = form["password"]!;
-    if (string.IsNullOrWhiteSpace(em) || !em.Contains('@') || password.Length < 6)
+    if (string.IsNullOrWhiteSpace(em) || !em.Contains('@'))
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1&mode=register");
+    if (!PasswordPolicy.IsAcceptable(password, minPasswordLength, out _)) // NIST: решает длина, без композиции
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=weak&mode=register");
 
     var existing = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
     if (existing is not null)
@@ -245,6 +268,10 @@ app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPass
         await SendConfirmationEmailAsync(ctx, tokens, email, existing, ret);
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
     }
+
+    // Пароль не должен фигурировать в известных утечках (HIBP, k-anonymity). Недоступность HIBP → не блокируем.
+    if (checkPwned && await pwned.IsPwnedAsync(password, ct))
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=pwned&mode=register");
 
     // Регистрация: создаём НЕподтверждённого, шлём письмо и СРАЗУ пускаем (мягкий гейт) — ценность
     // доступна немедленно, подтверждение просим баннером; чувствительное закрыто до email_verified=true.
@@ -526,7 +553,7 @@ button:hover{background:var(--accent-h)}
 static string BrandHeader(string sub) =>
     $"""<div class="brand"><span class="logo"><svg viewBox="0 0 45 45" width="18" height="18" fill="#fff"><path d="M18 10c1-1 3-2 5-2 7 0 12 6 12 16v14H13c0-6 3-9 7-12-2 1-5 2-7 1-2-1-2-3-1-5-2 1-4 1-5-1-1-3 1-5 4-7 .5-1 1-2 0-3 1-1 2-1 3 0z"/></svg></span> ChessSchool ID</div><p class="sub">{sub}</p>""";
 
-static string LoginPage(string ret, string? error, bool register, bool sent, string? email)
+static string LoginPage(string ret, string? error, bool register, bool sent, string? email, int minPw)
 {
     var en = IsEnCulture();
     string lang = en ? "en" : "ru";
@@ -562,7 +589,7 @@ static string LoginPage(string ret, string? error, bool register, bool sent, str
 
     string titleReg = en ? "Sign up" : "Регистрация", titleLogin = en ? "Sign in" : "Вход";
     string lPassword = en ? "Password" : "Пароль", lName = en ? "Name" : "Имя";
-    string phName = en ? "Your name" : "Ваше имя", phPass6 = en ? "At least 6 characters" : "Минимум 6 символов";
+    string phName = en ? "Your name" : "Ваше имя", phPass6 = en ? $"At least {minPw} characters" : $"Минимум {minPw} символов";
     string btnLogin = en ? "Sign in" : "Войти", btnCreate = en ? "Create account" : "Создать аккаунт";
     string noAcc = en ? "No account?" : "Нет аккаунта?", doReg = en ? "Sign up" : "Зарегистрироваться";
     string haveAcc = en ? "Already have an account?" : "Уже есть аккаунт?";
@@ -572,6 +599,8 @@ static string LoginPage(string ret, string? error, bool register, bool sent, str
         "unconfirmed" => en ? "Please confirm your email first — we can resend the link." : "Сначала подтвердите e-mail — можем отправить ссылку ещё раз.",
         "badtoken" => en ? "The confirmation link is invalid or has expired. Request a new one:" : "Ссылка подтверждения недействительна или устарела. Запросите новую:",
         "exists" => en ? "This email is already registered. Sign in instead." : "Этот e-mail уже зарегистрирован. Войдите.",
+        "weak" => en ? $"Password too short — at least {minPw} characters." : $"Пароль слишком короткий — минимум {minPw} символов.",
+        "pwned" => en ? "This password appears in known data breaches. Choose another." : "Этот пароль есть в известных утечках — выберите другой.",
         null => "",
         _ => en ? "Invalid credentials or email already taken." : "Неверные данные или email уже занят.",
     };

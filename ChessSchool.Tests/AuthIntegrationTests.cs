@@ -175,6 +175,27 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.Contains("/account/login", response.Headers.Location!.OriginalString);
     }
 
+    [Fact]
+    public async Task Register_RejectsShortPassword_NoUserCreated()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"short-{Guid.NewGuid():N}@test.local";
+        var r = await client.PostAsync("/account/register", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["name"] = "X",
+            ["email"] = email,
+            ["password"] = "short", // 5 символов < 8 (NIST-минимум)
+            ["return"] = "/"
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, r.StatusCode);
+        Assert.Contains("error=weak", r.Headers.Location!.OriginalString);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Assert.False(await db.Users.AnyAsync(u => u.Email == email));
+    }
+
     // ---- helpers ----
 
     private static Task<HttpResponseMessage> Register(HttpClient client, string email) =>
@@ -218,7 +239,8 @@ public class AuthIntegrationTests : IAsyncLifetime
                 ["Sso:Clients:chessschool-web"] = "https://localhost:5001",
                 // Эти тесты много раз шлют письма/логинятся — поднимаем лимиты, чтобы не упираться в rate-limiter.
                 ["RateLimit:Auth:Permit"] = "100000",
-                ["RateLimit:Email:Permit"] = "100000"
+                ["RateLimit:Email:Permit"] = "100000",
+                ["Auth:Password:CheckPwned"] = "false" // не ходить в HIBP из тестов (и "secret123" числится в утечках)
             }));
             return base.CreateHost(builder);
         }

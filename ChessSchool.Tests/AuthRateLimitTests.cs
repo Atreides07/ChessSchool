@@ -55,7 +55,8 @@ public class AuthRateLimitTests : IAsyncLifetime
             {
                 ["ConnectionStrings:authdb"] = connectionString,
                 ["RateLimit:Email:Permit"] = "2",
-                ["RateLimit:Email:WindowMinutes"] = "5"
+                ["RateLimit:Email:WindowMinutes"] = "5",
+                ["Auth:Password:CheckPwned"] = "false"
             }));
             return base.CreateHost(builder);
         }

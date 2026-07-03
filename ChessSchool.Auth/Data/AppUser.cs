@@ -10,6 +10,13 @@ public class AppUser
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     /// <summary>Подтверждён ли e-mail (переход по ссылке из письма). Логин запрещён до подтверждения.</summary>
     public bool EmailConfirmed { get; set; }
+
+    /// <summary>
+    /// Метка безопасности: значение попадает в claim cookie-сессии; при смене пароля (или иной чувствительной
+    /// операции) перевыпускается, из-за чего ВСЕ ранее выданные cookie-сессии на всех устройствах перестают
+    /// проходить валидацию (см. OnValidatePrincipal) — мгновенный логаут везде. Дополняет отзыв OIDC-токенов.
+    /// </summary>
+    public string SecurityStamp { get; set; } = Guid.NewGuid().ToString("N");
 }
 
 /// <summary>Назначение одноразового e-mail-токена (ссылка из письма).</summary>

@@ -120,13 +120,17 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
   форма нового пароля. Токен `ResetPassword` одноразовый, живёт **1ч** (в БД только хэш, [EmailTokenService](ChessSchool.Auth/EmailTokenService.cs)),
   rate-limit `auth` (анти-перебор токена). При сбросе: пароль проходит NIST+HIBP; `EmailConfirmed=true` (ссылка из письма
   доказывает владение адресом); **отзыв всех OIDC-токенов/разрешений** пользователя (`IOpenIddictTokenManager`/`…AuthorizationManager` —
-  краденые access/refresh умирают; cookie IdP короткоживущий, скользящий 8ч); **письмо-уведомление** владельцу о смене пароля.
+  краденые access/refresh умирают); **security-stamp** гасит и cookie-сессии IdP на всех устройствах; **письмо-уведомление** владельцу о смене пароля.
+- **Security-stamp — логаут на всех устройствах** ([AppUser.SecurityStamp](ChessSchool.Auth/Data/AppUser.cs)): метка едет в
+  claim cookie-сессии IdP; `OnValidatePrincipal` ([Program.cs](ChessSchool.Auth/Program.cs)) сверяет её с БД и разлогинивает
+  при несовпадении. Смена пароля перевыпускает метку → прочие сессии отклоняются. Интервал проверки
+  `Auth:SecurityStamp:ValidateMinutes` (дефолт 5; `0` = каждый запрос). Миграция `AddSecurityStamp` (grandfather).
 - **Rate-limiting переключается по Redis** ([RedisRateLimiting.cs](ChessSchool.Auth/RedisRateLimiting.cs)): есть Redis →
   распределённый `RedisFixedWindowRateLimiter` (общий счётчик на все ноды, атомарный Lua `INCRBY`+`PEXPIRE`, fail-open),
   нет → in-memory (dev/одна нода). **Аудит auth-событий** — таблица `AuthEvents` + [AuthAudit](ChessSchool.Auth/AuthAudit.cs).
 - **Полный реестр политик/настроек безопасности — [docs/SECURITY.md](docs/SECURITY.md)** (статус, место в коде,
-  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, security-stamp для мгновенной инвалидации
-  cookie-сессий на всех устройствах, смена подтверждённого e-mail (verify-new-before-switch), алертинг по аудиту.
+  параметры, компромиссы, отложенное). Отложено (OWASP/NIST): MFA, смена подтверждённого e-mail
+  (verify-new-before-switch), алертинг по аудиту.
 - **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
   заложен переход на Glicko-2.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера

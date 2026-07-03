@@ -55,7 +55,7 @@
 |---|---|---|
 | Нейтральный запрос | ✅ | `/account/forgot` не раскрывает существование e-mail; rate-limit `email-send`. |
 | Смена пароля по ссылке | ✅ | `/account/reset` — одноразовый токен (1ч), новый пароль проходит NIST+HIBP. |
-| Инвалидация сессий | 🟡 | Отзыв **всех OIDC-токенов/разрешений** пользователя (`IOpenIddictTokenManager`/`…AuthorizationManager`) — краденые access/refresh умирают. Cookie IdP на др. устройствах живёт до истечения (скользящие 8ч). |
+| Инвалидация сессий | ✅ | Отзыв **всех OIDC-токенов/разрешений** пользователя (`IOpenIddictTokenManager`/`…AuthorizationManager`) — краденые access/refresh умирают. Плюс **security-stamp** (см. §7): смена пароля перевыпускает метку → cookie-сессии IdP на всех устройствах отклоняются в пределах интервала проверки. |
 | Подтверждение владения | ✅ | Успешный сброс ставит `EmailConfirmed=true` (переход по ссылке доказывает владение адресом). |
 | Уведомление владельцу | ✅ | Письмо «пароль изменён» ([EmailTemplates](../ChessSchool.Auth/Email/EmailTemplates.cs) `PasswordChanged`). |
 
@@ -80,7 +80,7 @@
 | Регенерация при входе | ✅ | Новый `SignInAsync` при login/confirm/reset/change-email. |
 | Раздутая cookie → HTTP 431 | ✅ | Server-side **ticket-store** (в cookie только ключ) + `Kestrel MaxRequestHeadersTotalSize=256KB`. [SsoExtensions](../ChessSchool.WebAuth/SsoExtensions.cs). |
 | Общий keyring (мультисервер) | ✅ | DataProtection: Redis есть → общий keyring; нет → файловый. Ticket-store: Redis → `DistributedCacheTicketStore`, нет → `FileSystemTicketStore` (шифрован DataProtection). [Extensions](../ChessSchool.ServiceDefaults/Extensions.cs). |
-| Security-stamp (мгновенный логаут на всех устройствах) | ⏳ | Нет. Риск: после сброса пароля чужая cookie-сессия живёт до 8ч. Смягчение: OIDC-токены отзываются сразу, cookie короткоживущий. Follow-up. |
+| Security-stamp (логаут на всех устройствах) | ✅ | `AppUser.SecurityStamp` едет в claim cookie; `OnValidatePrincipal` сверяет его с БД и разлогинивает при несовпадении. Смена пароля перевыпускает метку → все прочие сессии отклоняются. Проверка с интервалом `Auth:SecurityStamp:ValidateMinutes` (дефолт **5**; `0` = каждый запрос) — баланс мгновенности и нагрузки на БД. Миграция `AddSecurityStamp` (grandfather: уникальная метка существующим). |
 | MFA | ⏳ | Не реализовано. Кандидат — TOTP для админов/премиума. |
 
 ## 8. Аудит auth-событий
@@ -116,7 +116,6 @@
 
 ## Отложенное (follow-up с остаточным риском)
 
-1. **Security-stamp** для мгновенной инвалидации cookie-сессий на всех устройствах после смены пароля. (§5, §7)
-2. **MFA** (TOTP) — для админов и премиума. (§7)
-3. **Алертинг по аудиту** — дашборды/пороги на всплески фейлов и вход с нового IP. (§8)
-4. **Смена подтверждённого e-mail** по схеме verify-new-before-switch (сейчас меняется только неподтверждённый). (§6)
+1. **MFA** (TOTP) — для админов и премиума. (§7)
+2. **Алертинг по аудиту** — дашборды/пороги на всплески фейлов и вход с нового IP. (§8)
+3. **Смена подтверждённого e-mail** по схеме verify-new-before-switch (сейчас меняется только неподтверждённый). (§6)

@@ -298,7 +298,39 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.DoesNotContain(events, e => e.Detail != null && (e.Detail.Contains("secret123") || e.Detail.Contains("wrong-password")));
     }
 
+    [Fact]
+    public async Task PasswordReset_InvalidatesCookieSessionOnOtherDevice()
+    {
+        var email = $"invalidate-{Guid.NewGuid():N}@test.local";
+
+        // Устройство A: вошли (мягкий гейт), cookie хранится в клиенте.
+        var deviceA = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Register(deviceA, email);
+
+        var authorizeUrl = AuthorizeUrl();
+        // База: сессия A валидна — authorize НЕ уводит на логин.
+        var before = await deviceA.GetAsync(authorizeUrl);
+        Assert.DoesNotContain("/account/login", before.Headers.Location!.OriginalString);
+
+        // Устройство B: сброс пароля перевыпускает security-stamp.
+        var deviceB = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Forgot(deviceB, email);
+        await Reset(deviceB, ResetToken(email), "brand-new-passphrase");
+
+        // Старая cookie устройства A теперь отклоняется (метка устарела) — authorize ведёт на логин.
+        var after = await deviceA.GetAsync(authorizeUrl);
+        Assert.Contains("/account/login", after.Headers.Location!.OriginalString);
+    }
+
     // ---- helpers ----
+
+    private static string AuthorizeUrl()
+    {
+        var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes("test-verifier-0123456789-0123456789-0123456789")));
+        var redirectUri = Uri.EscapeDataString("https://localhost:5001/signin-oidc");
+        return $"/connect/authorize?client_id=chessschool-web&redirect_uri={redirectUri}" +
+               $"&response_type=code&scope=openid&code_challenge={challenge}&code_challenge_method=S256";
+    }
 
     private static Task<HttpResponseMessage> Forgot(HttpClient client, string email) =>
         client.PostAsync("/account/forgot", new FormUrlEncodedContent(new Dictionary<string, string>
@@ -374,7 +406,8 @@ public class AuthIntegrationTests : IAsyncLifetime
                 // Эти тесты много раз шлют письма/логинятся — поднимаем лимиты, чтобы не упираться в rate-limiter.
                 ["RateLimit:Auth:Permit"] = "100000",
                 ["RateLimit:Email:Permit"] = "100000",
-                ["Auth:Password:CheckPwned"] = "false" // не ходить в HIBP из тестов (и "secret123" числится в утечках)
+                ["Auth:Password:CheckPwned"] = "false", // не ходить в HIBP из тестов (и "secret123" числится в утечках)
+                ["Auth:SecurityStamp:ValidateMinutes"] = "0" // проверять метку на каждом запросе (для теста инвалидации)
             }));
             return base.CreateHost(builder);
         }

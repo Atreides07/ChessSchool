@@ -154,6 +154,32 @@ builder.Services.AddAuthentication(options =>
     o.ReturnUrlParameter = "return";
     o.ExpireTimeSpan = TimeSpan.FromHours(8);
     o.SlidingExpiration = true;
+    // Security-stamp: сверяем метку из cookie с текущей в БД. Не совпала (пароль сменили на др. устройстве
+    // или пользователя удалили) → отклоняем сессию и разлогиниваем. Проверка не на каждый запрос, а с
+    // интервалом (баланс «мгновенность vs нагрузка на БД») — настраивается Auth:SecurityStamp:ValidateMinutes.
+    o.Events.OnValidatePrincipal = async context =>
+    {
+        var interval = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+            .GetValue("Auth:SecurityStamp:ValidateMinutes", 5);
+        var issued = context.Properties.IssuedUtc;
+        if (issued is not null && DateTimeOffset.UtcNow - issued.Value < TimeSpan.FromMinutes(interval))
+            return; // рано перепроверять — доверяем cookie до следующего интервала
+
+        var sub = context.Principal?.FindFirst("sub")?.Value;
+        var stamp = context.Principal?.FindFirst("sstamp")?.Value;
+        if (!Guid.TryParse(sub, out var uid))
+            return; // старые cookie без sub не трогаем (обратная совместимость)
+
+        var db = context.HttpContext.RequestServices.GetRequiredService<AuthDbContext>();
+        var current = await db.Users.Where(u => u.Id == uid).Select(u => u.SecurityStamp).FirstOrDefaultAsync();
+        if (current is null || current != stamp)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync("idp");
+            return;
+        }
+        context.ShouldRenew = true; // продлеваем и обновляем IssuedUtc, чтобы интервал считался заново
+    };
 });
 builder.Services.AddAuthorization();
 
@@ -426,10 +452,11 @@ app.MapPost("/account/reset", async (HttpContext ctx, AuthDbContext db, EmailTok
 
     user.PasswordHash = hasher.HashPassword(user, password);
     user.EmailConfirmed = true; // переход по ссылке из письма доказывает владение адресом
+    user.SecurityStamp = Guid.NewGuid().ToString("N"); // инвалидирует ВСЕ cookie-сессии на всех устройствах
     await db.SaveChangesAsync(ct);
 
     // OWASP: смена пароля инвалидирует активные сессии — отзываем все OIDC-токены/разрешения пользователя,
-    // чтобы украденные access/refresh-токены умерли. (Cookie-сессии IdP короткоживущие, скользящие 8ч.)
+    // чтобы украденные access/refresh-токены умерли. Security-stamp гасит и cookie-сессии IdP немедленно.
     var sub = user.Id.ToString();
     await foreach (var t in tokenManager.FindBySubjectAsync(sub, ct)) await tokenManager.TryRevokeAsync(t, ct);
     await foreach (var a in authManager.FindBySubjectAsync(sub, ct)) await authManager.TryRevokeAsync(a, ct);
@@ -588,6 +615,7 @@ static async Task SignInCookieAsync(HttpContext ctx, AppUser user)
     identity.AddClaim(new Claim("name", user.DisplayName));
     identity.AddClaim(new Claim("email", user.Email));
     identity.AddClaim(new Claim("email_verified", user.EmailConfirmed ? "true" : "false"));
+    identity.AddClaim(new Claim("sstamp", user.SecurityStamp)); // метка для мгновенной инвалидации сессий
     await ctx.SignInAsync("idp", new ClaimsPrincipal(identity));
 }
 

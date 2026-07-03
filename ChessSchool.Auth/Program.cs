@@ -91,6 +91,7 @@ if (!string.IsNullOrWhiteSpace(emailOptions.Host))
 else
     builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 builder.Services.AddScoped<EmailTokenService>();
+builder.Services.AddScoped<AuthAudit>(); // аудит auth-событий (наблюдаемость/детект аномалий) в общий стор
 
 // Политика паролей (NIST): минимальная длина из конфига (дефолт 8), проверка утечек по HIBP (k-anonymity).
 // CheckPwned выключается в тестах (не ходить в сеть). HttpClient к api.pwnedpasswords.com — короткий таймаут.
@@ -227,7 +228,7 @@ app.MapGet("/account/login", (string? @return, string? error, string? mode, stri
     Results.Content(LoginPage(@return ?? "/", error, mode == "register", mode == "sent", email, minPasswordLength),
         "text/html; charset=utf-8"));
 
-app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher) =>
+app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher, AuthAudit audit) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string email = form["email"].ToString().Trim().ToLowerInvariant();
@@ -236,19 +237,24 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
     if (user is null)
     {
         hasher.VerifyHashedPassword(new AppUser(), dummyPasswordHash, form["password"]!); // выравниваем тайминг
+        await audit.LogAsync(ctx, AuthEventType.LoginFailure, email, detail: "no-user");
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
     }
     if (hasher.VerifyHashedPassword(user, user.PasswordHash, form["password"]!) == PasswordVerificationResult.Failed)
+    {
+        await audit.LogAsync(ctx, AuthEventType.LoginFailure, email, user.Id, "bad-password");
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
+    }
 
     // Мягкий гейт: пускаем и с неподтверждённым e-mail (claim email_verified=false едет в токен;
     // чувствительные действия приложения закрывают сами). Подтверждение — nudge-баннером в приложении.
     await SignInCookieAsync(ctx, user);
+    await audit.LogAsync(ctx, AuthEventType.LoginSuccess, email, user.Id);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 }).RequireRateLimiting("auth"); // защита от перебора пароля
 
 app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPasswordHasher<AppUser> hasher,
-    EmailTokenService tokens, IEmailSender email, IPwnedPasswordChecker pwned, CancellationToken ct) =>
+    EmailTokenService tokens, IEmailSender email, IPwnedPasswordChecker pwned, AuthAudit audit, CancellationToken ct) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string em = form["email"].ToString().Trim().ToLowerInvariant();
@@ -281,12 +287,13 @@ app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPass
     await db.SaveChangesAsync();
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
     await SignInCookieAsync(ctx, user);
+    await audit.LogAsync(ctx, AuthEventType.Register, em, user.Id);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 }).RequireRateLimiting("email-send"); // регистрация шлёт письмо → анти-бомбинг
 
 // ---------------- Подтверждение e-mail по ссылке из письма ----------------
 app.MapGet("/account/confirm", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens,
-    string? token, string? @return) =>
+    AuthAudit audit, string? token, string? @return) =>
 {
     var userId = await tokens.ConsumeAsync(token, EmailTokenPurpose.ConfirmEmail);
     var user = userId is { } id ? await db.Users.FindAsync(id) : null;
@@ -296,18 +303,22 @@ app.MapGet("/account/confirm", async (HttpContext ctx, AuthDbContext db, EmailTo
     if (!user.EmailConfirmed) { user.EmailConfirmed = true; await db.SaveChangesAsync(); }
     // Подтвердил → сразу вход и возврат туда, откуда пришёл (обычно /connect/authorize → назад в приложение).
     await SignInCookieAsync(ctx, user);
+    await audit.LogAsync(ctx, AuthEventType.EmailConfirmed, user.Email, user.Id);
     return Results.Redirect(string.IsNullOrEmpty(@return) ? "/" : @return);
 }).RequireRateLimiting("auth"); // защита от перебора токена подтверждения
 
 // ---------------- Переотправка письма подтверждения (нейтральный ответ) ----------------
-app.MapPost("/account/resend", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
+app.MapPost("/account/resend", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email, AuthAudit audit) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string em = form["email"].ToString().Trim().ToLowerInvariant();
     string ret = form["return"].ToString();
     var user = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
     if (user is not null && !user.EmailConfirmed)
+    {
         await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
+        await audit.LogAsync(ctx, AuthEventType.ConfirmationResent, em, user.Id);
+    }
     // Нейтрально: всегда «письмо отправлено» (не раскрываем, есть ли такой аккаунт).
     return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
 }).RequireRateLimiting("email-send"); // анти-бомбинг переотправкой
@@ -322,7 +333,7 @@ app.MapGet("/account/email", async (HttpContext ctx, AuthDbContext db, string? @
     return Results.Content(AccountEmailPage(user.Email, user.EmailConfirmed, @return ?? "/", error), "text/html; charset=utf-8");
 });
 
-app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
+app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email, AuthAudit audit) =>
 {
     var auth = await ctx.AuthenticateAsync("idp");
     var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
@@ -337,8 +348,10 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
     if (await db.Users.AnyAsync(u => u.Email == newEmail && u.Id != user.Id))
         return Results.Redirect($"/account/email?return={Uri.EscapeDataString(ret)}&error=taken");
 
+    var oldEmail = user.Email;
     user.Email = newEmail;
     await db.SaveChangesAsync();
+    await audit.LogAsync(ctx, AuthEventType.EmailChanged, newEmail, user.Id, detail: $"from:{oldEmail}");
     await SignInCookieAsync(ctx, user);                                   // обновляем e-mail в cookie
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);      // письмо на новый адрес
     return Results.Redirect($"/account/login?mode=sent&email={Uri.EscapeDataString(newEmail)}&return={Uri.EscapeDataString(ret)}");
@@ -348,7 +361,7 @@ app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, E
 app.MapGet("/account/forgot", (string? @return, bool sent, string? email, string? error) =>
     Results.Content(ForgotPasswordPage(@return ?? "/", sent, email, error), "text/html; charset=utf-8"));
 
-app.MapPost("/account/forgot", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
+app.MapPost("/account/forgot", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email, AuthAudit audit) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string em = form["email"].ToString().Trim().ToLowerInvariant();
@@ -361,6 +374,7 @@ app.MapPost("/account/forgot", async (HttpContext ctx, AuthDbContext db, EmailTo
         var link = $"{baseUrl}/account/reset?token={Uri.EscapeDataString(raw)}&return={Uri.EscapeDataString(ret)}";
         var (subject, html) = EmailTemplates.ResetPassword(user.DisplayName, link, IsEnCulture());
         await email.SendAsync(user.Email, subject, html);
+        await audit.LogAsync(ctx, AuthEventType.PasswordResetRequested, em, user.Id);
     }
     // Нейтрально: всегда «письмо отправлено, если такой аккаунт есть» — не раскрываем существование почты.
     return Results.Redirect($"/account/forgot?sent=true&return={Uri.EscapeDataString(ret)}&email={Uri.EscapeDataString(em)}");
@@ -376,7 +390,7 @@ app.MapGet("/account/reset", (string? token, string? @return, string? error) =>
 
 app.MapPost("/account/reset", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens,
     IPasswordHasher<AppUser> hasher, IEmailSender email, IPwnedPasswordChecker pwned,
-    IOpenIddictTokenManager tokenManager, IOpenIddictAuthorizationManager authManager, CancellationToken ct) =>
+    IOpenIddictTokenManager tokenManager, IOpenIddictAuthorizationManager authManager, AuthAudit audit, CancellationToken ct) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     string token = form["token"]!;
@@ -411,6 +425,7 @@ app.MapPost("/account/reset", async (HttpContext ctx, AuthDbContext db, EmailTok
     await email.SendAsync(user.Email, subject, html); // уведомление владельцу о смене пароля
 
     await SignInCookieAsync(ctx, user); // новый вход после смены пароля
+    await audit.LogAsync(ctx, AuthEventType.PasswordReset, user.Email, user.Id);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 }).RequireRateLimiting("auth"); // защита от перебора reset-токена
 

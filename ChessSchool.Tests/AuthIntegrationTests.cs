@@ -278,6 +278,26 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.DoesNotContain("error", ok.Headers.Location!.OriginalString);
     }
 
+    [Fact]
+    public async Task AuthEvents_AreAudited_ForRegisterLoginFailureAndSuccess()
+    {
+        var email = $"audit-{Guid.NewGuid():N}@test.local";
+        await Register(_factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }), email);
+        await LoginWith(_factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }), email, "wrong-password");
+        await LoginWith(_factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }), email, "secret123");
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var events = await db.AuthEvents.Where(e => e.Email == email).ToListAsync();
+
+        Assert.Contains(events, e => e.Type == AuthEventType.Register);
+        Assert.Contains(events, e => e.Type == AuthEventType.LoginFailure);
+        Assert.Contains(events, e => e.Type == AuthEventType.LoginSuccess);
+        Assert.All(events, e => Assert.NotEqual(default, e.CreatedAt)); // время события зафиксировано
+        // Секреты в аудит не попадают: ни пароль, ни его хэш не должны оказаться в деталях события.
+        Assert.DoesNotContain(events, e => e.Detail != null && (e.Detail.Contains("secret123") || e.Detail.Contains("wrong-password")));
+    }
+
     // ---- helpers ----
 
     private static Task<HttpResponseMessage> Forgot(HttpClient client, string email) =>

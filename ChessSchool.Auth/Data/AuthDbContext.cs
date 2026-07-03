@@ -8,6 +8,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbContext(
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuthCode> AuthCodes => Set<AuthCode>();
     public DbSet<EmailToken> EmailTokens => Set<EmailToken>();
+    public DbSet<AuthEvent> AuthEvents => Set<AuthEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -16,6 +17,10 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbContext(
         b.Entity<AuthCode>().HasIndex(a => a.Code).IsUnique();
         b.Entity<EmailToken>().HasIndex(t => t.TokenHash).IsUnique();
         b.Entity<EmailToken>().HasIndex(t => new { t.UserId, t.Purpose });
+        // Аудит: выборки по пользователю и по времени (расследование инцидентов, детект аномалий).
+        b.Entity<AuthEvent>().HasIndex(e => new { e.Email, e.CreatedAt });
+        b.Entity<AuthEvent>().HasIndex(e => new { e.UserId, e.CreatedAt });
+        b.Entity<AuthEvent>().HasIndex(e => e.CreatedAt);
         // DateTimeOffset хранится нативно в PostgreSQL (timestamptz) — конвертеры не нужны.
     }
 }

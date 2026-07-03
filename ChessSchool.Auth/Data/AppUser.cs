@@ -34,6 +34,37 @@ public class EmailToken
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>Тип аудируемого события аутентификации (для наблюдаемости и детекта аномалий).</summary>
+public enum AuthEventType
+{
+    LoginSuccess = 0,
+    LoginFailure = 1,
+    Register = 2,
+    EmailConfirmed = 3,
+    ConfirmationResent = 4,
+    EmailChanged = 5,
+    PasswordResetRequested = 6,
+    PasswordReset = 7,
+}
+
+/// <summary>
+/// Запись аудита auth-события (вход/фейл/регистрация/подтверждение/смена e-mail/сброс пароля). Пишется в
+/// общий стор (PostgreSQL) — виден всем нодам. Секретов не содержит (пароли/сырые токены сюда не попадают);
+/// e-mail хранится для расследования инцидентов. IP/UA — для детекта аномалий (перебор, вход с нового места).
+/// </summary>
+public class AuthEvent
+{
+    public long Id { get; set; }
+    public AuthEventType Type { get; set; }
+    public Guid? UserId { get; set; }
+    public string? Email { get; set; }
+    public string? Ip { get; set; }
+    public string? UserAgent { get; set; }
+    /// <summary>Необязательная деталь события (напр. причина фейла), без секретов.</summary>
+    public string? Detail { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 /// <summary>Opaque refresh-токен с ротацией.</summary>
 public class RefreshToken
 {

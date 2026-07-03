@@ -3,6 +3,7 @@
 @using ChessSchool.Arena
 @inject NavigationManager Nav
 @inject IHttpContextAccessor Http
+@inject IConfiguration Config
 @inject ChessSchool.Arena.Services.IPlayerEntitlements Entitlements
 
 <input type="checkbox" id="ar-nav-toggle" class="ar-nav-toggle" />
@@ -74,6 +75,16 @@
             </AuthorizeView>
         </header>
 
+        @if (_authed && !_emailVerified)
+        {
+            @* Мягкий гейт: вошёл, но e-mail не подтверждён — nudge-баннер (играть можно, чувствительное закрыто). *@
+            <div class="ar-verify" role="status">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6" /></svg>
+                <span>@Loc.T("verify.banner")</span>
+                <a class="btn btn-sm btn-primary" href="@_manageEmailUrl" data-enhance-nav="false">@Loc.T("verify.banner.cta")</a>
+            </div>
+        }
+
         <main class="ar-content">
             @Body
         </main>
@@ -87,12 +98,19 @@
 </div>
 
 @code {
-    private bool _isPremium;
+    private bool _isPremium, _authed, _emailVerified;
+    private string _manageEmailUrl = "/";
 
-    // Премиум-статус текущего игрока для бейджа в навигации (кэшируется в PlayerEntitlements).
+    // Премиум-статус + статус подтверждения e-mail (для nudge-баннера мягкого гейта).
     protected override async Task OnInitializedAsync()
     {
-        var sub = Http.HttpContext?.User?.FindFirst("sub")?.Value;
+        var user = Http.HttpContext?.User;
+        _authed = user?.Identity?.IsAuthenticated == true;
+        _emailVerified = user?.FindFirst("email_verified")?.Value == "true";
+        var authority = (Config["Sso:Authority"] ?? "").TrimEnd('/');
+        var ret = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0];
+        _manageEmailUrl = $"{authority}/account/email?return={Uri.EscapeDataString(ret)}";
+        var sub = user?.FindFirst("sub")?.Value;
         if (!string.IsNullOrEmpty(sub)) _isPremium = await Entitlements.IsPremiumAsync(sub);
     }
 
@@ -159,6 +177,12 @@
     .ar-lang-menu a.on { color: var(--accent); font-weight: 700; }
 
     .ar-content { padding: 26px 28px 60px; width: 100%; max-width: 1200px; }
+
+    /* Баннер мягкого гейта: подтвердите e-mail */
+    .ar-verify { display: flex; align-items: center; gap: .7rem; margin: 14px 28px 0; padding: .6rem .9rem;
+        background: #fff4e0; border: 1px solid #e0ad00; border-radius: var(--r-md); color: #6e5200; font-size: .9rem; }
+    .ar-verify svg { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .ar-verify span { flex: 1; }
 
     /* ---------- Мобильный режим ---------- */
     .ar-scrim { display: none; }

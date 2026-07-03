@@ -73,7 +73,10 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();
 // Авторизация админки (/admin): только роль "admin". Источник истины — IdP: он кладёт claim role=admin
 // в токен для админских e-mail (по умолчанию akhmed@outlook.com, список — Admin:Emails в Auth).
 // RoleClaimType="role" задаётся в AddChessSchoolSso, поэтому RequireRole видит этот claim.
-builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy => policy.RequireRole("admin"));
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("Admin", policy => policy.RequireRole("admin"))
+    // Мягкий гейт: чувствительные действия (оплата) — только с подтверждённым e-mail (claim из IdP).
+    .AddPolicy("ConfirmedEmail", policy => policy.RequireAuthenticatedUser().RequireClaim("email_verified", "true"));
 
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();
@@ -266,7 +269,7 @@ if (app.Environment.IsDevelopment())
         await client.SendAsync(req, ct);
         ents.Invalidate(sub); // сбросить кэш — статус подхватится на ближайшем запросе/перезагрузке
         return Results.Ok();
-    }).RequireAuthorization().DisableAntiforgery();
+    }).RequireAuthorization("ConfirmedEmail").DisableAntiforgery(); // премиум — только с подтверждённым e-mail
 }
 
 // Данные партии для тонкого клиента страницы /me/games/{id}: позиции (стартовый FEN + FEN/ход после

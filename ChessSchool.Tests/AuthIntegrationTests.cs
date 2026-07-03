@@ -17,24 +17,21 @@ using Testcontainers.PostgreSql;
 namespace ChessSchool.Tests;
 
 /// <summary>
-/// Интеграционные тесты IdP против реального PostgreSQL (Testcontainers) — боевой провайдер БД.
-/// Покрывают: JWKS без приватного материала; подтверждение e-mail при регистрации (создание
-/// неподтверждённого + письмо со ссылкой, гейт логина, погашение токена → вход); мягкий редирект
-/// при протухшей cookie. Письма перехватывает фейковый <see cref="IEmailSender"/>. Требует Docker.
+/// Интеграционные тесты IdP против реального PostgreSQL (Testcontainers). Покрывают: JWKS без приватного
+/// материала; МЯГКИЙ гейт (регистрация сразу логинит и шлёт письмо; логин пускает неподтверждённого);
+/// смену e-mail до подтверждения (исправить опечатку); погашение токена; протухшую cookie. Письма
+/// перехватывает фейковый <see cref="IEmailSender"/>. Требует Docker.
 /// </summary>
 public class AuthIntegrationTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder()
-        .WithImage("postgres:18.3")
-        .Build();
-
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder().WithImage("postgres:18.3").Build();
     private AuthFactory _factory = null!;
 
     public async Task InitializeAsync()
     {
         await _pg.StartAsync();
         _factory = new AuthFactory(_pg.GetConnectionString());
-        _ = _factory.Services; // старт хоста (миграции + сидинг) до тестов
+        _ = _factory.Services;
     }
 
     public async Task DisposeAsync()
@@ -47,12 +44,11 @@ public class AuthIntegrationTests : IAsyncLifetime
     public async Task Jwks_ExposesOnlyPublicKeyMaterial()
     {
         var client = _factory.CreateClient();
-
         var json = await client.GetStringAsync("/.well-known/jwks");
         using var doc = JsonDocument.Parse(json);
         var keys = doc.RootElement.GetProperty("keys");
 
-        Assert.True(keys.GetArrayLength() >= 1, "JWKS должен содержать хотя бы один ключ подписи");
+        Assert.True(keys.GetArrayLength() >= 1);
         foreach (var jwk in keys.EnumerateArray())
         {
             if (jwk.GetProperty("kty").GetString() == "RSA")
@@ -66,53 +62,79 @@ public class AuthIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Register_CreatesUnconfirmedUser_AndSendsConfirmationEmail()
+    public async Task Register_SignsInImmediately_UserUnconfirmed_EmailSent()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         var email = $"reg-{Guid.NewGuid():N}@test.local";
 
         var register = await Register(client, email);
 
+        // Мягкий гейт: пускаем сразу (redirect в приложение, ставится cookie idp), но e-mail не подтверждён.
         Assert.Equal(HttpStatusCode.Redirect, register.StatusCode);
-        Assert.Contains("mode=sent", register.Headers.Location!.OriginalString);
+        Assert.Equal("/", register.Headers.Location!.OriginalString);
+        Assert.Contains(register.Headers.GetValues("Set-Cookie"), c => c.StartsWith("idp_sso"));
 
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            var user = await db.Users.FirstAsync(u => u.Email == email);
-            Assert.False(user.EmailConfirmed); // не подтверждён до перехода по ссылке
+            Assert.False((await db.Users.FirstAsync(u => u.Email == email)).EmailConfirmed);
         }
 
-        var msg = Assert.Single(_factory.Sent, m => m.To == email); // e-mail уникален на тест
-        Assert.Contains("token=", msg.Html); // письмо содержит ссылку подтверждения
+        var msg = Assert.Single(_factory.Sent, m => m.To == email);
+        Assert.Contains("token=", msg.Html);
     }
 
     [Fact]
-    public async Task Login_IsBlocked_UntilEmailConfirmed()
+    public async Task Login_Succeeds_EvenWhenEmailUnconfirmed()
+    {
+        var reg = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"soft-{Guid.NewGuid():N}@test.local";
+        await Register(reg, email);
+
+        // Свежий клиент (без cookie): вход неподтверждённого проходит (мягкий гейт), без ошибки.
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var login = await Login(client, email);
+
+        Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+        Assert.DoesNotContain("error", login.Headers.Location!.OriginalString);
+        Assert.Contains(login.Headers.GetValues("Set-Cookie"), c => c.StartsWith("idp_sso"));
+    }
+
+    [Fact]
+    public async Task ChangeEmail_BeforeConfirmation_UpdatesAddress_ResendsAndInvalidatesOldToken()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        var email = $"gate-{Guid.NewGuid():N}@test.local";
+        var oldEmail = $"old-{Guid.NewGuid():N}@test.local";
+        var newEmail = $"new-{Guid.NewGuid():N}@test.local";
 
-        await Register(client, email);
+        await Register(client, oldEmail);           // вошли (мягкий гейт), письмо на старый адрес
+        var oldToken = ConfirmToken(oldEmail);
 
-        // 1) До подтверждения вход запрещён.
-        var loginBefore = await Login(client, email);
-        Assert.Equal(HttpStatusCode.Redirect, loginBefore.StatusCode);
-        Assert.Contains("error=unconfirmed", loginBefore.Headers.Location!.OriginalString);
+        // Опечатка → меняем адрес до подтверждения (клиент аутентифицирован cookie от register).
+        var change = await client.PostAsync("/account/change-email", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = newEmail,
+            ["return"] = "/"
+        }));
+        Assert.Equal(HttpStatusCode.Redirect, change.StatusCode);
 
-        // 2) Переходим по ссылке из письма → подтверждено.
-        var confirm = await client.GetAsync($"/account/confirm?token={ConfirmToken(email)}");
-        Assert.Equal(HttpStatusCode.Redirect, confirm.StatusCode);
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            Assert.True((await db.Users.FirstAsync(u => u.Email == email)).EmailConfirmed);
+            Assert.True(await db.Users.AnyAsync(u => u.Email == newEmail));
+            Assert.False(await db.Users.AnyAsync(u => u.Email == oldEmail));
         }
 
-        // 3) Теперь вход проходит (без ошибки).
-        var loginAfter = await Login(client, email);
-        Assert.Equal(HttpStatusCode.Redirect, loginAfter.StatusCode);
-        Assert.DoesNotContain("error", loginAfter.Headers.Location!.OriginalString);
+        // Старая ссылка больше не работает, новая — подтверждает.
+        var newToken = ConfirmToken(newEmail);
+        Assert.Contains("error=badtoken", (await client.GetAsync($"/account/confirm?token={oldToken}")).Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.Redirect, (await client.GetAsync($"/account/confirm?token={newToken}")).StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Assert.True((await db.Users.FirstAsync(u => u.Email == newEmail)).EmailConfirmed);
+        }
     }
 
     [Fact]
@@ -120,7 +142,6 @@ public class AuthIntegrationTests : IAsyncLifetime
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         var response = await client.GetAsync("/account/confirm?token=definitely-not-a-valid-token");
-
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Contains("error=badtoken", response.Headers.Location!.OriginalString);
     }
@@ -130,10 +151,9 @@ public class AuthIntegrationTests : IAsyncLifetime
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-        // Регистрируемся и подтверждаем e-mail — теперь есть idp-сессия (cookie).
+        // Регистрация сразу логинит (мягкий гейт) → есть idp-сессия (cookie).
         var email = $"stale-{Guid.NewGuid():N}@test.local";
         await Register(client, email);
-        await client.GetAsync($"/account/confirm?token={ConfirmToken(email)}"); // ставит cookie idp_sso
 
         // Удаляем пользователя — cookie указывает на несуществующего.
         using (var scope = _factory.Services.CreateScope())
@@ -143,8 +163,7 @@ public class AuthIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var verifier = "test-verifier-0123456789-0123456789-0123456789";
-        var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes("test-verifier-0123456789-0123456789-0123456789")));
         var redirectUri = Uri.EscapeDataString("https://localhost:5001/signin-oidc");
         var authorizeUrl =
             $"/connect/authorize?client_id=chessschool-web&redirect_uri={redirectUri}" +
@@ -175,7 +194,6 @@ public class AuthIntegrationTests : IAsyncLifetime
             ["return"] = "/"
         }));
 
-    // Достаёт сырой токен подтверждения из последнего письма для адреса.
     private string ConfirmToken(string email)
     {
         var html = _factory.Sent.Last(m => m.To == email).Html;
@@ -202,7 +220,6 @@ public class AuthIntegrationTests : IAsyncLifetime
             return base.CreateHost(builder);
         }
 
-        // Перехватываем письма вместо реальной отправки — чтобы читать ссылку подтверждения.
         protected override void ConfigureWebHost(IWebHostBuilder builder) =>
             builder.ConfigureTestServices(services =>
             {

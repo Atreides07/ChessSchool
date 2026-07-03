@@ -39,6 +39,15 @@ else if (_isPremium)
         </div>
     </div>
 }
+else if (!_emailVerified)
+{
+    @* Мягкий гейт: премиум — чувствительное действие (оплата/письма-чеки), только после подтверждения e-mail. *@
+    <div class="card prem-card">
+        <ul class="prem-perks"><li>@Loc.T("premium.perk")</li></ul>
+        <p class="text-secondary">@Loc.T("verify.premium")</p>
+        <a class="btn btn-primary" href="@_manageEmailUrl" data-enhance-nav="false">@Loc.T("verify.premium.cta")</a>
+    </div>
+}
 else
 {
     <div class="card prem-card">
@@ -89,9 +98,10 @@ else
 }
 
 @code {
-    private bool _authed, _isPremium, _paddle, _hasAnnual;
+    private bool _authed, _isPremium, _paddle, _hasAnnual, _emailVerified;
     private int _trialDays;
     private string _sub = "", _token = "", _priceId = "", _priceAnnual = "", _annualNote = "", _env = "sandbox";
+    private string _manageEmailUrl = "/";
 
     // Подпись кнопки: с пробным периодом — «Попробовать N дней бесплатно», иначе обычная покупка/dev.
     private string BuyLabel() => !_paddle
@@ -102,6 +112,10 @@ else
     {
         var user = Http.HttpContext?.User;
         _authed = user?.Identity?.IsAuthenticated == true;
+        _emailVerified = user?.FindFirst("email_verified")?.Value == "true";
+        // Ссылка на управление e-mail в IdP (подтвердить/сменить), с возвратом на /premium.
+        var authority = (Config["Sso:Authority"] ?? "").TrimEnd('/');
+        _manageEmailUrl = $"{authority}/account/email?return={Uri.EscapeDataString($"{Nav.BaseUri}premium")}";
         _sub = user?.FindFirst("sub")?.Value ?? "";
         _token = Config["Paddle:ClientToken"] ?? "";
         _priceId = Config["Paddle:PremiumPriceId"] ?? "";

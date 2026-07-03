@@ -185,6 +185,11 @@ public static class Loc
         ["review.rs.insufficient"] = ("материал", "material"),
         ["review.rs.abandoned"] = ("покинута", "abandoned"),
         ["premium.buy"] = ("Оформить премиум", "Get premium"),
+        // Мягкий гейт по подтверждению e-mail.
+        ["verify.banner"] = ("Подтвердите e-mail, чтобы разблокировать все возможности.", "Confirm your email to unlock everything."),
+        ["verify.banner.cta"] = ("Подтвердить", "Confirm"),
+        ["verify.premium"] = ("Подтвердите e-mail, чтобы оформить премиум.", "Confirm your email to get premium."),
+        ["verify.premium.cta"] = ("Подтвердить e-mail", "Confirm email"),
         ["premium.have"] = ("У вас активен премиум ✓", "Your premium is active ✓"),
         ["premium.login"] = ("Войдите, чтобы оформить премиум.", "Sign in to get premium."),
         ["premium.loginbtn"] = ("Войти", "Sign in"),

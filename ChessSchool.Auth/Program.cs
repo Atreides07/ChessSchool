@@ -194,10 +194,8 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
     if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, form["password"]!) == PasswordVerificationResult.Failed)
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1");
 
-    // Гейт: без подтверждённого e-mail вход запрещён — предлагаем переотправить письмо.
-    if (!user.EmailConfirmed)
-        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=unconfirmed&email={Uri.EscapeDataString(email)}");
-
+    // Мягкий гейт: пускаем и с неподтверждённым e-mail (claim email_verified=false едет в токен;
+    // чувствительные действия приложения закрывают сами). Подтверждение — nudge-баннером в приложении.
     await SignInCookieAsync(ctx, user);
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 });
@@ -222,13 +220,15 @@ app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPass
         return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
     }
 
-    // Регистрация: пользователь создаётся НЕподтверждённым и БЕЗ входа — сначала письмо со ссылкой.
+    // Регистрация: создаём НЕподтверждённого, шлём письмо и СРАЗУ пускаем (мягкий гейт) — ценность
+    // доступна немедленно, подтверждение просим баннером; чувствительное закрыто до email_verified=true.
     var user = new AppUser { Email = em, DisplayName = form["name"].ToString() };
     user.PasswordHash = hasher.HashPassword(user, password);
     db.Users.Add(user);
     await db.SaveChangesAsync();
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
-    return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
+    await SignInCookieAsync(ctx, user);
+    return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 });
 
 // ---------------- Подтверждение e-mail по ссылке из письма ----------------
@@ -257,6 +257,38 @@ app.MapPost("/account/resend", async (HttpContext ctx, AuthDbContext db, EmailTo
         await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
     // Нейтрально: всегда «письмо отправлено» (не раскрываем, есть ли такой аккаунт).
     return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
+});
+
+// ---------------- Управление e-mail: смена адреса ДО подтверждения (исправить опечатку) ----------------
+// Требует входа (мягкий гейт → пользователь уже внутри). Подтверждённый адрес здесь не меняем.
+app.MapGet("/account/email", async (HttpContext ctx, AuthDbContext db, string? @return, string? error) =>
+{
+    var auth = await ctx.AuthenticateAsync("idp");
+    var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
+    if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "/")}");
+    return Results.Content(AccountEmailPage(user.Email, user.EmailConfirmed, @return ?? "/", error), "text/html; charset=utf-8");
+});
+
+app.MapPost("/account/change-email", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email) =>
+{
+    var auth = await ctx.AuthenticateAsync("idp");
+    var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
+    var form = await ctx.Request.ReadFormAsync();
+    string ret = form["return"].ToString();
+    if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}");
+    if (user.EmailConfirmed) return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret); // подтверждённый так не меняем
+
+    string newEmail = form["email"].ToString().Trim().ToLowerInvariant();
+    if (string.IsNullOrWhiteSpace(newEmail) || !newEmail.Contains('@'))
+        return Results.Redirect($"/account/email?return={Uri.EscapeDataString(ret)}&error=invalid");
+    if (await db.Users.AnyAsync(u => u.Email == newEmail && u.Id != user.Id))
+        return Results.Redirect($"/account/email?return={Uri.EscapeDataString(ret)}&error=taken");
+
+    user.Email = newEmail;
+    await db.SaveChangesAsync();
+    await SignInCookieAsync(ctx, user);                                   // обновляем e-mail в cookie
+    await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);      // письмо на новый адрес
+    return Results.Redirect($"/account/login?mode=sent&email={Uri.EscapeDataString(newEmail)}&return={Uri.EscapeDataString(ret)}");
 });
 
 // ---------------- OpenIddict: authorization endpoint ----------------
@@ -294,6 +326,7 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext ctx, Au
 
     identity.SetClaim(Claims.Subject, user.Id.ToString())
             .SetClaim(Claims.Email, user.Email)
+            .SetClaim(Claims.EmailVerified, user.EmailConfirmed ? "true" : "false") // мягкий гейт: приложения гейтят по нему
             .SetClaim(Claims.Name, user.DisplayName);
 
     // Ролевая модель: админам выдаём claim role=admin (едет в токен — см. GetDestinations).
@@ -346,6 +379,7 @@ app.MapMethods("/connect/userinfo", ["GET", "POST"], async (HttpContext ctx, Aut
     {
         [Claims.Subject] = user.Id.ToString(),
         [Claims.Email] = user.Email,
+        [Claims.EmailVerified] = user.EmailConfirmed,
         [Claims.Name] = user.DisplayName
     };
     // Роль — и в userinfo (потребитель мапит её в principal через GetClaimsFromUserInfoEndpoint).
@@ -402,6 +436,7 @@ static async Task SignInCookieAsync(HttpContext ctx, AppUser user)
     identity.AddClaim(new Claim("sub", user.Id.ToString()));
     identity.AddClaim(new Claim("name", user.DisplayName));
     identity.AddClaim(new Claim("email", user.Email));
+    identity.AddClaim(new Claim("email_verified", user.EmailConfirmed ? "true" : "false"));
     await ctx.SignInAsync("idp", new ClaimsPrincipal(identity));
 }
 
@@ -420,7 +455,7 @@ static bool IsEnCulture() => System.Globalization.CultureInfo.CurrentUICulture.T
 
 static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
 {
-    Claims.Name or Claims.Email or Claims.Subject or Claims.Role => [Destinations.AccessToken, Destinations.IdentityToken],
+    Claims.Name or Claims.Email or Claims.EmailVerified or Claims.Subject or Claims.Role => [Destinations.AccessToken, Destinations.IdentityToken],
     _ => [Destinations.AccessToken]
 };
 
@@ -551,6 +586,49 @@ static string LoginPage(string ret, string? error, bool register, bool sent, str
 <p class="muted">{{secured}}</p></div>
 """;
     return AuthShell(lang, register ? titleReg : titleLogin, inner);
+}
+
+// Страница управления e-mail (вход есть): переотправка + смена адреса до подтверждения.
+static string AccountEmailPage(string email, bool confirmed, string ret, string? error)
+{
+    var en = IsEnCulture();
+    string lang = en ? "en" : "ru";
+    string retEnc = System.Net.WebUtility.HtmlEncode(ret);
+    string emailEnc = System.Net.WebUtility.HtmlEncode(email);
+    string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
+    string title = en ? "Your email" : "Ваш e-mail";
+    string back = en ? "← Back" : "← Назад";
+    string resendBtn = en ? "Resend confirmation email" : "Отправить письмо ещё раз";
+    string changeLbl = en ? "Wrong address? Change it" : "Не тот адрес? Изменить";
+    string changeBtn = en ? "Change and resend" : "Изменить и переслать";
+
+    if (confirmed)
+    {
+        string okMsg = en ? "Your e-mail is confirmed ✓" : "Ваш e-mail подтверждён ✓";
+        return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1><p class="info">{okMsg}</p>
+<p class="switch"><a href="{retEnc}">{back}</a></p></div>
+""");
+    }
+
+    string pending = en
+        ? $"We sent a confirmation link to <b>{emailEnc}</b>. Not confirmed yet — resend it or fix the address."
+        : $"Мы отправили ссылку на <b>{emailEnc}</b>. Пока не подтверждён — переотправьте или исправьте адрес.";
+    string errText = error switch
+    {
+        "taken" => en ? "This email is already in use." : "Этот e-mail уже занят.",
+        "invalid" => en ? "Enter a valid email." : "Укажите корректный e-mail.",
+        _ => "",
+    };
+    string errBlock = string.IsNullOrEmpty(errText) ? "" : $"<p class=\"err\">{errText}</p>";
+    return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}
+<p class="info">{pending}</p>
+<form method="post" action="/account/resend"><input type="hidden" name="return" value="{retEnc}"><input type="hidden" name="email" value="{emailEnc}"><button type="submit">{resendBtn}</button></form>
+<div class="resend"><label>{changeLbl}</label>
+<form method="post" action="/account/change-email"><input type="hidden" name="return" value="{retEnc}"><input name="email" type="email" value="{emailEnc}" placeholder="you@example.com" required><button type="submit">{changeBtn}</button></form></div>
+<p class="switch"><a href="{retEnc}">{back}</a></p></div>
+""");
 }
 
 record ByEmailRequest(string Email);

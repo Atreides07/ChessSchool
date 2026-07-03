@@ -59,6 +59,9 @@ public static class SsoExtensions
             // по ней (RequireRole). Маппим её и из userinfo (без дублей), т.к. это не стандартный OIDC-claim.
             o.TokenValidationParameters.RoleClaimType = "role";
             o.ClaimActions.MapUniqueJsonKey("role", "role");
+            // Статус подтверждения e-mail (мягкий гейт): приложения закрывают чувствительные действия,
+            // пока email_verified != "true". Стандартный OIDC-claim, но маппим явно (MapInboundClaims=false).
+            o.ClaimActions.MapUniqueJsonKey("email_verified", "email_verified");
 
             o.Scope.Clear();
             o.Scope.Add("openid");

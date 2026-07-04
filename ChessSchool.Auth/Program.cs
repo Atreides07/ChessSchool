@@ -245,6 +245,9 @@ var dummyPasswordHash = new PasswordHasher<AppUser>().HashPassword(new AppUser()
 // Кто админ (источник истины — IdP): список e-mail из Admin:Emails, по умолчанию — akhmed@outlook.com.
 // Для этих пользователей в токен уходит claim role=admin; потребители гейтят админку по роли.
 var adminEmails = AdminRoles.Resolve(builder.Configuration["Admin:Emails"]);
+// Обязательная MFA для админов: без включённой 2FA админ не получает токен приложения (гейт в authorize)
+// и на входе форсится в настройку. Отключаемо конфигом (напр. для локальной отладки).
+var requireMfaForAdmins = builder.Configuration.GetValue("Auth:Mfa:RequiredForAdmins", true);
 
 // Применение схемы. В проде миграции выкатываются ОТДЕЛЬНЫМ шагом (тот же образ с аргументом `migrate`
 // как k8s Job), а боевые реплики стартуют без авто-миграции (нет гонки нескольких реплик за первую
@@ -297,6 +300,11 @@ app.MapPost("/account/login", async (HttpContext ctx, AuthDbContext db, IPasswor
     }
 
     await CompleteLoginAsync(ctx, db, audit, emailSender, user);
+
+    // Админ без MFA (когда она обязательна) → форсим настройку: сессия есть (нужна для enrollment),
+    // но реальный доступ к приложениям гейтится в authorize до включения 2FA.
+    if (requireMfaForAdmins && !user.MfaEnabled && AdminRoles.IsAdmin(adminEmails, user.Email))
+        return Results.Redirect($"/account/mfa?required=1&return={Uri.EscapeDataString(ret)}");
     return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
 }).RequireRateLimiting("auth"); // защита от перебора пароля
 
@@ -454,21 +462,24 @@ app.MapGet("/account/confirm-email-change", async (HttpContext ctx, AuthDbContex
 }).RequireRateLimiting("auth"); // защита от перебора токена смены адреса
 
 // ---------------- MFA (TOTP): настройка ----------------
-app.MapGet("/account/mfa", async (HttpContext ctx, AuthDbContext db, MfaService mfa, string? @return, string? error) =>
+app.MapGet("/account/mfa", async (HttpContext ctx, AuthDbContext db, MfaService mfa, string? @return, string? error, bool? required) =>
 {
     var auth = await ctx.AuthenticateAsync("idp");
     var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
     if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "/")}");
 
+    // Для админа 2FA обязательна — показываем требование даже без ?required (напр. открыл страницу сам).
+    var mustEnable = required == true || (requireMfaForAdmins && AdminRoles.IsAdmin(adminEmails, user.Email));
+
     if (user.MfaEnabled)
-        return Results.Content(MfaSettingsPage(true, null, null, @return ?? "/", error), "text/html; charset=utf-8");
+        return Results.Content(MfaSettingsPage(true, null, null, @return ?? "/", error, mustEnable), "text/html; charset=utf-8");
 
     // Настройка: генерируем свежий секрет, сохраняем (зашифрованно, MfaEnabled=false), показываем для сканирования.
     var secret = Totp.GenerateSecret();
     user.MfaSecret = mfa.Protect(secret);
     await db.SaveChangesAsync();
     var uri = Totp.OtpAuthUri(MfaService.Issuer, user.Email, secret);
-    return Results.Content(MfaSettingsPage(false, Base32.Encode(secret), uri, @return ?? "/", error), "text/html; charset=utf-8");
+    return Results.Content(MfaSettingsPage(false, Base32.Encode(secret), uri, @return ?? "/", error, mustEnable), "text/html; charset=utf-8");
 });
 
 app.MapPost("/account/mfa/enable", async (HttpContext ctx, AuthDbContext db, MfaService mfa, AuthAudit audit) =>
@@ -499,6 +510,9 @@ app.MapPost("/account/mfa/disable", async (HttpContext ctx, AuthDbContext db, Mf
     string ret = form["return"].ToString();
     if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}");
     if (!user.MfaEnabled) return Results.Redirect(string.IsNullOrEmpty(ret) ? "/" : ret);
+    // Админам отключать MFA нельзя, когда она обязательна (иначе окно без 2FA до гейта в authorize).
+    if (requireMfaForAdmins && AdminRoles.IsAdmin(adminEmails, user.Email))
+        return Results.Redirect($"/account/mfa?return={Uri.EscapeDataString(ret)}&error=adminlock");
 
     // Отключение — чувствительно: требуем действующий код (TOTP или резервный).
     var code = form["code"].ToString();
@@ -644,6 +658,12 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext ctx, Au
             new AuthenticationProperties { RedirectUri = returnUrl },
             ["idp"]);
     }
+
+    // Обязательная MFA для админов — жёсткий гейт на выдаче токена: без включённой 2FA код не выдаём,
+    // уводим админа в настройку (сессия IdP уже есть). Так админ не получит role=admin в приложении,
+    // пока не включит второй фактор. Возврат — на исходный authorize-URL (после enrollment завершится вход).
+    if (requireMfaForAdmins && !user.MfaEnabled && AdminRoles.IsAdmin(adminEmails, user.Email))
+        return Results.Redirect($"/account/mfa?required=1&return={Uri.EscapeDataString(returnUrl)}");
 
     var identity = new ClaimsIdentity(
         authenticationType: TokenValidationParameters.DefaultAuthenticationType,
@@ -1028,7 +1048,7 @@ static string AccountEmailPage(string email, bool confirmed, string? pendingEmai
 }
 
 // Страница настройки MFA: включение (показ секрета/otpauth + подтверждение кодом) либо статус «включено».
-static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpauthUri, string ret, string? error)
+static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpauthUri, string ret, string? error, bool mustEnable = false)
 {
     var en = IsEnCulture();
     string lang = en ? "en" : "ru";
@@ -1036,8 +1056,15 @@ static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpaut
     string sub = en ? "One account for ChessSchool and Arena" : "Единый аккаунт для ChessSchool и Arena";
     string title = en ? "Two-factor authentication" : "Двухфакторная аутентификация";
     string back = en ? "← Back" : "← Назад";
-    string errBlock = error == "code"
-        ? $"<p class=\"err\">{(en ? "Wrong code — try again." : "Неверный код — попробуйте ещё раз.")}</p>"
+    string errBlock = error switch
+    {
+        "code" => $"<p class=\"err\">{(en ? "Wrong code — try again." : "Неверный код — попробуйте ещё раз.")}</p>",
+        "adminlock" => $"<p class=\"err\">{(en ? "2FA is required for admins and can't be turned off." : "Для админов 2FA обязательна и не отключается.")}</p>",
+        _ => "",
+    };
+    // Баннер обязательности для админов (или форс с логина/authorize).
+    string requiredBanner = mustEnable && !enabled
+        ? $"<p class=\"err\">{(en ? "Two-factor authentication is required for your account. Set it up to continue." : "Для вашего аккаунта двухфакторная аутентификация обязательна. Настройте её, чтобы продолжить.")}</p>"
         : "";
 
     if (enabled)
@@ -1045,10 +1072,16 @@ static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpaut
         string onMsg = en ? "Two-factor authentication is ON ✓" : "Двухфакторная аутентификация включена ✓";
         string disableLbl = en ? "Turn it off? Enter a current code to confirm" : "Отключить? Введите текущий код для подтверждения";
         string disableBtn = en ? "Disable 2FA" : "Отключить 2FA";
-        return AuthShell(lang, title, $"""
-<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}<p class="info">{onMsg}</p>
+        // Админам отключать нельзя — прячем форму отключения, показываем пояснение.
+        string body = mustEnable
+            ? $"<p class=\"info\">{(en ? "2FA is required for your account (admin) and can't be turned off." : "Для вашего аккаунта (админ) 2FA обязательна и не отключается.")}</p>"
+            : $"""
 <div class="resend"><label>{disableLbl}</label>
 <form method="post" action="/account/mfa/disable"><input type="hidden" name="return" value="{retEnc}"><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required><button type="submit">{disableBtn}</button></form></div>
+""";
+        return AuthShell(lang, title, $"""
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}<p class="info">{onMsg}</p>
+{body}
 <p class="switch"><a href="{retEnc}">{back}</a></p></div>
 """);
     }
@@ -1062,7 +1095,7 @@ static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpaut
     string enableBtn = en ? "Enable 2FA" : "Включить 2FA";
     string linkLbl = en ? "Or open in app" : "Или открыть в приложении";
     return AuthShell(lang, title, $"""
-<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}
+<div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}{requiredBanner}
 <p class="info">{step1}</p>
 <p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1rem;letter-spacing:.06em;word-break:break-all;background:#f6f7f9;border:1px solid var(--line);border-radius:8px;padding:.6rem .7rem;margin:0 0 .6rem">{secretEnc}</p>
 <p class="muted" style="text-align:left;margin:0 0 1rem"><a href="{uriEnc}" style="color:var(--accent)">{linkLbl}</a></p>

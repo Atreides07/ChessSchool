@@ -86,7 +86,8 @@ purpose `ChangeEmail`, `/account/confirm-email-change`); ссылка уходи
 | Раздутая cookie → HTTP 431 | ✅ | Server-side **ticket-store** (в cookie только ключ) + `Kestrel MaxRequestHeadersTotalSize=256KB`. [SsoExtensions](../ChessSchool.WebAuth/SsoExtensions.cs). |
 | Общий keyring (мультисервер) | ✅ | DataProtection: Redis есть → общий keyring; нет → файловый. Ticket-store: Redis → `DistributedCacheTicketStore`, нет → `FileSystemTicketStore` (шифрован DataProtection). [Extensions](../ChessSchool.ServiceDefaults/Extensions.cs). |
 | Security-stamp (логаут на всех устройствах) | ✅ | `AppUser.SecurityStamp` едет в claim cookie; `OnValidatePrincipal` сверяет его с БД и разлогинивает при несовпадении. Смена пароля перевыпускает метку → все прочие сессии отклоняются. Проверка с интервалом `Auth:SecurityStamp:ValidateMinutes` (дефолт **5**; `0` = каждый запрос) — баланс мгновенности и нагрузки на БД. Миграция `AddSecurityStamp` (grandfather: уникальная метка существующим). |
-| MFA (TOTP) | ✅ | Опциональная двухфакторка ([Totp](../ChessSchool.Auth/Totp.cs)/[MfaService](../ChessSchool.Auth/MfaService.cs)): RFC 6238 (SHA-1, 6 цифр, 30с), совместимо с Google Authenticator и пр. Секрет в БД **зашифрован DataProtection** (общий keyring в мультисервере). Логин при включённой MFA — двухшаговый (пароль → второй фактор; между шагами короткоживущий DataProtection-маркер `idp_mfa`, 5 мин). **Резервные коды** одноразовые (в БД только SHA-256-хэш). Настройка — `/account/mfa`. Миграция `AddMfa`. Отключение требует действующего кода. |
+| MFA (TOTP) | ✅ | Двухфакторка ([Totp](../ChessSchool.Auth/Totp.cs)/[MfaService](../ChessSchool.Auth/MfaService.cs)): RFC 6238 (SHA-1, 6 цифр, 30с), совместимо с Google Authenticator и пр. Секрет в БД **зашифрован DataProtection** (общий keyring в мультисервере). Логин при включённой MFA — двухшаговый (пароль → второй фактор; между шагами короткоживущий DataProtection-маркер `idp_mfa`, 5 мин). **Резервные коды** одноразовые (в БД только SHA-256-хэш). Настройка — `/account/mfa`. Миграция `AddMfa`. |
+| Обязательная MFA для админов | ✅ | `Auth:Mfa:RequiredForAdmins` (дефолт **вкл**): админ (e-mail в `Admin:Emails`) без 2FA форсится в настройку на входе, а **authorize не выдаёт код** до включения → нет `role=admin` в приложении без второго фактора. Отключить 2FA админу нельзя, пока правило включено. |
 
 ## 8. Аудит auth-событий
 
@@ -125,6 +126,5 @@ purpose `ChangeEmail`, `/account/confirm-email-change`); ссылка уходи
 
 Все пункты из исходного чек-листа безопасности внедрены. Возможные усиления на будущее (низкий остаточный риск):
 
-1. **Обязательная MFA для админов** — сейчас MFA опциональна (self-service) для всех; принудительное включение для роли `admin` можно добавить политикой поверх. (§7)
-2. **Готовые пороговые правила алертинга** — метрики/события есть, конкретные правила настраиваются в системе мониторинга прод-окружения (вне кода). (§8)
-3. **Распределённый rate-limiter покрыт**, но при экстремальном масштабе можно перейти на sliding-window/token-bucket в Redis вместо fixed-window. (§2)
+1. **Готовые пороговые правила алертинга** — метрики/события есть, конкретные правила настраиваются в системе мониторинга прод-окружения (вне кода). (§8)
+2. **Распределённый rate-limiter покрыт**, но при экстремальном масштабе можно перейти на sliding-window/token-bucket в Redis вместо fixed-window. (§2)

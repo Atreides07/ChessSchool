@@ -454,6 +454,26 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.Contains("error", reuse.Headers.Location!.OriginalString);
     }
 
+    [Fact]
+    public async Task Admin_WithoutMfa_IsForcedToEnroll_AtLoginAndAuthorize()
+    {
+        const string adminEmail = "admin-forced@test.local"; // в Admin:Emails фабрики
+        // Регистрация создаёт+входит (сам register MFA не форсит). Затем свежий вход и authorize.
+        await Register(_factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }), adminEmail);
+
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var login = await LoginWith(client, adminEmail, "secret123");
+        Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+        Assert.Contains("/account/mfa", login.Headers.Location!.OriginalString);      // форс настройки
+        Assert.Contains("required=1", login.Headers.Location!.OriginalString);
+
+        // Жёсткий гейт: authorize админу без MFA код не выдаёт — уводит на настройку, а не в приложение.
+        var authz = await client.GetAsync(AuthorizeUrl());
+        Assert.Equal(HttpStatusCode.Redirect, authz.StatusCode);
+        // Редирект на нашу /account/mfa (относительный), а НЕ на redirect_uri приложения с кодом.
+        Assert.StartsWith("/account/mfa", authz.Headers.Location!.OriginalString);
+    }
+
     // ---- helpers ----
 
     private static string TotpNow(string base32Secret) =>
@@ -562,7 +582,8 @@ public class AuthIntegrationTests : IAsyncLifetime
                 ["RateLimit:Auth:Permit"] = "100000",
                 ["RateLimit:Email:Permit"] = "100000",
                 ["Auth:Password:CheckPwned"] = "false", // не ходить в HIBP из тестов (и "secret123" числится в утечках)
-                ["Auth:SecurityStamp:ValidateMinutes"] = "0" // проверять метку на каждом запросе (для теста инвалидации)
+                ["Auth:SecurityStamp:ValidateMinutes"] = "0", // проверять метку на каждом запросе (для теста инвалидации)
+                ["Admin:Emails"] = "admin-forced@test.local" // для теста обязательной MFA у админов
             }));
             return base.CreateHost(builder);
         }

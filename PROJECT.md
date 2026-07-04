@@ -141,8 +141,9 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
 - **Полный реестр политик/настроек безопасности — [docs/SECURITY.md](docs/SECURITY.md)** (статус, место в коде,
   параметры, компромиссы, отложенное). Весь исходный чек-лист безопасности внедрён; на будущее — обязательная
   MFA для админов и готовые пороговые правила алертинга (в системе мониторинга).
-- **Рейтинг** — Elo за интерфейсом `IRatingService` ([RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs)),
-  заложен переход на Glicko-2.
+- **Рейтинг** — **Glicko-2** (`Glicko2RatingService`, [RatingService.cs](ChessSchool.ApiService/Services/RatingService.cs))
+  за интерфейсом `IRatingService` (рейтинг + отклонение RD + волатильность; τ=0.5, старт 1500/350/0.06).
+  Интерфейс позволяет подменить алгоритм без правок вызывающего кода.
 - **Атрибуция тренировочных партий**: партии без чек-ина ученика идут в очередь тренера
   (`/attribution`) и **не влияют на рейтинг** до подтверждения.
 - **`/play` — «тонкий» клиент** ([Play.razor](ChessSchool.Web/Components/Pages/Play.razor)):

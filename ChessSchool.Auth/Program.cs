@@ -140,6 +140,7 @@ builder.Services.AddRateLimiter(o =>
     o.OnRejected = (ctx, _) =>
     {
         ctx.HttpContext.Response.Headers.RetryAfter = ((int)TimeSpan.FromMinutes(rlAuthWindow).TotalSeconds).ToString();
+        AuthMetrics.RecordRateLimited(ctx.HttpContext.Request.Path); // сигнал перебора/бомбинга для алертинга
         return ValueTask.CompletedTask;
     };
 });

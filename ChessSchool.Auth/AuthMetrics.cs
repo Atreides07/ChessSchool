@@ -17,6 +17,13 @@ public static class AuthMetrics
     private static readonly Counter<long> EventsCounter = Meter.CreateCounter<long>(
         "chessschool.auth.events", unit: "{event}", description: "Число auth-событий по типу");
 
+    // Отклонения rate-limiter — прямой сигнал активного перебора/бомбинга письмами (алерт на всплеск).
+    private static readonly Counter<long> RateLimitRejectedCounter = Meter.CreateCounter<long>(
+        "chessschool.auth.ratelimit.rejected", unit: "{request}", description: "Число запросов, отклонённых rate-limiter, по пути");
+
     public static void Record(AuthEventType type) =>
         EventsCounter.Add(1, new KeyValuePair<string, object?>("type", type.ToString()));
+
+    public static void RecordRateLimited(string path) =>
+        RateLimitRejectedCounter.Add(1, new KeyValuePair<string, object?>("path", path));
 }

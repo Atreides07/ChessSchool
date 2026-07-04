@@ -191,6 +191,11 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
    иначе нода не расшифрует cookie/тикет, выданный другой.
 8. **Health-checks AppHost:** `WithHttpHealthCheck` по https с dev-сертификатом вешает `WaitFor`-каскад.
    Health маппится всегда (не только Development), интеграционный тест ждёт состояния `Running`, не `Healthy`.
+   **`WebTests.GetWebResourceRootReturnsOkStatusCode` флакует на холодном старте:** `Running` ≠ «прогрет», а
+   первый SSR-рендер Arena (JIT + чтение каталога) периодически не укладывается в 30-секундный лимит
+   `AddStandardResilienceHandler` → `TaskCanceled` на `arena.GetAsync("/")`. Это тайминг, не регрессия
+   логики (перепрогон зелёный; на `Healthy` не переключать — см. первый абзац). Быстрый набор
+   (`--filter "FullyQualifiedName!~WebTests"`) детерминирован — им и проверять свои правки.
 9. **Arena-турнир переживает деактивацию грейна.** Мета+таблица персистятся в grain storage `"arena"`
    ([Program.cs](ChessSchool.Arena/Program.cs)): есть Redis → `AddRedisGrainStorage("arena")` (состояние
    переживает рестарт/масштабирование силосов), нет → `AddMemoryGrainStorage("arena")` (dev). Грейн сам

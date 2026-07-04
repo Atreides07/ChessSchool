@@ -6,6 +6,13 @@ public class School
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// IdP-`sub` владельца школы (тренер). Доступ к ЛК/ученикам разрешён только владельцу
+    /// (проверка в ApiService по X-Acting-Sub). null → школа без владельца, недоступна никому (безопасный дефолт).
+    /// </summary>
+    public string? OwnerSub { get; set; }
+
     public List<Group> Groups { get; } = [];
 }
 

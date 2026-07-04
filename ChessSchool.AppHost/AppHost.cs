@@ -82,6 +82,7 @@ var gameServer = builder.AddProject<Projects.ChessSchool_GameServer>("gameserver
 var web = builder.AddProject<Projects.ChessSchool_Web>("webfrontend")
     .WithExternalHttpEndpoints()
     .WithEnvironment("Sso__ClientId", "chessschool-web")
+    .WithEnvironment("InternalApiKey", internalKey) // BFF: server-to-server вызовы ЛК школы в ApiService
     .WithReference(auth)
     .WithReference(apiService)
     .WithReference(gameServer)

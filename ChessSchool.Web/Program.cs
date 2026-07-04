@@ -31,7 +31,10 @@ builder.Services.AddRazorComponents()
 builder.Services.AddOutputCache();
 
 // Доменный API и сервис авторизации — через service discovery Aspire.
-builder.Services.AddHttpClient<SchoolApiClient>(c => c.BaseAddress = new("https+http://apiservice"));
+// BFF: SchoolApiClient ходит в ApiService с X-Internal-Key (handler); acting-sub добавляет per-call.
+var internalKey = builder.Configuration.ResolveInternalApiKey(builder.Environment);
+builder.Services.AddHttpClient<SchoolApiClient>(c => c.BaseAddress = new("https+http://apiservice"))
+    .AddHttpMessageHandler(() => new InternalKeyHandler(internalKey));
 builder.Services.AddHttpClient<AuthApiClient>(c => c.BaseAddress = new("https+http://auth"));
 
 var app = builder.Build();

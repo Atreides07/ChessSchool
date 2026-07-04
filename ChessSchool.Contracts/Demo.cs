@@ -5,4 +5,7 @@ public static class Demo
 {
     public static readonly Guid SchoolId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid GroupId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+    /// <summary>Владелец (IdP-`sub`) демо-школы: локально/в тестах можно действовать как владелец.</summary>
+    public const string OwnerSub = "demo-owner-sub";
 }

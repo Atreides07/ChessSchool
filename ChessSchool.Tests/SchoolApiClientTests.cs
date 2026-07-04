@@ -27,7 +27,7 @@ public class SchoolApiClientTests
     [Fact]
     public async Task GetProfile_OnNotFound_ReturnsNull_DoesNotThrow()
     {
-        var profile = await Client(HttpStatusCode.NotFound, null).GetProfileAsync(Guid.NewGuid());
+        var profile = await Client(HttpStatusCode.NotFound, null).GetProfileAsync(Guid.NewGuid(), "sub");
         Assert.Null(profile);
     }
 
@@ -37,7 +37,7 @@ public class SchoolApiClientTests
         var dto = new StudentProfileDto(
             new StudentDto(Guid.NewGuid(), Guid.NewGuid(), "Тест", 1500, 350, 0, 0, 0, 0, null),
             RatingHistory: [], RecentGames: []);
-        var profile = await Client(HttpStatusCode.OK, dto).GetProfileAsync(dto.Student.Id);
+        var profile = await Client(HttpStatusCode.OK, dto).GetProfileAsync(dto.Student.Id, "sub");
         Assert.NotNull(profile);
         Assert.Equal("Тест", profile!.Student.DisplayName);
     }

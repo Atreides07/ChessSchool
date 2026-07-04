@@ -21,6 +21,7 @@ public class SchoolDbContext(DbContextOptions<SchoolDbContext> options) : DbCont
         b.Entity<Subscription>().HasIndex(s => s.UserSub).IsUnique();          // одна подписка на пользователя
         b.Entity<Subscription>().HasIndex(s => s.ProviderSubscriptionId);     // поиск по id провайдера (вебхук)
         b.Entity<ProcessedBillingEvent>().HasKey(p => p.EventId);             // идемпотентность по event id
+        b.Entity<School>().HasIndex(s => s.OwnerSub);                 // resolve «моя школа по sub» (get-or-create)
         b.Entity<Student>().HasIndex(s => s.LinkedUserSub);
         b.Entity<Student>().HasIndex(s => s.GroupId);                 // листинг учеников школы по группам
         b.Entity<Game>().HasIndex(g => g.ExternalGameId).IsUnique();

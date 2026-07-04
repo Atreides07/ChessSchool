@@ -13,7 +13,7 @@ public static class SeedData
     {
         if (db.Schools.Any()) return;
 
-        var school = new School { Id = SchoolId, Name = "Шахматная школа №1" };
+        var school = new School { Id = SchoolId, Name = "Шахматная школа №1", OwnerSub = Demo.OwnerSub };
         var group = new Group { Id = GroupId, SchoolId = SchoolId, Name = "Группа начинающих" };
         db.Schools.Add(school);
         db.Groups.Add(group);

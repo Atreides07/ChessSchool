@@ -72,14 +72,17 @@
 мапится в [WebAuth](../ChessSchool.WebAuth/SsoExtensions.cs); Арена — политика `ConfirmedEmail` на премиум + баннер.
 Статус: ✅ (Arena/Auth).
 
-> ⚠️ **ИЗВЕСТНЫЙ ПРОБЕЛ (ЛК школы в Web/ApiService) — НЕ гейтится ни в одном окружении.**
-> Страницы `/school`, `/attribution`, `/students/{id}` ([ChessSchool.Web](../ChessSchool.Web/Components/Pages/))
-> не имеют `[Authorize]`, а доменные эндпоинты [ApiService/Program.cs](../ChessSchool.ApiService/Program.cs) L77–125
-> (`/schools/{id}/students`, `/students/{id}`, `/games/{id}/attribute`, `/students/{id}/link|share`) висят вне
-> группы `/internal` и **открыты анониму**. Комментарий «в проде гейтятся JWT» — аспирационный, гейт НЕ реализован
-> (код одинаков в dev и prod). Риск: чтение PII учеников, создание/привязка учеников, раздача родительских ссылок,
-> искажение рейтинга через атрибуцию — без входа. Требует модели владения школой (аккаунт↔школа), которой пока нет
-> (используется фикс. `Demo.SchoolId`). См. [TODO.md](TODO.md). Найдено аудитом авторизации 2026-07-04.
+**ЛК школы** (✅, модель владения): у `School` есть `OwnerSub` (IdP-`sub` тренера). Web — доверенный **BFF**:
+страницы `/school`, `/attribution`, `/students/{id}` под `[Authorize]` (`AuthorizeRouteView` → неавторизованный
+уводится на `/signin`); `sub` читается из `AuthenticationStateProvider` (работает и в InteractiveServer-контуре, где
+нет `HttpContext`). SchoolApiClient ходит в ApiService server-to-server с `X-Internal-Key` (DelegatingHandler) и
+передаёт вошедшего пользователя в `X-Acting-Sub`. Доменные эндпоинты ApiService — в группе `RequireInternalKey`
++ `RequireActingSub`; каждый обработчик проверяет владение через `SchoolAccessService` (`OwnsSchool`/`OwnsStudent`,
+резолв `Student.GroupId→Group.SchoolId`) → `403` на чужой школе, `401` без ключа/sub. Провижининг: `GET /my-school`
+(get-or-create) выдаёт школу владельца вместо фикс. `Demo.SchoolId`. `X-Acting-Sub` доверенный, т.к. канал закрыт
+`X-Internal-Key` (constant-time) — спуфинг извне невозможен (тот же уровень доверия, что GameServer→ApiService).
+**Публичный `/share/{token}`** остаётся анонимным (capability-URL родителю) — вне защищённой группы. Демо-школа
+засеяна с `Demo.OwnerSub` (локаль/тесты действуют как владелец). Внедрено 2026-07-04 (было: открыто анониму).
 
 **Смена e-mail** (✅): НЕподтверждённый адрес меняется сразу (исправить опечатку). **Подтверждённый** — по схеме
 **verify-new-before-switch**: адрес не меняется, пока владение новым не доказано ссылкой (`AppUser.PendingEmail`,

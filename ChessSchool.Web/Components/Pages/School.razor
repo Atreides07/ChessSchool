@@ -1,6 +1,8 @@
 @page "/school"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using ChessSchool.Web
+@using Microsoft.AspNetCore.Authorization
 @inject SchoolApiClient Api
 @inject NavigationManager Nav
 
@@ -74,27 +76,42 @@
 </div>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private IReadOnlyList<StudentDto>? _students;
+    private Guid _schoolId;
+    private Guid _groupId;
+    private string? _sub;
     private string _newName = "";
     private string? _shareUrl;
     private Guid? _linkingId;
     private string _linkEmail = "";
     private string? _linkError;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        // sub из AuthState (работает и в prerender, и в интерактивном контуре Blazor Server).
+        _sub = AuthState is null ? null : (await AuthState).User.FindFirst("sub")?.Value;
+        if (_sub is null) return; // [Authorize] не пускает анонима — это лишь страховка
+        var my = await Api.GetOrCreateMySchoolAsync(_sub);
+        if (my is null) return;
+        _schoolId = my.SchoolId;
+        _groupId = my.GroupId;
+        await Load();
+    }
 
-    private async Task Load() => _students = await Api.GetStudentsAsync(Demo.SchoolId);
+    private async Task Load() => _students = await Api.GetStudentsAsync(_schoolId, _sub!);
 
     private async Task AddStudent()
     {
-        await Api.CreateStudentAsync(Demo.SchoolId, new CreateStudentRequest(Demo.GroupId, _newName.Trim(), null));
+        await Api.CreateStudentAsync(_schoolId, new CreateStudentRequest(_groupId, _newName.Trim(), null), _sub!);
         _newName = "";
         await Load();
     }
 
     private async Task Share(Guid studentId)
     {
-        var link = await Api.CreateShareAsync(studentId);
+        var link = await Api.CreateShareAsync(studentId, _sub!);
         if (link is not null)
             _shareUrl = new Uri(new Uri(Nav.BaseUri), link.Url).ToString();
     }
@@ -102,7 +119,7 @@
     private async Task LinkAccount(Guid studentId)
     {
         _linkError = null;
-        var updated = await Api.LinkAccountAsync(studentId, _linkEmail.Trim());
+        var updated = await Api.LinkAccountAsync(studentId, _linkEmail.Trim(), _sub!);
         if (updated is null) { _linkError = Loc.T("school.linkerr"); return; }
         _linkingId = null;
         _linkEmail = "";

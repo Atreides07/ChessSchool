@@ -54,6 +54,9 @@ public sealed record PendingGameDto(Guid Id, DateTimeOffset PlayedAt, string Dev
 /// <summary>Назначение игроков и цветов на партию тренером.</summary>
 public sealed record AttributeGameRequest(Guid WhiteStudentId, Guid BlackStudentId, GameResult Result);
 
+/// <summary>Школа текущего пользователя (владельца) + её дефолтная группа — результат провижининга get-or-create.</summary>
+public sealed record MySchoolDto(Guid SchoolId, Guid GroupId);
+
 /// <summary>Ссылка на публичный профиль ученика для родителя.</summary>
 public sealed record ShareLinkDto(string Token, string Url, DateTimeOffset? ExpiresAt);
 

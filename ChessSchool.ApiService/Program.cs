@@ -21,6 +21,7 @@ builder.Services.AddScoped<GameArchiver>();
 builder.Services.AddScoped<ArenaGameStore>();
 builder.Services.AddScoped<SubscriptionService>();
 builder.Services.AddScoped<StudentService>();
+builder.Services.AddScoped<SchoolAccessService>(); // авторизация по владению школой + провижининг «моя школа»
 // Провайдер эквайринга: Paddle при наличии конфига (секрет вебхука/API-ключ), иначе dev-заглушка
 // (оплата проходит локально). Выбор по конфигу — как S3↔MinIO.
 var paddleOptions = builder.Configuration.GetSection("Paddle").Get<PaddleOptions>() ?? new PaddleOptions();
@@ -73,40 +74,58 @@ if (migrateRequested) return; // режим миграции: схему при�
 app.UseExceptionHandler();
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 
-// ---------- ЛК школы (чтение) — тонкие эндпоинты над StudentService ----------
-app.MapGet("/schools/{schoolId:guid}/students",
-    async (Guid schoolId, int? skip, int? take, StudentService students, CancellationToken ct) =>
-    Results.Ok(await students.ListBySchoolAsync(schoolId, skip, take, ct)));
+// ---------- ЛК школы: доступ ТОЛЬКО владельцу (BFF) ----------
+// Web ходит server-to-server с X-Internal-Key и передаёт вошедшего пользователя в X-Acting-Sub;
+// ApiService проверяет владение школой (School.OwnerSub == acting sub). Форбид = 403 через StatusCode
+// (в ApiService нет auth-схемы, поэтому Results.Forbid() неприменим). 403-константа:
+const int Forbidden = StatusCodes.Status403Forbidden;
+var lk = app.MapGroup("").RequireInternalKey(internalKey).RequireActingSub();
 
-app.MapGet("/students/{id:guid}", async (Guid id, StudentService students, CancellationToken ct) =>
-    await students.GetProfileAsync(id, ct) is { } p ? Results.Ok(p) : Results.NotFound());
+// Провижининг: школа текущего пользователя (или создаётся) — Web зовёт вместо фикс. Demo.SchoolId.
+lk.MapGet("/my-school", async (HttpContext ctx, SchoolAccessService access, CancellationToken ct) =>
+    Results.Ok(await access.EnsureSchoolForAsync(ctx.ActingSub()!, ct)));
 
-app.MapGet("/schools/{schoolId:guid}/pending-games",
-    async (Guid schoolId, int? skip, int? take, StudentService students, CancellationToken ct) =>
-    Results.Ok(await students.ListPendingGamesAsync(schoolId, skip, take, ct)));
+lk.MapGet("/schools/{schoolId:guid}/students",
+    async (Guid schoolId, int? skip, int? take, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct) ? Results.StatusCode(Forbidden)
+    : Results.Ok(await students.ListBySchoolAsync(schoolId, skip, take, ct)));
 
-// ---------- ЛК школы (мутации) ----------
-// Для локального демо открыты; в проде гейтятся JWT от IdP (см. docs).
-app.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStudentRequest req,
-    StudentService students, CancellationToken ct) =>
+lk.MapGet("/students/{id:guid}", async (Guid id, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
+    : await students.GetProfileAsync(id, ct) is { } p ? Results.Ok(p) : Results.NotFound());
+
+lk.MapGet("/schools/{schoolId:guid}/pending-games",
+    async (Guid schoolId, int? skip, int? take, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct) ? Results.StatusCode(Forbidden)
+    : Results.Ok(await students.ListPendingGamesAsync(schoolId, skip, take, ct)));
+
+lk.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStudentRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
 {
+    if (!await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct)) return Results.StatusCode(Forbidden);
     var (dto, error) = await students.CreateAsync(schoolId, req, ct);
     return error is not null ? Results.BadRequest(new { error }) : Results.Created($"/students/{dto!.Id}", dto);
 });
 
-app.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest req,
-    StudentService students, CancellationToken ct) =>
-    await students.AttributeAsync(id, req, ct) switch
+lk.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+{
+    // Оба ученика должны быть в школе владельца — заодно закрывает cross-school атрибуцию.
+    var sub = ctx.ActingSub()!;
+    if (!await access.OwnsStudentAsync(sub, req.WhiteStudentId, ct) || !await access.OwnsStudentAsync(sub, req.BlackStudentId, ct))
+        return Results.StatusCode(Forbidden);
+    return await students.AttributeAsync(id, req, ct) switch
     {
         StudentService.AttributeOutcome.GameNotFound => Results.NotFound(),
         StudentService.AttributeOutcome.StudentNotFound => Results.BadRequest(new { error = "Ученик не найден." }),
         _ => Results.Ok(),
-    });
+    };
+});
 
-// ---------- Привязка ученика к онлайн-аккаунту (по email из IdP) ----------
-app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req,
-    StudentService students, CancellationToken ct) =>
+lk.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
 {
+    if (!await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct)) return Results.StatusCode(Forbidden);
     var (outcome, dto) = await students.LinkAsync(id, req.Email, ct);
     return outcome switch
     {
@@ -116,10 +135,11 @@ app.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req,
     };
 });
 
-// ---------- Шаринг профиля родителю ----------
-app.MapPost("/students/{id:guid}/share", async (Guid id, StudentService students, CancellationToken ct) =>
-    await students.CreateShareAsync(id, ct) is { } link ? Results.Ok(link) : Results.NotFound());
+lk.MapPost("/students/{id:guid}/share", async (Guid id, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
+    : await students.CreateShareAsync(id, ct) is { } link ? Results.Ok(link) : Results.NotFound());
 
+// Публичный: профиль по share-токену — capability-URL родителю, БЕЗ ключа и acting-sub (вне группы `lk`).
 app.MapGet("/share/{token}", async (string token, StudentService students, CancellationToken ct) =>
     await students.GetSharedProfileAsync(token, ct) is { } p ? Results.Ok(p) : Results.NotFound());
 

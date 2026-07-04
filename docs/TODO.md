@@ -5,19 +5,14 @@
 
 ## Безопасность
 
-### ⚠️ ОТКРЫТО: ЛК школы (Web + ApiService) не гейтится авторизацией
-Найдено аудитом авторизации 2026-07-04. Страницы `/school`, `/attribution`, `/students/{id}`
-([ChessSchool.Web/Components/Pages](../ChessSchool.Web/Components/Pages/)) без `[Authorize]`; доменные
-эндпоинты [ApiService/Program.cs](../ChessSchool.ApiService/Program.cs) L77–125 (`/schools/{id}/students`,
-`/students/{id}`, `/games/{id}/attribute`, `/students/{id}/link|share`) — вне группы `/internal`, открыты
-анониму **во всех окружениях** (комментарий «в проде гейтятся JWT» — гейт не реализован).
-**Остаточный риск:** чтение PII учеников, создание/привязка учеников, раздача родительских ссылок,
-искажение рейтинга атрибуцией — без входа. Уместно, пока это лишь локальное демо на фикс. `Demo.SchoolId`;
-опасно, как только Web/ApiService доступны извне.
-**Что нужно:** модель владения школой (аккаунт↔школа/роль тренера), затем `[Authorize]` на страницах ЛК +
-авторизация доменных эндпоинтов ApiService (JWT от IdP или internal-key от веб-бэкенда) с проверкой, что
-пользователь владеет запрашиваемой школой/учеником. До этого — хотя бы гейтить открытое состояние
-`IsDevelopment()`. См. [docs/SECURITY.md](SECURITY.md) §6.
+### ✅ ЛК школы гейтится авторизацией по владению (было ОТКРЫТО)
+**Сделано** (2026-07-04, найдено аудитом авторизации). Добавлена модель владения `School.OwnerSub`; Web —
+доверенный BFF: страницы ЛК под `[Authorize]` (`AuthorizeRouteView` → на `/signin`), `sub` из
+`AuthenticationStateProvider`. Доменные эндпоинты [ApiService/Program.cs](../ChessSchool.ApiService/Program.cs)
+вынесены в группу `RequireInternalKey` + `RequireActingSub`; владение проверяет `SchoolAccessService`
+(403 на чужой школе, 401 без ключа/sub). Провижининг `GET /my-school` (get-or-create) заменил фикс.
+`Demo.SchoolId`. Публичный `/share/{token}` остался анонимным. Ключ `X-Internal-Key` Web получает от AppHost.
+Покрыто тестами (`ApiServiceTests`: 401/403/провижининг/анонимный share). См. [docs/SECURITY.md](SECURITY.md) §6.
 
 ### ✅ Прод тонкого клиента `/play`: обновление access-токена (refresh)
 **Сделано** (пункт оказался уже закрыт в коде). SignalR-клиент в

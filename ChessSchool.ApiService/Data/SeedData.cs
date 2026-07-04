@@ -11,7 +11,14 @@ public static class SeedData
 
     public static void Ensure(SchoolDbContext db)
     {
-        if (db.Schools.Any()) return;
+        if (db.Schools.Any())
+        {
+            // БД уже засеяна. Бэкфилл владельца демо-школе для БД, созданных до появления OwnerSub
+            // (миграция AddSchoolOwner оставляет OwnerSub=NULL у старых строк) — иначе демо-владелец получает 403.
+            var demo = db.Schools.FirstOrDefault(s => s.Id == SchoolId);
+            if (demo is not null && demo.OwnerSub is null) { demo.OwnerSub = Demo.OwnerSub; db.SaveChanges(); }
+            return;
+        }
 
         var school = new School { Id = SchoolId, Name = "Шахматная школа №1", OwnerSub = Demo.OwnerSub };
         var group = new Group { Id = GroupId, SchoolId = SchoolId, Name = "Группа начинающих" };

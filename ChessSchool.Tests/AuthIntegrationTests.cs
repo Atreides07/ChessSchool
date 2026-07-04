@@ -23,6 +23,7 @@ namespace ChessSchool.Tests;
 /// смену e-mail до подтверждения (исправить опечатку); погашение токена; протухшую cookie. Письма
 /// перехватывает фейковый <see cref="IEmailSender"/>. Требует Docker.
 /// </summary>
+[Trait("Category", "Docker")] // Testcontainers PostgreSQL → быстрый цикл: dotnet test --filter "Category!=Docker"
 public class AuthIntegrationTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder().WithImage("postgres:18.3").Build();

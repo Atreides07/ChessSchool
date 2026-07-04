@@ -1,0 +1,41 @@
+name: CI
+
+# Гейт качества: красное не мёржится (build + формат + тесты). Соответствует контуру качества из CLAUDE.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest # Docker предустановлен → Testcontainers (Postgres/Redis) работают
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      # Чистая сборка (workaround UseRazorSourceGenerator в Web/Arena.csproj держит Razor-SG — грабля #16).
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Format check
+        run: dotnet format --verify-no-changes
+
+      # Быстрый набор: юниты + auth-интеграция (Testcontainers). Обязательный гейт.
+      - name: Test (unit + integration)
+        run: dotnet test --no-build -c Release --filter "FullyQualifiedName!~WebTests"
+
+      # Полный AppHost (Aspire) — тяжелее и чувствительнее к холодному старту; отдельным шагом.
+      - name: Test (full AppHost / WebTests)
+        run: dotnet test --no-build -c Release --filter "FullyQualifiedName~WebTests"

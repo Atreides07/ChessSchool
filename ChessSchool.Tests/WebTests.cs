@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ChessSchool.Tests;
 
+[Trait("Category", "Docker")]
 public class WebTests
 {
     // Холодный старт поднимает контейнер Postgres (при первом прогоне ещё и тянется образ ~479MB) +

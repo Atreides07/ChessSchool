@@ -10,6 +10,7 @@ namespace ChessSchool.Tests;
 /// Лимит email-send выставлен маленьким (2/окно) — третий подряд запрос с того же клиента должен
 /// получить 429. Требует Docker (Testcontainers), т.к. приложение при старте накатывает миграции.
 /// </summary>
+[Trait("Category", "Docker")]
 public class AuthRateLimitTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder().WithImage("postgres:18.3").Build();

@@ -9,6 +9,7 @@ namespace ChessSchool.Tests;
 /// AWS SDK (path-style, подпись payload), автосоздание приватного бакета, сохранение и чтение.
 /// Требует Docker — поэтому в имени WebTests (исключается быстрым фильтром без Docker).
 /// </summary>
+[Trait("Category", "Docker")]
 public class S3ImageStorageWebTests
 {
     [Fact]

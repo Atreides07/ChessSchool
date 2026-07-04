@@ -9,6 +9,7 @@ namespace ChessSchool.Tests;
 /// Проверяет РЕАЛЬНЫЙ SMTP-транспорт (MailKit → mailpit): письмо доходит и видно через HTTP API mailpit.
 /// Это тот же путь, что локально в Aspire (контейнер mailpit) и в проде (реальный SMTP). Требует Docker.
 /// </summary>
+[Trait("Category", "Docker")]
 public class SmtpEmailSenderTests : IAsyncLifetime
 {
     private readonly IContainer _mailpit = new ContainerBuilder()

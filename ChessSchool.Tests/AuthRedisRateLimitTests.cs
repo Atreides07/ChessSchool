@@ -11,6 +11,7 @@ namespace ChessSchool.Tests;
 /// живёт в Redis (общий для всех нод), а не в памяти процесса. Проверяем, что лимит реально энфорсится
 /// этим путём (третий запрос → 429). Требует Docker (Postgres для миграций + Redis для лимитера).
 /// </summary>
+[Trait("Category", "Docker")]
 public class AuthRedisRateLimitTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder().WithImage("postgres:18.3").Build();

@@ -51,15 +51,18 @@ Billing: модель, вебхук, настройка sandbox) — [docs/SUBSC
 
 ```bash
 dotnet run --project ChessSchool.AppHost   # запуск всего (откроется дашборд Aspire). Нужен Docker/Podman (Postgres).
-dotnet test                                # юнит + интеграционные (вкл. полный старт AppHost; ~до 180с)
+dotnet test                                # ВСЁ: юнит + Orleans + Testcontainers + полный AppHost (~до 180с)
+dotnet test --filter "Category!=Docker"    # БЕЗ Docker вообще (юнит+Orleans+bunit, ~305 тестов) — когда демон не запущен
+dotnet test --filter "FullyQualifiedName!~WebTests"  # всё кроме полного AppHost (Testcontainers ещё нужны)
 dotnet format                              # анализатор стиля/кода
 dotnet build                               # сборка решения
 ```
 
-> **Требуется контейнер-рантайм (Docker/Podman).** БД — PostgreSQL для всех окружений; Aspire
-> поднимает контейнер Postgres локально. Без рантайма не стартуют AppHost и интеграционный
-> `WebTests`. Быстрые тесты (`ApiServiceTests` на EF InMemory, юниты) работают без Docker:
-> `dotnet test --filter "FullyQualifiedName!~WebTests"`.
+> **Контейнер-рантайм (Docker/Podman)** нужен только тестам с трейтом `[Trait("Category","Docker")]`
+> (Testcontainers Postgres/Redis/Minio/mailpit + полный AppHost в `WebTests`). Остальные (юниты,
+> Orleans-грейны на in-proc TestingHost, bunit) идут **без Docker**: `--filter "Category!=Docker"`.
+> NB: по замерам основное время прогона — старт Orleans-тест-силосов, а не контейнеры (их reuse
+> не ускоряет; реальный рычаг — общий тест-кластер, отложено).
 
 Точка входа после запуска — `webfrontend` (бери внешний URL **из дашборда Aspire**, не Kestrel-порт —
 см. гочу про redirect_uri ниже). Маршруты: `/` лендинг, `/school` ЛК школы, `/students/{id}` профиль,

@@ -45,13 +45,13 @@
        в новую страницу <script> НЕ исполняется, поэтому подключение на самой странице не запускалось
        (отсюда «пропала» кнопка/доска на /t/{id} при переходе с Home). Здесь скрипты живут постоянно и
        по событию enhancedload инициализируют свою страницу; на чужих страницах их setup() — no-op. *@
-    <script src="js/navprogress.js"></script>
-    <script src="js/premium.js"></script>
-    <script src="js/schedule.js"></script>
-    <script src="js/tournament.js"></script>
-    <script src="js/games.js"></script>
-    <script src="js/broadcast.js"></script>
-    <script src="js/pairings.js"></script>
+    <script src="@Assets["js/navprogress.js"]"></script>
+    <script src="@Assets["js/premium.js"]"></script>
+    <script src="@Assets["js/schedule.js"]"></script>
+    <script src="@Assets["js/tournament.js"]"></script>
+    <script src="@Assets["js/games.js"]"></script>
+    <script src="@Assets["js/broadcast.js"]"></script>
+    <script src="@Assets["js/pairings.js"]"></script>
 </body>
 
 </html>

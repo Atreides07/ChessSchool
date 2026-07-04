@@ -154,6 +154,13 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
 - **Дизайн-система ChessSchool.Design** — светлый минимализм idChess (акцент `#2b6ef2`), единые
   токены/компоненты в `wwwroot/css/design.css`. **Bootstrap удалён** (его `.row`-грид конфликтовал
   с утилитой `.row`). Фигуры — набор Cburnett (SVG), не глифы шрифта.
+- **Статику из разметки подключать ТОЛЬКО через `@Assets["…"]`** (обязательно, для любых новых `<script>`/`<link>`/`<img>`
+  на локальные файлы под `wwwroot`/`_content`). Фингерпринт (`file.<hash>.js`) даёт в проде `Cache-Control: immutable`
+  → файл не перекачивается при полной навигации (важно для медленной сети и JS-off) и мгновенно инвалидируется при
+  деплое (новый контент → новый хэш → новый URL, без «застрявшего старого JS»). Литеральный `src="js/x.js"` даёт
+  `no-cache` и в проде. В Development `MapStaticAssets` всё равно отдаёт статику `no-cache`+ETag (hot-reload) — выигрыш
+  проявляется вне Development. Исключение: URL, собираемые в рантайме на клиенте (напр. путь к SVG-фигуре из её кода в
+  [GameReview.razor](ChessSchool.Arena/Components/Pages/GameReview.razor)) — фингерпринт на этапе сборки неприменим.
 
 ## Грабли (подтверждены на практике — не наступать снова)
 

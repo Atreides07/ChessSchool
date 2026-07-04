@@ -35,6 +35,11 @@ public class WebTests
         var httpClient = app.CreateHttpClient("webfrontend");
         await app.ResourceNotifications.WaitForResourceAsync("webfrontend", KnownResourceStates.Running, cancellationToken)
             .WaitAsync(DefaultTimeout, cancellationToken);
+        // Прогрев: первый запрос платит одноразовый JIT/прогрев конвейера Blazor SSR (замер: cold ~4.5с,
+        // warm ~7мс; под нагрузкой параллельных тестов cold может пробить 30s-лимит resilience-хэндлера у
+        // app.CreateHttpClient → флак). Дожимаем первый ответ плоским клиентом с щедрым таймаутом, чтобы
+        // ассерты шли по «тёплому» процессу. См. грабля #8.
+        await WarmUpAsync(httpClient.BaseAddress!, cancellationToken);
         var response = await httpClient.GetAsync("/", cancellationToken);
 
         // Assert
@@ -46,6 +51,7 @@ public class WebTests
         await app.ResourceNotifications
             .WaitForResourceAsync("arena", KnownResourceStates.Running, cancellationToken)
             .WaitAsync(DefaultTimeout, cancellationToken);
+        await WarmUpAsync(arena.BaseAddress!, cancellationToken); // прогрев JIT Arena до ассертов (см. выше)
 
         // Home Arena (расписание + лента «Главные турниры») — SSR читает каталог бренд-турниров.
         var arenaHome = await arena.GetAsync("/", cancellationToken);
@@ -64,5 +70,23 @@ public class WebTests
         // «Напомнить» (.ics) смапплен и гейтит небрендовые турниры (test-tournament — не бренд → 404).
         var ics = await arena.GetAsync("/t/test-tournament/calendar.ics", cancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, ics.StatusCode);
+    }
+
+    // Дожимает первый (холодный) ответ сервиса плоским клиентом с щедрым таймаутом — вне 30s-лимита
+    // resilience-хэндлера, которым обёрнуты клиенты из app.CreateHttpClient. Так первичный JIT конвейера
+    // происходит здесь, а не под тайт-таймаутом ассерта. Ограничен внешним cancellationToken (300с).
+    private static async Task WarmUpAsync(Uri baseAddress, CancellationToken ct)
+    {
+        using var raw = new HttpClient { BaseAddress = baseAddress, Timeout = TimeSpan.FromSeconds(120) };
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                using var r = await raw.GetAsync("/", ct);
+                if (r.IsSuccessStatusCode) return;
+            }
+            catch (Exception) when (!ct.IsCancellationRequested) { /* сервис ещё прогревается — повторим */ }
+            await Task.Delay(500, ct);
+        }
     }
 }

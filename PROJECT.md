@@ -191,10 +191,15 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
    иначе нода не расшифрует cookie/тикет, выданный другой.
 8. **Health-checks AppHost:** `WithHttpHealthCheck` по https с dev-сертификатом вешает `WaitFor`-каскад.
    Health маппится всегда (не только Development), интеграционный тест ждёт состояния `Running`, не `Healthy`.
-   **`WebTests.GetWebResourceRootReturnsOkStatusCode` флакует на холодном старте:** `Running` ≠ «прогрет», а
-   первый SSR-рендер Arena (JIT + чтение каталога) периодически не укладывается в 30-секундный лимит
-   `AddStandardResilienceHandler` → `TaskCanceled` на `arena.GetAsync("/")`. Это тайминг, не регрессия
-   логики (перепрогон зелёный; на `Healthy` не переключать — см. первый абзац). Быстрый набор
+   **`WebTests.GetWebResourceRootReturnsOkStatusCode` флаковал на холодном старте:** `Running` ≠ «прогрет».
+   Замер (temp-инструментовка `OnInitializedAsync` + плоский клиент): **cold `/` ≈ 4.5с, warm ≈ 7мс**; при
+   этом ожидание данных в рендере (грейны) — лишь **~120мс** (активация directory-грейна ~110мс), т.е.
+   доминирует **первичный JIT/прогрев конвейера Blazor SSR**, а НЕ Orleans/каталог. Под нагрузкой
+   параллельных Testcontainers этот JIT раздувается и периодически пробивал 30-секундный лимит
+   `AddStandardResilienceHandler` (им обёрнуты клиенты `app.CreateHttpClient`) → `TaskCanceled` на
+   `arena.GetAsync("/")`. **Лечение:** перед ассертами дожимаем первый ответ `WarmUpAsync` — плоским
+   `HttpClient` с таймаутом 120с (вне resilience-хэндлера), прогревая JIT; ассерты идут по «тёплому»
+   процессу (~мс). На `Healthy` не переключать (см. первый абзац). Быстрый набор
    (`--filter "FullyQualifiedName!~WebTests"`) детерминирован — им и проверять свои правки.
 9. **Arena-турнир переживает деактивацию грейна.** Мета+таблица персистятся в grain storage `"arena"`
    ([Program.cs](ChessSchool.Arena/Program.cs)): есть Redis → `AddRedisGrainStorage("arena")` (состояние

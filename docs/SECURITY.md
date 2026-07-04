@@ -70,7 +70,16 @@
 
 Механизм: claim **`email_verified`** едет в authorize/userinfo/cookie ([Program.cs](../ChessSchool.Auth/Program.cs)),
 мапится в [WebAuth](../ChessSchool.WebAuth/SsoExtensions.cs); Арена — политика `ConfirmedEmail` на премиум + баннер.
-Статус: ✅.
+Статус: ✅ (Arena/Auth).
+
+> ⚠️ **ИЗВЕСТНЫЙ ПРОБЕЛ (ЛК школы в Web/ApiService) — НЕ гейтится ни в одном окружении.**
+> Страницы `/school`, `/attribution`, `/students/{id}` ([ChessSchool.Web](../ChessSchool.Web/Components/Pages/))
+> не имеют `[Authorize]`, а доменные эндпоинты [ApiService/Program.cs](../ChessSchool.ApiService/Program.cs) L77–125
+> (`/schools/{id}/students`, `/students/{id}`, `/games/{id}/attribute`, `/students/{id}/link|share`) висят вне
+> группы `/internal` и **открыты анониму**. Комментарий «в проде гейтятся JWT» — аспирационный, гейт НЕ реализован
+> (код одинаков в dev и prod). Риск: чтение PII учеников, создание/привязка учеников, раздача родительских ссылок,
+> искажение рейтинга через атрибуцию — без входа. Требует модели владения школой (аккаунт↔школа), которой пока нет
+> (используется фикс. `Demo.SchoolId`). См. [TODO.md](TODO.md). Найдено аудитом авторизации 2026-07-04.
 
 **Смена e-mail** (✅): НЕподтверждённый адрес меняется сразу (исправить опечатку). **Подтверждённый** — по схеме
 **verify-new-before-switch**: адрес не меняется, пока владение новым не доказано ссылкой (`AppUser.PendingEmail`,

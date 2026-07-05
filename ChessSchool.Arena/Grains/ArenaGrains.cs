@@ -138,6 +138,7 @@ public sealed class ArenaTournamentGrain(
     IChessEngine engine,
     ArenaRuntimeOptions runtime,
     IAnalytics analytics,
+    TimeProvider time,
     IServiceProvider services,
     ILogger<ArenaTournamentGrain> logger) : Grain, IArenaTournamentGrain, IRemindable
 {
@@ -261,7 +262,7 @@ public sealed class ArenaTournamentGrain(
 
         // Слот, который уже закончился к моменту первого появления на сервере, — без реальной истории:
         // показываем детерминированную симуляцию. Турнир, прошедший вживую, сохраняет настоящую таблицу.
-        if (_startsAt.AddSeconds(_durationSeconds) <= DateTimeOffset.UtcNow)
+        if (_startsAt.AddSeconds(_durationSeconds) <= time.GetUtcNow())
         {
             SimulateFinished();
             _finishedDemo = true;
@@ -303,7 +304,7 @@ public sealed class ArenaTournamentGrain(
 
     private TournamentStatus Status()
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = time.GetUtcNow();
         if (now < _startsAt) return TournamentStatus.Created;
         if (now < _startsAt.AddSeconds(_durationSeconds)) return TournamentStatus.Running;
         return TournamentStatus.Finished;
@@ -487,7 +488,7 @@ public sealed class ArenaTournamentGrain(
     /// </summary>
     private async Task RefreshBotSettingsAsync()
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = time.GetUtcNow();
         if (_botTarget is not null && (now - _botSettingsAt).TotalSeconds < 15) return;
         _botSettingsAt = now;
         var type = ArenaSchedule.TypeOf(Id);
@@ -540,7 +541,7 @@ public sealed class ArenaTournamentGrain(
             {
                 p.Playing = false;
                 p.GameId = null;
-                if (!p.Seeking) { p.Seeking = true; p.WaitingSince = DateTimeOffset.UtcNow; }
+                if (!p.Seeking) { p.Seeking = true; p.WaitingSince = time.GetUtcNow(); }
             }
         }
         EnsureTimer();
@@ -665,7 +666,7 @@ public sealed class ArenaTournamentGrain(
 
         if (mover == Color.White) { game.WhiteMoved = true; if (!game.WhiteBerserk) game.WhiteMs += _tc.IncrementSeconds * 1000L; }
         else { game.BlackMoved = true; if (!game.BlackBerserk) game.BlackMs += _tc.IncrementSeconds * 1000L; }
-        game.LastMoveAt = DateTimeOffset.UtcNow;
+        game.LastMoveAt = time.GetUtcNow();
         game.DrawOfferBy = null; // любой ход снимает висящее предложение ничьи
 
         if (game.Board.IsEndGame)
@@ -781,7 +782,7 @@ public sealed class ArenaTournamentGrain(
     // ----------------------- Внутренняя логика -----------------------
 
     private int SecondsLeft() => Status() == TournamentStatus.Running
-        ? Math.Max(0, (int)(_startsAt.AddSeconds(_durationSeconds) - DateTimeOffset.UtcNow).TotalSeconds)
+        ? Math.Max(0, (int)(_startsAt.AddSeconds(_durationSeconds) - time.GetUtcNow()).TotalSeconds)
         : 0;
 
     private void Tick()
@@ -800,7 +801,7 @@ public sealed class ArenaTournamentGrain(
         foreach (var g in _games.Values.Where(g => g.Status == GameStatus.InProgress).ToList())
             if (DeductClock(g, g.Board.Turn)) FinishGame(g);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = time.GetUtcNow();
         foreach (var g in _games.Values.Where(g => g.Status != GameStatus.InProgress).ToList())
         {
             // Завершённую партию держим, пока её смотрит участник-человек: его доска не исчезает сама,
@@ -850,7 +851,7 @@ public sealed class ArenaTournamentGrain(
 
     private async Task DriveBotsAsync()
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = time.GetUtcNow();
         foreach (var g in _games.Values.Where(g => g.Status == GameStatus.InProgress).ToList())
         {
             var botColor = g.Board.Turn;
@@ -885,7 +886,7 @@ public sealed class ArenaTournamentGrain(
 
             if (botColor == Color.White) { g.WhiteMoved = true; g.WhiteMs += _tc.IncrementSeconds * 1000L; }
             else { g.BlackMoved = true; g.BlackMs += _tc.IncrementSeconds * 1000L; }
-            g.LastMoveAt = DateTimeOffset.UtcNow;
+            g.LastMoveAt = time.GetUtcNow();
 
             if (g.Board.IsEndGame)
             {
@@ -917,7 +918,7 @@ public sealed class ArenaTournamentGrain(
             // После партии НЕ ищем следующего соперника автоматически: человек снова видит кнопку
             // «подобрать соперника». Боты сразу снова в пуле (играют между собой / ждут людей).
             p.Seeking = p.IsBot;
-            p.WaitingSince = p.IsBot ? DateTimeOffset.UtcNow : null;
+            p.WaitingSince = p.IsBot ? time.GetUtcNow() : null;
         }
     }
 
@@ -932,7 +933,7 @@ public sealed class ArenaTournamentGrain(
         var idleBots = _players.Where(kv => kv.Value.IsBot && !kv.Value.Playing)
             .Select(kv => kv.Key).ToList();
 
-        var plan = ArenaPairing.Plan(idleHumans, idleBots, DateTimeOffset.UtcNow, WaitForBotSeconds, BotTarget > 0);
+        var plan = ArenaPairing.Plan(idleHumans, idleBots, time.GetUtcNow(), WaitForBotSeconds, BotTarget > 0);
         foreach (var (a, b) in plan.Pairs) CreateGame(a, b);
         foreach (var human in plan.HumansNeedingNewBot) CreateGame(human, SpawnBot());
     }
@@ -950,7 +951,7 @@ public sealed class ArenaTournamentGrain(
             Rating = persona.Rating,
             Skill = persona.Skill,
             SpeedFactor = persona.Speed,
-            WaitingSince = DateTimeOffset.UtcNow,
+            WaitingSince = time.GetUtcNow(),
         };
         _dirty = true;
         return key;
@@ -969,8 +970,8 @@ public sealed class ArenaTournamentGrain(
             BlackName = _players[aWhite ? b : a].Name,
             WhiteMs = _tc.InitialSeconds * 1000L,
             BlackMs = _tc.InitialSeconds * 1000L,
-            LastMoveAt = DateTimeOffset.UtcNow,
-            StartedAt = DateTimeOffset.UtcNow
+            LastMoveAt = time.GetUtcNow(),
+            StartedAt = time.GetUtcNow()
         };
         foreach (var s in new[] { a, b })
         {
@@ -984,7 +985,7 @@ public sealed class ArenaTournamentGrain(
                     ["tournament_id"] = Id,
                     ["time_control"] = _tc.ToString(),
                     ["opponent_is_bot"] = opp.IsBot,
-                    ["wait_seconds"] = p.WaitingSince is { } w ? (int)(DateTimeOffset.UtcNow - w).TotalSeconds : 0,
+                    ["wait_seconds"] = p.WaitingSince is { } w ? (int)(time.GetUtcNow() - w).TotalSeconds : 0,
                 });
             }
             p.Playing = true;
@@ -997,7 +998,7 @@ public sealed class ArenaTournamentGrain(
     // Часы и разрешение просрочки — в ArenaClock (тестируемо). Здесь только применяем к доске.
     private bool DeductClock(Game g, Color mover)
     {
-        var elapsed = (long)(DateTimeOffset.UtcNow - g.LastMoveAt).TotalMilliseconds;
+        var elapsed = (long)(time.GetUtcNow() - g.LastMoveAt).TotalMilliseconds;
         if (mover == Color.White)
         {
             var (ms, timedOut) = ArenaClock.Deduct(g.WhiteMs, elapsed);
@@ -1010,7 +1011,7 @@ public sealed class ArenaTournamentGrain(
             g.BlackMs = ms;
             if (timedOut) { (g.Result, g.Reason) = ArenaClock.ResolveTimeout(g.Board.Fen, Color.Black); return true; }
         }
-        g.LastMoveAt = DateTimeOffset.UtcNow;
+        g.LastMoveAt = time.GetUtcNow();
         return false;
     }
 
@@ -1018,7 +1019,7 @@ public sealed class ArenaTournamentGrain(
     {
         if (g.Status != GameStatus.InProgress) return;
         g.Status = GameStatus.Finished;
-        g.FinishedAt = DateTimeOffset.UtcNow;
+        g.FinishedAt = time.GetUtcNow();
 
         var white = _players[g.WhiteSub];
         var black = _players[g.BlackSub];
@@ -1063,7 +1064,7 @@ public sealed class ArenaTournamentGrain(
         var req = new ArenaGameArchiveRequest(
             Id, g.Id, g.WhiteSub, g.BlackSub, g.WhiteName, g.BlackName,
             IsBotSub(g.WhiteSub), IsBotSub(g.BlackSub),
-            g.Board.Pgn, g.Result, g.Reason, _tc, g.FinishedAt ?? DateTimeOffset.UtcNow);
+            g.Board.Pgn, g.Result, g.Reason, _tc, g.FinishedAt ?? time.GetUtcNow());
         _ = archive.ArchiveAsync(req); // ошибки клиент логирует сам и не бросает
     }
 

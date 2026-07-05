@@ -10,7 +10,11 @@ const string internalKey = "dev-internal-key";
 // "auth" уже занято проектом IdP). Имя ресурса = ключ connection string в сервисе.
 var postgres = builder.AddPostgres("postgres").WithDataVolume();
 var authDb = postgres.AddDatabase("authdb");
-var schoolDb = postgres.AddDatabase("schooldb");
+// По одной БД на bounded-контекст (общий Postgres-сервер локально; в проде разводятся строкой
+// подключения по серверам). Межконтекстных FK нет — ссылки на игроков по строковому IdP-sub.
+var schoolDb = postgres.AddDatabase("schooldb");  // школьный домен (школы/группы/ученики/партии/рейтинг)
+var arenaDb = postgres.AddDatabase("arenadb");    // архив арена-партий B2C
+var billingDb = postgres.AddDatabase("billingdb"); // подписки/премиум + идемпотентность вебхуков
 
 // Redis — распределённый ярус для мультисервера: SignalR backplane, Orleans clustering/persist,
 // общий DataProtection-keyring и ticket-store. Сервисы переключаются на распределённые провайдеры
@@ -62,8 +66,12 @@ var apiService = builder.AddProject<Projects.ChessSchool_ApiService>("apiservice
     .WithEnvironment("InternalApiKey", internalKey)
     .WithReference(auth)
     .WithReference(schoolDb)
+    .WithReference(arenaDb)
+    .WithReference(billingDb)
     .WithReference(seq)
-    .WaitFor(schoolDb);
+    .WaitFor(schoolDb)
+    .WaitFor(arenaDb)
+    .WaitFor(billingDb);
 
 // Игровой сервер: Orleans-силос (живые партии) + SignalR. Валидирует токены IdP,
 // архивирует завершённые партии в доменный API.

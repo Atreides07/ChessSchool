@@ -12,11 +12,11 @@ namespace ChessSchool.Tests;
 /// </summary>
 public class SubscriptionServiceTests
 {
-    private static SchoolDbContext NewDb() =>
-        new(new DbContextOptionsBuilder<SchoolDbContext>()
+    private static BillingDbContext NewDb() =>
+        new(new DbContextOptionsBuilder<BillingDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
-    private static SubscriptionService Svc(SchoolDbContext db) => new(db, NullLogger<SubscriptionService>.Instance);
+    private static SubscriptionService Svc(BillingDbContext db) => new(db, NullLogger<SubscriptionService>.Instance);
 
     [Fact]
     public async Task Activate_GrantsPremium()

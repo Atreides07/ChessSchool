@@ -190,16 +190,29 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
         {
             builder.ConfigureTestServices(services =>
             {
+                // Подменяем все три bounded-контекста (school/arena/billing) на EF InMemory —
+                // иначе арена-эндпоинты (ArenaDbContext) и /internal/subscriptions (BillingDbContext)
+                // упадут на резолве Npgsql-строки. У каждого — своя in-memory БД.
                 services.RemoveAll<DbContextOptions<SchoolDbContext>>();
+                services.RemoveAll<DbContextOptions<ArenaDbContext>>();
+                services.RemoveAll<DbContextOptions<BillingDbContext>>();
                 services.RemoveAll<DbContextOptions>();
                 services.RemoveAll<SchoolDbContext>();
+                services.RemoveAll<ArenaDbContext>();
+                services.RemoveAll<BillingDbContext>();
 
                 var efProvider = new ServiceCollection()
                     .AddEntityFrameworkInMemoryDatabase()
                     .BuildServiceProvider();
 
                 services.AddDbContext<SchoolDbContext>(o => o
-                    .UseInMemoryDatabase(_dbName)
+                    .UseInMemoryDatabase($"{_dbName}-school")
+                    .UseInternalServiceProvider(efProvider));
+                services.AddDbContext<ArenaDbContext>(o => o
+                    .UseInMemoryDatabase($"{_dbName}-arena")
+                    .UseInternalServiceProvider(efProvider));
+                services.AddDbContext<BillingDbContext>(o => o
+                    .UseInMemoryDatabase($"{_dbName}-billing")
                     .UseInternalServiceProvider(efProvider));
             });
         }

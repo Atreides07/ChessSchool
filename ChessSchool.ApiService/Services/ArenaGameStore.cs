@@ -9,7 +9,7 @@ namespace ChessSchool.ApiService.Services;
 /// Архив арена-партий (B2C): запись завершённой партии (идемпотентно), история по игроку (sub),
 /// выдача партии для воспроизведения и кэш разбора. Источник истины — Postgres, общий для всех нод.
 /// </summary>
-public sealed class ArenaGameStore(SchoolDbContext db)
+public sealed class ArenaGameStore(ArenaDbContext db)
 {
     /// <summary>Сохраняет завершённую партию. Повтор по тому же ExternalGameId игнорируется.</summary>
     public async Task<bool> ArchiveAsync(ArenaGameArchiveRequest r, CancellationToken ct)

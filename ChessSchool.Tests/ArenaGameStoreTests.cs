@@ -11,9 +11,9 @@ namespace ChessSchool.Tests;
 /// </summary>
 public class ArenaGameStoreTests
 {
-    private static SchoolDbContext NewDb()
+    private static ArenaDbContext NewDb()
     {
-        var db = new SchoolDbContext(new DbContextOptionsBuilder<SchoolDbContext>()
+        var db = new ArenaDbContext(new DbContextOptionsBuilder<ArenaDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         db.Database.EnsureCreated();
         return db;

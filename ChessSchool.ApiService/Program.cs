@@ -13,9 +13,14 @@ builder.AddServiceDefaults();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
-// БД — PostgreSQL (connection string инжектит Aspire по ссылке на ресурс "school").
+// БД — PostgreSQL, по одной на bounded-контекст (строки подключения инжектит Aspire):
+// schooldb (школьный домен), arenadb (архив арена-партий), billingdb (подписки/биллинг).
 builder.Services.AddDbContext<SchoolDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("schooldb")));
+builder.Services.AddDbContext<ArenaDbContext>(o =>
+    o.UseNpgsql(builder.Configuration.GetConnectionString("arenadb")));
+builder.Services.AddDbContext<BillingDbContext>(o =>
+    o.UseNpgsql(builder.Configuration.GetConnectionString("billingdb")));
 builder.Services.AddSingleton<IRatingService, Glicko2RatingService>();
 builder.Services.AddScoped<GameArchiver>();
 builder.Services.AddScoped<ArenaGameStore>();
@@ -39,9 +44,10 @@ else
 builder.AddChessSchoolAnalytics();
 
 // Readiness-проверка доступности БД (попадает в /health, не в /alive). Без строки подключения
-// (InMemory в тестах) — пропускаем.
-if (builder.Configuration.GetConnectionString("schooldb") is { Length: > 0 } schoolConn)
-    builder.Services.AddHealthChecks().AddNpgSql(schoolConn, name: "postgres");
+// (InMemory в тестах) — пропускаем. По одной проверке на каждую БД.
+foreach (var (name, cs) in new[] { ("schooldb", "schooldb"), ("arenadb", "arenadb"), ("billingdb", "billingdb") })
+    if (builder.Configuration.GetConnectionString(cs) is { Length: > 0 } conn)
+        builder.Services.AddHealthChecks().AddNpgSql(conn, name: name);
 
 // Клиент к сервису авторизации (для резолва email → sub при привязке аккаунта).
 builder.Services.AddHttpClient("auth", c => c.BaseAddress = new("https+http://auth"));
@@ -63,9 +69,17 @@ var migrateRequested = args.Contains("migrate");
 var migrateAtStartup = builder.Configuration.GetValue("Database:MigrateAtStartup", builder.Environment.IsDevelopment());
 using (var scope = app.Services.CreateScope())
 {
+    // Каждый bounded-контекст — своя БД со своим __EFMigrationsHistory. Применяем все три.
+    void ApplySchema(DbContext ctx)
+    {
+        if (!ctx.Database.IsNpgsql()) ctx.Database.EnsureCreated();     // InMemory (тесты)
+        else if (migrateRequested || migrateAtStartup) ctx.Database.Migrate();
+    }
+
     var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
-    if (!db.Database.IsNpgsql()) db.Database.EnsureCreated();          // InMemory (тесты)
-    else if (migrateRequested || migrateAtStartup) db.Database.Migrate();
+    ApplySchema(db);
+    ApplySchema(scope.ServiceProvider.GetRequiredService<ArenaDbContext>());
+    ApplySchema(scope.ServiceProvider.GetRequiredService<BillingDbContext>());
     // Демо-данные (школа/ученики) — только вне прод-БД и не в чистом режиме миграции.
     if (!migrateRequested && app.Environment.IsDevelopment()) SeedData.Ensure(db);
 }

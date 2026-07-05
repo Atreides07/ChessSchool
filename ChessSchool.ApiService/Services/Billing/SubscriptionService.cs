@@ -9,7 +9,7 @@ namespace ChessSchool.ApiService.Services.Billing;
 /// Применяет нормализованные события биллинга к состоянию подписки и отдаёт entitlement.
 /// Идемпотентно (повтор события/несколько нод не двоят), источник истины — Postgres.
 /// </summary>
-public sealed class SubscriptionService(SchoolDbContext db, ILogger<SubscriptionService> logger)
+public sealed class SubscriptionService(BillingDbContext db, ILogger<SubscriptionService> logger)
 {
     /// <summary>Применить событие. true — применили, false — уже обработано (идемпотентность).</summary>
     public async Task<bool> ApplyAsync(BillingEventDto e, CancellationToken ct = default)

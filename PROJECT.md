@@ -98,6 +98,16 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
 поэтому распределённые пути работают и проверяются и локально. Персист доменных данных → **PostgreSQL**
 (managed в проде). dev и прод на одном провайдере БД — схема через EF-миграции.
 
+### БД-на-контекст (bounded contexts)
+ApiService держит **три отдельные БД**, по одной на bounded-контекст (у каждой свой `__EFMigrationsHistory`
+и свой набор миграций): `schooldb` ([SchoolDbContext](ChessSchool.ApiService/Data/SchoolDbContext.cs) — школы/группы/ученики/устройства/партии/рейтинг/шаринг),
+`arenadb` ([ArenaDbContext](ChessSchool.ApiService/Data/ArenaDbContext.cs) — архив арена-партий B2C, `ArenaGameStore`),
+`billingdb` ([BillingDbContext](ChessSchool.ApiService/Data/BillingDbContext.cs) — подписки/премиум + идемпотентность
+вебхуков, `SubscriptionService`). **Межконтекстных FK нет** — арена/биллинг ссылаются на игроков по строковому
+IdP-`sub`, поэтому кросс-БД джойны не нужны и разделение чистое (разный blast-radius/бэкап/масштабирование).
+Локально — один Postgres-сервер, три БД (как `authdb`); в проде разводятся строкой подключения (можно по серверам).
+ApiService остаётся владельцем персистентности всех трёх (Arena — тонкий HTTP-клиент к ApiService, своей БД у неё нет).
+
 ## Архитектурные решения
 
 - **Регистрация с подтверждением e-mail + МЯГКИЙ гейт** ([ChessSchool.Auth/Program.cs](ChessSchool.Auth/Program.cs)):
@@ -183,9 +193,13 @@ Redis-clustering + Redis grain storage, SignalR Redis-backplane, общий Data
    или авто-миграция на старте при `Database:MigrateAtStartup` (по умолчанию = Development); для InMemory
    в тестах — `EnsureCreated()`. Прод-сертификаты IdP (вне Development) грузятся из конфигурации
    `OpenIddict:SigningCertificate`/`:EncryptionCertificate` ([Certificates.cs](ChessSchool.Auth/Certificates.cs)).
-   Генерация миграций без Docker — через design-time фабрики (`AuthDbContextFactory`/`SchoolDbContextFactory`):
-   `dotnet ef migrations add <Name> -p ChessSchool.Auth -s ChessSchool.Auth -o Migrations`.
+   Генерация миграций без Docker — через design-time фабрики (`AuthDbContextFactory`/`SchoolDbContextFactory`/
+   `ArenaDbContextFactory`/`BillingDbContextFactory`): `dotnet ef migrations add <Name> -p ChessSchool.Auth -s ChessSchool.Auth -o Migrations`.
    Фабрика Auth обязана звать `UseOpenIddict()`, иначе таблицы OpenIddict не попадут в миграцию.
+   **ApiService — три контекста, у каждого свой набор миграций и свой каталог** (обязательно указывать
+   `-c` и `-o`): `-c SchoolDbContext -o Migrations`, `-c ArenaDbContext -o Migrations/Arena`,
+   `-c BillingDbContext -o Migrations/Billing`. Program.cs применяет схему всех трёх (Migrate/EnsureCreated),
+   readiness-health-check — по каждой БД (schooldb/arenadb/billingdb).
 3. **Два Orleans-силоса (GameServer и Arena) на одной машине конфликтуют** портами/clusterId.
    Разведены: GameServer `11111/30000 clusterId=chessschool-game`, Arena `11112/30001 clusterId=chessschool-arena`.
 4. **IdP: JWK строить только из публичных параметров** (`n,e`) — `ConvertFromRSASecurityKey` на ключе

@@ -306,6 +306,19 @@ public sealed class ArenaTournamentGrain(
         _dirty = false;
     }
 
+    /// <summary>
+    /// Персист с коалесингом для ГОРЯЧИХ путей (регистрация/подбор/чтения). Snapshot+WriteState — O(N)
+    /// по составу турнира, поэтому запись стора на КАЖДЫЙ вызов делала бёрст регистраций O(N²) (5000
+    /// join'ов ≈ 50с, см. docs/CAPACITY_PLANNING.md §8.1). Пока турнир идёт (Running), таймер тика
+    /// (каждые 500 мс, <see cref="OnTimerAsync"/>) — единственный писатель: он и сбросит накопленный
+    /// _dirty. Здесь лишь помечаем изменение (persist ≤500 мс спустя) — O(N) на бёрст вместо O(N²).
+    /// Вне Running таймера нет → персистим сразу (регистрация до старта durable без таймера).
+    /// Компромисс: при потере ноды в окне ≤500 мс теряется свежая регистрация/движение таблицы — игрок
+    /// перезаходит (как активные доски, которые и так не персистятся — грабля #9). Не критичные данные.
+    /// </summary>
+    private Task PersistDeferredAsync() =>
+        Status() == TournamentStatus.Running ? Task.CompletedTask : FlushAsync();
+
     private TournamentStatus Status()
     {
         var now = time.GetUtcNow();
@@ -466,7 +479,6 @@ public sealed class ArenaTournamentGrain(
     public async Task JoinAsync(string sub, string name)
     {
         EnsureConfigured();
-        await RefreshBotSettingsAsync();
         // Регистрация возможна и до старта (Created), и во время турнира (Running).
         if (Status() == TournamentStatus.Finished) return;
         if (!_players.ContainsKey(sub))
@@ -478,8 +490,9 @@ public sealed class ArenaTournamentGrain(
             telemetry.Joined(Id, _tc, sub);
         }
         EnsureTimer();
-        Tick();
-        await FlushAsync();
+        // Тик/подбор/боты и запись стора ведёт таймер (каждые 500 мс). На регистрации их НЕ гоняем:
+        // иначе бёрст из N join'ов в один турнир = O(N²) (Snapshot+WriteState всего состояния на каждый).
+        await PersistDeferredAsync();
         notifier.Notify(Id);
     }
 
@@ -507,8 +520,8 @@ public sealed class ArenaTournamentGrain(
             }
         }
         EnsureTimer();
-        Tick();          // попытка мгновенного пейринга с другим ищущим
-        await FlushAsync();
+        Tick();          // попытка мгновенного пейринга с другим ищущим (в памяти, дёшево)
+        await PersistDeferredAsync(); // запись стора коалесит таймер (Running) — не пишем на каждый seek
         notifier.Notify(Id);
     }
 
@@ -518,7 +531,7 @@ public sealed class ArenaTournamentGrain(
         await RefreshBotSettingsAsync();
         Tick();
         EnsureTimer();
-        await FlushAsync();
+        await PersistDeferredAsync(); // чтение не пишет стор на каждый вызов — таймер коалесит (Running)
         return new TournamentSummaryDto(
             Id, _name, _tc, Status(), _players.Count, SecondsLeft(),
             _players.Values.Count(p => p.IsBot), _startsAt, _durationSeconds,
@@ -542,7 +555,7 @@ public sealed class ArenaTournamentGrain(
         {
             await RefreshBotSettingsAsync();
             Tick();
-            await FlushAsync();
+            await PersistDeferredAsync(); // холодный peek: персист коалесит таймер, если турнир идёт
         }
         return new TournamentSummaryDto(
             Id, _name, _tc, Status(), _players.Count, SecondsLeft(),
@@ -556,7 +569,7 @@ public sealed class ArenaTournamentGrain(
         await RefreshBotSettingsAsync();
         Tick();
         EnsureTimer();
-        await FlushAsync();
+        await PersistDeferredAsync(); // чтение состояния не пишет стор на каждый вызов — таймер коалесит
 
         var standings = _players
             .OrderByDescending(p => p.Value.Score)
@@ -584,7 +597,7 @@ public sealed class ArenaTournamentGrain(
         await RefreshBotSettingsAsync();
         Tick();
         EnsureTimer();
-        await FlushAsync();
+        await PersistDeferredAsync(); // список досок не пишет стор на каждый вызов — таймер коалесит
         return BuildBoards(int.MaxValue); // все доски — для страницы «Все игры»
     }
 

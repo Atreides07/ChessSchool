@@ -148,6 +148,35 @@ public class AuthIntegrationTests : IAsyncLifetime
         Assert.Contains("error=badtoken", response.Headers.Location!.OriginalString);
     }
 
+    // Регрессия: minimal-API bool-биндинг ронял страницы. Редиректы шлют ?required=1 / POST шлёт ?sent=true,
+    // но bool-параметр парсит лишь true/false, а не-nullable bool ещё и ОБЯЗАТЕЛЕН → 400 BadHttpRequestException.
+    [Fact]
+    public async Task Mfa_WithRequiredEqualsOne_DoesNotFailBinding()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var response = await client.GetAsync("/account/mfa?required=1&return=%2F");
+        // Аноним → редирект на логин (НЕ 400/500 из-за привязки "1" к bool).
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("/account/login", response.Headers.Location!.OriginalString);
+    }
+
+    [Fact]
+    public async Task Forgot_WithoutSentParam_RendersPage_NotBadRequest()
+    {
+        var client = _factory.CreateClient();
+        // Ссылка «Забыли пароль?» ведёт на /account/forgot БЕЗ ?sent — non-nullable bool был обязателен → 400.
+        var response = await client.GetAsync("/account/forgot?return=%2F");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Forgot_WithSentEqualsOne_RendersPage()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/account/forgot?sent=1&return=%2F");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     public async Task Authorize_WhenCookieUserMissing_RedirectsToLogin_NotServerError()
     {

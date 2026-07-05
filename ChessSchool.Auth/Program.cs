@@ -463,14 +463,17 @@ app.MapGet("/account/confirm-email-change", async (HttpContext ctx, AuthDbContex
 }).RequireRateLimiting("auth"); // защита от перебора токена смены адреса
 
 // ---------------- MFA (TOTP): настройка ----------------
-app.MapGet("/account/mfa", async (HttpContext ctx, AuthDbContext db, MfaService mfa, string? @return, string? error, bool? required) =>
+app.MapGet("/account/mfa", async (HttpContext ctx, AuthDbContext db, MfaService mfa, string? @return, string? error, string? required) =>
 {
     var auth = await ctx.AuthenticateAsync("idp");
     var user = Guid.TryParse(auth.Principal?.FindFirst("sub")?.Value, out var id) ? await db.Users.FindAsync(id) : null;
     if (user is null) return Results.Redirect($"/account/login?return={Uri.EscapeDataString(@return ?? "/")}");
 
+    // `required` берём как строку: редиректы шлют "1", а bool-биндинг minimal-API парсит лишь true/false —
+    // "1" валило страницу в 500 (BadHttpRequestException). Параметр не должен ронять страницу: трактуем truthy.
+    bool requiredFlag = required is "1" || string.Equals(required, "true", StringComparison.OrdinalIgnoreCase);
     // Для админа 2FA обязательна — показываем требование даже без ?required (напр. открыл страницу сам).
-    var mustEnable = required == true || (requireMfaForAdmins && AdminRoles.IsAdmin(adminEmails, user.Email));
+    var mustEnable = requiredFlag || (requireMfaForAdmins && AdminRoles.IsAdmin(adminEmails, user.Email));
 
     if (user.MfaEnabled)
         return Results.Content(MfaSettingsPage(true, null, null, @return ?? "/", error, mustEnable), "text/html; charset=utf-8");
@@ -559,8 +562,12 @@ app.MapPost("/account/mfa/verify", async (HttpContext ctx, AuthDbContext db, Mfa
 }).RequireRateLimiting("auth"); // анти-перебор второго фактора
 
 // ---------------- Сброс пароля: запрос ссылки (нейтральный ответ) ----------------
-app.MapGet("/account/forgot", (string? @return, bool sent, string? email, string? error) =>
-    Results.Content(ForgotPasswordPage(@return ?? "/", sent, email, error), "text/html; charset=utf-8"));
+app.MapGet("/account/forgot", (string? @return, string? sent, string? email, string? error) =>
+    // `sent` строкой: без ?sent (ссылка «Забыли пароль?») bool был ОБЯЗАТЕЛЕН → 400; а "1" не парсится в bool.
+    // Параметр не должен ронять страницу — трактуем truthy (POST шлёт sent=true).
+    Results.Content(ForgotPasswordPage(@return ?? "/",
+        sent is "1" || string.Equals(sent, "true", StringComparison.OrdinalIgnoreCase),
+        email, error), "text/html; charset=utf-8"));
 
 app.MapPost("/account/forgot", async (HttpContext ctx, AuthDbContext db, EmailTokenService tokens, IEmailSender email, AuthAudit audit) =>
 {

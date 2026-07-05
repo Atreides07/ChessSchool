@@ -27,3 +27,6 @@ tools/loadtest/tokens.json
 node_modules/
 e2e/test-results/
 e2e/playwright-report/
+
+# Orleans TestingHost logs (from tools/arena-loadtest)
+logs/

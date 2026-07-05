@@ -1055,6 +1055,17 @@ static string AccountEmailPage(string email, bool confirmed, string? pendingEmai
 """);
 }
 
+// QR-код otpauth-ссылки как inline-SVG (QRCoder, чистый managed — без System.Drawing/нативных зависимостей,
+// без внешних CDN). Работает и с выключенным JS. ECC M — баланс плотности и устойчивости к сбоям сканирования.
+static string OtpAuthQrSvg(string otpauthUri)
+{
+    using var gen = new QRCoder.QRCodeGenerator();
+    using var data = gen.CreateQrCode(otpauthUri, QRCoder.QRCodeGenerator.ECCLevel.M);
+    var svg = new QRCoder.SvgQRCode(data).GetGraphic(4, "#111827", "#ffffff", drawQuietZones: true);
+    // Вписываем в контейнер: SVG имеет фиксированный px-размер → форсим масштаб по ширине контейнера.
+    return svg.Replace("<svg ", "<svg style=\"width:100%;height:auto;display:block\" ");
+}
+
 // Страница настройки MFA: включение (показ секрета/otpauth + подтверждение кодом) либо статус «включено».
 static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpauthUri, string ret, string? error, bool mustEnable = false)
 {
@@ -1096,16 +1107,21 @@ static string MfaSettingsPage(bool enabled, string? base32Secret, string? otpaut
 
     string secretEnc = System.Net.WebUtility.HtmlEncode(base32Secret ?? "");
     string uriEnc = System.Net.WebUtility.HtmlEncode(otpauthUri ?? "");
-    string step1 = en ? "1. Add this key to your authenticator app (Google Authenticator, 1Password…):"
-                      : "1. Добавьте этот ключ в приложение-аутентификатор (Google Authenticator, 1Password…):";
+    string qrSvg = string.IsNullOrEmpty(otpauthUri) ? "" : OtpAuthQrSvg(otpauthUri);
+    string step1 = en ? "1. Scan this QR code in your authenticator app (Google Authenticator, 1Password…):"
+                      : "1. Отсканируйте QR-код в приложении-аутентификаторе (Google Authenticator, 1Password…):";
+    string manualLbl = en ? "Can’t scan? Enter this key manually:"
+                          : "Не получается отсканировать? Введите ключ вручную:";
     string step2 = en ? "2. Enter the 6-digit code it shows to turn on 2FA:"
                       : "2. Введите 6-значный код из приложения, чтобы включить 2FA:";
     string enableBtn = en ? "Enable 2FA" : "Включить 2FA";
-    string linkLbl = en ? "Or open in app" : "Или открыть в приложении";
+    string linkLbl = en ? "Open in app" : "Открыть в приложении";
     return AuthShell(lang, title, $"""
 <div class="card">{BrandHeader(sub)}<h1>{title}</h1>{errBlock}{requiredBanner}
 <p class="info">{step1}</p>
-<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1rem;letter-spacing:.06em;word-break:break-all;background:#f6f7f9;border:1px solid var(--line);border-radius:8px;padding:.6rem .7rem;margin:0 0 .6rem">{secretEnc}</p>
+<div style="display:flex;justify-content:center;margin:0 0 1rem"><div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:.6rem;line-height:0;width:200px" aria-label="QR otpauth">{qrSvg}</div></div>
+<p class="info" style="margin:0 0 .4rem">{manualLbl}</p>
+<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1rem;letter-spacing:.06em;word-break:break-all;background:#f6f7f9;border:1px solid var(--line);border-radius:8px;padding:.6rem .7rem;margin:0 0 .5rem">{secretEnc}</p>
 <p class="muted" style="text-align:left;margin:0 0 1rem"><a href="{uriEnc}" style="color:var(--accent)">{linkLbl}</a></p>
 <label>{step2}</label>
 <form method="post" action="/account/mfa/enable"><input type="hidden" name="return" value="{retEnc}"><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required><button type="submit">{enableBtn}</button></form>

@@ -178,6 +178,27 @@ public class AuthIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MfaSetup_ShowsBothQrCodeAndManualKey()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Register(client, $"mfa-setup-{Guid.NewGuid():N}@test.local"); // авто-логин → есть idp-сессия
+
+        var response = await client.GetAsync("/account/mfa?return=%2F");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+
+        // QR-код отрисован inline-SVG (сканирование).
+        Assert.Contains("<svg", html);
+        // И ключ символами доступен (ручной ввод) — обе опции сразу (метка культуронезависимо RU/EN).
+        Assert.True(html.Contains("Введите ключ вручную") || html.Contains("Enter this key manually"),
+            "на странице должен быть блок ручного ввода ключа");
+        // Ссылка/URI otpauth (открыть в приложении) — часть ручного пути.
+        Assert.Contains("otpauth://", html);
+        // Плюс форма подтверждения кодом.
+        Assert.Contains("/account/mfa/enable", html);
+    }
+
+    [Fact]
     public async Task Authorize_WhenCookieUserMissing_RedirectsToLogin_NotServerError()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

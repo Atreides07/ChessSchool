@@ -45,7 +45,8 @@ test('трансляция: онлайн-доски грузятся при пе
   ]);
 
   // broadcast.js исполнился и заменил плейсхолдер реальными досками (а не «висит» на загрузке).
-  expect(scripts, 'broadcast.js не загрузился').toContain('broadcast.js');
+  // Имя фингерпринтится через @Assets (broadcast.<hash>.js в проде / broadcast.js в dev) — матчим префикс.
+  expect(scripts.some((s) => /^broadcast\.([\w]+\.)?js$/.test(s)), 'broadcast.js не загрузился').toBe(true);
   await expect(page.locator('#bd-boards .bd-card').first()).toBeVisible();
   expect(await page.locator('#bd-boards .bd-card').count()).toBeGreaterThan(0);
 

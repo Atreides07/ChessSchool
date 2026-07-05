@@ -106,4 +106,51 @@ public class ArenaRegistrationLoadTests
             await cluster.StopAllSilosAsync();
         }
     }
+
+    [Fact]
+    public async Task MoveBurst_CoalescesStoreWrites_ButAdvancesGame()
+    {
+        CountingGrainStorage.Writes = 0;
+        var cluster = new TestClusterBuilder().AddSiloBuilderConfigurator<SiloConfigurator>().Build();
+        await cluster.DeployAsync();
+        try
+        {
+            var t = cluster.GrainFactory.GetGrain<IArenaTournamentGrain>("move-load");
+            await t.ConfigureAsync("Ходы", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-2), 3600);
+            await t.JoinAsync("a", "a");
+            await t.JoinAsync("b", "b");
+            await t.SeekAsync("a");
+            await t.SeekAsync("b"); // два ищущих человека спариваются сразу
+
+            var st = await t.GetStateAsync("a");
+            Assert.NotNull(st.MyGame);
+            string white = st.MyGame!.MyColor == PieceColor.White ? "a" : "b";
+            string black = white == "a" ? "b" : "a";
+
+            // Известная легальная линия (Испанка): чётные полуходы — белые, нечётные — чёрные.
+            (string From, string To)[] line =
+            [
+                ("e2", "e4"), ("e7", "e5"), ("g1", "f3"), ("b8", "c6"),
+                ("f1", "b5"), ("a7", "a6"), ("b5", "a4"), ("g8", "f6"),
+            ];
+
+            int writesBefore = CountingGrainStorage.Writes;
+            ArenaGameDto? last = null;
+            for (int i = 0; i < line.Length; i++)
+                last = await t.MoveAsync(i % 2 == 0 ? white : black, new MoveInput(line[i].From, line[i].To, null));
+            int moveWrites = CountingGrainStorage.Writes - writesBefore;
+
+            // Ходы коалесят запись стора: мид-партийный ход в персист не идёт (в Snapshot только Players/мета,
+            // не _games). До фикса это было ~N записей на N ходов. Допускаем ≤1 — таймер тика мог сработать раз.
+            Assert.True(moveWrites <= 1, $"ходы должны коалесить запись стора: {moveWrites} на {line.Length} ходов");
+
+            // Но партия реально продвинулась (ходы применились): FEN уже не стартовый.
+            Assert.NotNull(last);
+            Assert.NotEqual("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", last!.Fen);
+        }
+        finally
+        {
+            await cluster.StopAllSilosAsync();
+        }
+    }
 }

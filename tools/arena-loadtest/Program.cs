@@ -229,8 +229,8 @@ async Task PlayScenario(TestCluster c, int n, int seconds)
     Console.WriteLine($"Ходов (MoveAsync): {calls} за {swAll.Elapsed.TotalSeconds:F1}с = **{perSec:N0} ходов/с**; без легального хода {noMove}.");
     if (l.Count > 0)
         Console.WriteLine($"Задержка MoveAsync: p50 {Pct(l, .50):F1} мс | p95 {Pct(l, .95):F1} мс | p99 {Pct(l, .99):F1} мс | max {l[^1]:F1} мс");
-    Console.WriteLine("NB: MoveAsync флашит ВЕСЬ стор на каждый ход (Snapshot+WriteState, O(N)) — на N/2 партий");
-    Console.WriteLine("    в одном турнире это O(N) на ход; узкое место горячего пути игры (см. вывод в конце).\n");
+    Console.WriteLine("NB: MoveAsync коалесит запись стора (ход в персист не идёт — в Snapshot только Players/мета;");
+    Console.WriteLine("    финиш партии пишет таймер тика). Потолок ходов/с — однопоточное применение ходов грейном.\n");
 }
 
 // Легальный ход из FEN через Gera.Chess (та же либа, что в грейне). pick разнообразит выбор по партиям.

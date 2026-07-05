@@ -634,7 +634,7 @@ public sealed class ArenaTournamentGrain(
         var mover = sub == game.WhiteSub ? Color.White : Color.Black;
         if (mover != game.Board.Turn) return null;
 
-        if (DeductClock(game, mover)) { FinishGame(game); await FlushAsync(); notifier.Notify(Id); return BuildGameDto(game, sub); }
+        if (DeductClock(game, mover)) { FinishGame(game); await PersistDeferredAsync(); notifier.Notify(Id); return BuildGameDto(game, sub); }
 
         if (!game.Board.TryMove(move.From, move.To, move.Promotion))
             return BuildGameDto(game, sub);
@@ -650,7 +650,10 @@ public sealed class ArenaTournamentGrain(
             FinishGame(game);
         }
 
-        await FlushAsync();
+        // Ход сам в персист НЕ идёт (Snapshot пишет только Players/мету, не _games). Мид-партийный ход —
+        // ничего durable не меняет, поэтому НЕ пишем стор на каждый ход (было O(N) на ход). Финиш партии
+        // меняет таблицу (FinishGame ставит _dirty) → его запишет таймер тика (≤500 мс), как регистрацию.
+        await PersistDeferredAsync();
         notifier.Notify(Id);
         return BuildGameDto(game, sub);
     }

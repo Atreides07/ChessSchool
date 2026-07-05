@@ -330,6 +330,16 @@ ApiService остаётся владельцем персистентности 
     оставлять литералом: `otpauth://totp/{Esc(issuer)}:{Esc(account)}?secret=…&issuer={Esc(issuer)}&…`. Секрет —
     Base32 (RFC 4648) БЕЗ паддинга, в верхнем регистре (иначе GA тоже отвергает). Защищено
     `TotpTests.OtpAuthUri_UsesLiteralColonSeparator_AndCanonicalParams`.
+20. **Long-poll грейн: окно ожидания ОБЯЗАНО быть меньше response-timeout Orleans, и возвращать «пусто», а не бросать.**
+    Симптом: `System.TimeoutException` из `MatchmakingGrain.FindMatchAsync` у одинокого искателя партии. Причина
+    двойная: (1) грейн ждал соперника `WaitTimeout=60с`, но дефолтный **response-timeout Orleans — 30с** →
+    клиентский вызов пробивал таймаут раньше, чем грейн отвечал; (2) на таймаут ожидания грейн **бросал**
+    исключение → пользователь видел ошибку, даже когда просто «пока никого». Лечение: `FindMatchAsync`
+    возвращает `MatchFound?` (null = за окно никого, НЕ бросает); окно `WaitTimeout` дефолт **20с** (< 30с
+    Orleans) — грейн успевает вернуть null до таймаута сообщения; клиент [Play.razor](ChessSchool.Web/Components/Pages/Play.razor)
+    опрашивает в цикле (bounded long-poll) с кнопкой отмены. Правило: любой «ждущий» грейн-вызов — окно
+    заметно меньше response-timeout, ответ — «пустой результат», а не исключение; долгое ожидание держит клиент
+    повтором, а не одним висящим вызовом. Защищено `OnlineGameFlowTests.TimedOutSeeker_ReturnsNull_*`.
 
 ## Безопасность и конфигурация (специфика)
 

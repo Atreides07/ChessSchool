@@ -17,11 +17,14 @@ public sealed class GameHub(IGrainFactory grains) : Hub
     private string Name => Context.User?.FindFirst("name")?.Value ?? "Игрок";
 
     /// <summary>Поиск соперника по контролю времени. Возвращается, когда пара найдена.</summary>
-    public async Task<MatchFound> FindMatch(int initialSeconds, int increment)
+    public async Task<MatchFound?> FindMatch(int initialSeconds, int increment)
     {
         var tc = new TimeControl(initialSeconds, increment);
         var mm = grains.GetGrain<IMatchmakingGrain>(tc.ToString());
+        // Bounded long-poll: null = за окно соперник не нашёлся (клиент повторит вызов). Так вызов не пробивает
+        // response-timeout Orleans и одинокий искатель не получает TimeoutException.
         var found = await mm.FindMatchAsync(new MatchRequest(Sub, Name, 1200, tc));
+        if (found is null) return null;
         await Groups.AddToGroupAsync(Context.ConnectionId, found.GameId);
         return found;
     }

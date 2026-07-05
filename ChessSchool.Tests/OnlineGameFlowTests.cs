@@ -60,7 +60,9 @@ public class OnlineGameFlowTests
         // Боб ищет вторым — мгновенно спаривается с ждущей Алисой.
         var bob = await mm.FindMatchAsync(new MatchRequest("bob", "Боб", 1300, TimeControl.Blitz));
         var alice = await aliceTask;
-        return (alice, bob); // ждавший (Алиса) получает белые
+        Assert.NotNull(alice); // спарились — оба не null
+        Assert.NotNull(bob);
+        return (alice!, bob!); // ждавший (Алиса) получает белые
     }
 
     [Fact]
@@ -158,7 +160,7 @@ public class OnlineGameFlowTests
     }
 
     [Fact]
-    public async Task TimedOutSeeker_IsPurged_AndNotPairedWithLaterPlayer()
+    public async Task TimedOutSeeker_ReturnsNull_AndIsPurged_NotPairedWithLaterPlayer()
     {
         var cluster = NewCluster();
         await cluster.DeployAsync();
@@ -166,14 +168,13 @@ public class OnlineGameFlowTests
         {
             var mm = cluster.GrainFactory.GetGrain<IMatchmakingGrain>(TimeControl.Blitz.ToString());
 
-            // Алиса ищет и не дожидается соперника — заявка протухает по таймауту (1с в тестовом силосе).
-            await Assert.ThrowsAsync<TimeoutException>(
-                () => mm.FindMatchAsync(new MatchRequest("alice", "Алиса", 1200, TimeControl.Blitz)));
+            // Алиса ищет и не дожидается соперника — окно ожидания истекает (1с в тестовом силосе).
+            // Возвращается null (НЕ исключение) — клиент повторил бы вызов; одинокий искатель не видит ошибки.
+            Assert.Null(await mm.FindMatchAsync(new MatchRequest("alice", "Алиса", 1200, TimeControl.Blitz)));
 
-            // Боб приходит ПОСЛЕ ухода Алисы. Раньше он спаривался с её «висящей» заявкой и получал
-            // партию-призрак; теперь протухшая заявка вычищается, и Боб сам встаёт в ожидание → таймаут.
-            await Assert.ThrowsAsync<TimeoutException>(
-                () => mm.FindMatchAsync(new MatchRequest("bob", "Боб", 1300, TimeControl.Blitz)));
+            // Боб приходит ПОСЛЕ ухода Алисы. Её протухшая заявка вычищена (Tcs отменён) — Боб НЕ спаривается
+            // с «призраком», а сам встаёт в ожидание и тоже получает null по истечении окна.
+            Assert.Null(await mm.FindMatchAsync(new MatchRequest("bob", "Боб", 1300, TimeControl.Blitz)));
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

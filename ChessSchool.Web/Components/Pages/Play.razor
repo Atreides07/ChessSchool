@@ -62,6 +62,9 @@ else
             connected: @((MarkupString)J("play.connected")),
             searching: @((MarkupString)J("play.searching")),
             notFound: @((MarkupString)J("play.notfound")),
+            cancelSearch: @((MarkupString)J("play.cancelsearch")),
+            find: @((MarkupString)J("play.find")),
+            error: @((MarkupString)J("play.error")),
         };
         // Свежий токен берём с серверного эндпоинта (обновляется по refresh) — не вшиваем в страницу.
         const getToken = async () => {
@@ -200,14 +203,21 @@ else
         await conn.start();
         statusEl.textContent = L.connected;
 
+        // Поиск — bounded long-poll: сервер отвечает «пока никого» (null) за окно < таймаута Orleans, поэтому
+        // одинокий искатель НЕ получает ошибку. Клиент повторяет вызов, пока не найдётся пара или не отменят.
+        let searching = false;
         findBtn.onclick = async () => {
-            findBtn.disabled = true; statusEl.textContent = L.searching;
+            if (searching) { searching = false; findBtn.textContent = L.find; statusEl.textContent = ''; return; } // отмена
+            searching = true; findBtn.textContent = L.cancelSearch; statusEl.textContent = L.searching;
             try {
-                const f = await conn.invoke('FindMatch', 300, 2);
+                let f = null;
+                while (searching && !f) f = await conn.invoke('FindMatch', 300, 2); // null → продолжаем опрос
+                if (!f) return; // отменили
+                searching = false; findBtn.textContent = L.find;
                 gameId = f.gameId; myColor = f.color === 0 ? 'w' : 'b'; flip = myColor === 'b';
                 buildBoard();
                 render(await conn.invoke('JoinGame', gameId));
-            } catch { statusEl.textContent = L.notFound; findBtn.disabled = false; }
+            } catch { searching = false; findBtn.textContent = L.find; statusEl.textContent = L.error; }
         };
         resignBtn.onclick = () => { if (gameId) conn.invoke('Resign', gameId).then(s => s && render(s)); };
     </script>

@@ -42,9 +42,10 @@ if (redisConn is not null) builder.Services.AddHealthChecks().AddRedis(redisConn
 builder.Services.AddHttpClient<IGameArchiveClient, GameArchiveClient>(c =>
     c.BaseAddress = new("https+http://apiservice"));
 
-// Таймаут ожидания соперника в матчмейкинге — из конфига (без хардкода в грейне).
+// Таймаут одного окна ожидания соперника — из конфига (без хардкода в грейне). Дефолт 20с < response-timeout
+// Orleans (30с): грейн успевает вернуть «пока никого» до таймаута сообщения; клиент опрашивает в цикле.
 builder.Services.AddSingleton(new ChessSchool.GameServer.Grains.MatchmakingOptions(
-    TimeSpan.FromSeconds(builder.Configuration.GetValue("Matchmaking:WaitTimeoutSeconds", 60))));
+    TimeSpan.FromSeconds(builder.Configuration.GetValue("Matchmaking:WaitTimeoutSeconds", 20))));
 
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();

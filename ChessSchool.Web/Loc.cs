@@ -95,6 +95,8 @@ public static class Loc
         ["play.connected"] = ("Подключено. Нажмите «Найти соперника».", "Connected. Click \"Find opponent\"."),
         ["play.searching"] = ("Ищем соперника…", "Looking for an opponent…"),
         ["play.notfound"] = ("Соперник не найден. Попробуйте ещё раз.", "No opponent found. Try again."),
+        ["play.cancelsearch"] = ("Отменить поиск", "Cancel search"),
+        ["play.error"] = ("Ошибка соединения. Попробуйте ещё раз.", "Connection error. Try again."),
 
         // --- Профили (StudentProfile / PublicProfile / ProfileView / RatingChart) ---
         ["profile.fallback"] = ("Профиль ученика", "Student profile"),

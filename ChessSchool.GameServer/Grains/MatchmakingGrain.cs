@@ -5,10 +5,12 @@ using Color = ChessSchool.Contracts.PieceColor;
 namespace ChessSchool.GameServer.Grains;
 
 /// <summary>Настройки матчмейкинга. Таймаут ожидания соперника — из конфига (Matchmaking:WaitTimeoutSeconds),
-/// чтобы менять под нагрузку без пересборки образа. Дефолт — 60 секунд.</summary>
+/// чтобы менять под нагрузку без пересборки образа. Дефолт — 20 секунд.
+/// ВАЖНО: должен быть МЕНЬШЕ response-timeout Orleans (дефолт 30с), иначе клиентский вызов пробьёт таймаут
+/// раньше, чем грейн вернёт «пока никого» (так и ловили System.TimeoutException). Клиент опрашивает в цикле.</summary>
 public sealed record MatchmakingOptions(TimeSpan WaitTimeout)
 {
-    public static readonly MatchmakingOptions Default = new(TimeSpan.FromSeconds(60));
+    public static readonly MatchmakingOptions Default = new(TimeSpan.FromSeconds(20));
 }
 
 /// <summary>
@@ -22,7 +24,7 @@ public sealed class MatchmakingGrain(IGrainFactory grains, MatchmakingOptions op
 
     private readonly Queue<Waiting> _waiting = new();
 
-    public async Task<MatchFound> FindMatchAsync(MatchRequest request)
+    public async Task<MatchFound?> FindMatchAsync(MatchRequest request)
     {
         // Ищем первого ЖИВОГО ждущего соперника. Протухших (ожидание истекло по таймауту → Tcs отменён)
         // и повторную заявку того же пользователя выкидываем. Снимаем с очереди СРАЗУ (до await ниже):
@@ -49,8 +51,9 @@ public sealed class MatchmakingGrain(IGrainFactory grains, MatchmakingOptions op
             return new MatchFound(gameId, Color.Black, white.UserId, white.DisplayName, white.Rating, request.TimeControl);
         }
 
-        // Соперника нет — встаём в очередь и ждём (с тайм-аутом). По таймауту ОТМЕНЯЕМ свою заявку,
-        // чтобы следующий искатель не спарился с уже ушедшим игроком (Tcs.IsCompleted → вычистится выше).
+        // Соперника нет — встаём в очередь и ждём до WaitTimeout. По таймауту ОТМЕНЯЕМ свою заявку и
+        // возвращаем null («пока никого») — НЕ бросаем: клиент повторит вызов и продолжит поиск без ошибки.
+        // Отмена заявки (Tcs) не даёт следующему искателю спариться с уже ушедшим (IsCompleted → чистится выше).
         var tcs = new TaskCompletionSource<MatchFound>(TaskCreationOptions.RunContinuationsAsynchronously);
         _waiting.Enqueue(new Waiting(request, tcs));
         try
@@ -60,7 +63,7 @@ public sealed class MatchmakingGrain(IGrainFactory grains, MatchmakingOptions op
         catch (TimeoutException)
         {
             tcs.TrySetCanceled();
-            throw;
+            return null;
         }
     }
 }

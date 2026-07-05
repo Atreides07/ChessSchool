@@ -20,5 +20,8 @@ public interface IGameGrain : IGrainWithStringKey
 /// </summary>
 public interface IMatchmakingGrain : IGrainWithStringKey
 {
-    Task<MatchFound> FindMatchAsync(MatchRequest request);
+    /// <summary>Bounded long-poll: спарить с ждущим соперником ИЛИ подождать до WaitTimeout. Возвращает
+    /// null, если за окно соперник не нашёлся (НЕ бросает) — клиент повторяет вызов (держит поиск).
+    /// WaitTimeout ОБЯЗАН быть меньше response-timeout Orleans, иначе вызов пробьёт таймаут раньше.</summary>
+    Task<MatchFound?> FindMatchAsync(MatchRequest request);
 }

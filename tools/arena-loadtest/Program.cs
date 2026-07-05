@@ -1,10 +1,13 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using Chess;
 using ChessSchool.Arena.Grains;
 using ChessSchool.Arena.Services;
 using ChessSchool.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
+using CColor = ChessSchool.Contracts.PieceColor; // разводим с Chess.PieceColor (Gera.Chess)
 
 // ---------------------------------------------------------------------------------------------------
 // Нагрузочный тест Арены на ЯРУСЕ ГРЕЙНА (единица масштабирования — грейн-на-турнир, single-writer).
@@ -46,6 +49,7 @@ try
     if (scenario is "all" or "storm") await StormScenario(cluster, players);
     if (scenario is "all" or "horizontal") await HorizontalScenario(cluster, players);
     if (scenario is "all" or "sustain") await SustainScenario(cluster, players, sustainSeconds);
+    if (scenario is "all" or "play") await PlayScenario(cluster, players, sustainSeconds);
 
     long memAfter = GcMem();
     Console.WriteLine("\n=== Память ===");
@@ -172,6 +176,74 @@ async Task SustainScenario(TestCluster c, int n, int seconds)
     Console.WriteLine($"Проба GetSummary (round-trip за тиком), проб {probe.Count}:");
     Console.WriteLine($"  p50 {Pct(probe, .50):F2} мс | p95 {Pct(probe, .95):F2} мс | p99 {Pct(probe, .99):F2} мс | max {probe[^1]:F2} мс");
     Console.WriteLine($"Бюджет тика — {ArenaTuning.TimerCadenceMs} мс. p99 пробы < бюджета → грейн держит тик без деградации.\n");
+}
+
+// ------------------------------- Сценарий PLAY: N игроков активно ИГРАЮТ -------------------------------
+// N игроков → N/2 партий человек-vs-человек, и харнес РЕАЛЬНО гонит ходы через MoveAsync (легальные ходы
+// генерит Gera.Chess по FEN доски — та же либа, что в грейне, поэтому ход принимается). Волнами: один
+// GetBoardsAsync (все доски) → на каждую идущую партию один ход стороны, чей ход. Измеряет горячий путь
+// ИГРЫ (MoveAsync) при N/2 партий в ОДНОМ турнире (single-writer). Имя игрока = его sub, чтобы по доске
+// (WhiteName/BlackName) знать, кто ходит.
+async Task PlayScenario(TestCluster c, int n, int seconds)
+{
+    Console.WriteLine($"=== Сценарий PLAY: {n} игроков активно играют, окно {seconds}с ===");
+    var id = $"play-{Guid.NewGuid():N}";
+    var g = c.GrainFactory.GetGrain<IArenaTournamentGrain>(id);
+    await g.ConfigureAsync("Play", TimeControl.Blitz, DateTimeOffset.UtcNow.AddSeconds(-2), 3600);
+
+    var joinSw = Stopwatch.StartNew();
+    await Task.WhenAll(Enumerable.Range(0, n).Select(i => g.JoinAsync($"u{i}", $"u{i}")));
+    await Task.WhenAll(Enumerable.Range(0, n).Select(i => g.SeekAsync($"u{i}")));
+    joinSw.Stop();
+    int gamesStart = (await g.GetBoardsAsync()).Count(b => b.Status == GameStatus.InProgress);
+    Console.WriteLine($"Подготовка: {n} join+seek за {joinSw.ElapsedMilliseconds} мс → {gamesStart} партий пошло.");
+
+    var lat = new ConcurrentBag<double>();
+    long calls = 0, noMove = 0;
+    int pick = 0, waves = 0;
+    var swAll = Stopwatch.StartNew();
+    var end = DateTimeOffset.UtcNow.AddSeconds(seconds);
+    while (DateTimeOffset.UtcNow < end)
+    {
+        var boards = (await g.GetBoardsAsync()).Where(b => b.Status == GameStatus.InProgress).ToList();
+        if (boards.Count == 0) break;
+        waves++;
+        await Task.WhenAll(boards.Select(async b =>
+        {
+            var mover = b.Turn == CColor.White ? b.WhiteName : b.BlackName;
+            var mv = LegalMove(b.Fen, Interlocked.Increment(ref pick));
+            if (mv is null) { Interlocked.Increment(ref noMove); return; }
+            var sw = Stopwatch.StartNew();
+            await g.MoveAsync(mover, new MoveInput(mv.Value.From, mv.Value.To, "q")); // promo=q безвредно для не-превращений
+            sw.Stop();
+            lat.Add(sw.Elapsed.TotalMilliseconds);
+            Interlocked.Increment(ref calls);
+        }));
+    }
+    swAll.Stop();
+    int gamesEnd = (await g.GetBoardsAsync()).Count(b => b.Status == GameStatus.InProgress);
+
+    var l = lat.OrderBy(x => x).ToList();
+    double perSec = calls / Math.Max(swAll.Elapsed.TotalSeconds, 1e-6);
+    Console.WriteLine($"Партий в игре: старт {gamesStart} → конец {gamesEnd}; волн ходов {waves}.");
+    Console.WriteLine($"Ходов (MoveAsync): {calls} за {swAll.Elapsed.TotalSeconds:F1}с = **{perSec:N0} ходов/с**; без легального хода {noMove}.");
+    if (l.Count > 0)
+        Console.WriteLine($"Задержка MoveAsync: p50 {Pct(l, .50):F1} мс | p95 {Pct(l, .95):F1} мс | p99 {Pct(l, .99):F1} мс | max {l[^1]:F1} мс");
+    Console.WriteLine("NB: MoveAsync флашит ВЕСЬ стор на каждый ход (Snapshot+WriteState, O(N)) — на N/2 партий");
+    Console.WriteLine("    в одном турнире это O(N) на ход; узкое место горячего пути игры (см. вывод в конце).\n");
+}
+
+// Легальный ход из FEN через Gera.Chess (та же либа, что в грейне). pick разнообразит выбор по партиям.
+static (string From, string To)? LegalMove(string fen, int pick)
+{
+    ChessBoard b;
+    try { b = ChessBoard.LoadFromFen(fen); }
+    catch { return null; }
+    var moves = b.Moves();
+    if (moves.Length == 0) return null;
+    var m = moves[(pick & int.MaxValue) % moves.Length];
+    static string Sq(Position p) => $"{(char)('a' + p.X)}{p.Y + 1}";
+    return (Sq(m.OriginalPosition), Sq(m.NewPosition));
 }
 
 // ------------------------------- helpers -------------------------------

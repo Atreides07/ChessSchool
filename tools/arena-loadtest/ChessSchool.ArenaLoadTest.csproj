@@ -15,6 +15,8 @@
     <ProjectReference Include="..\..\ChessSchool.Arena\ChessSchool.Arena.csproj" />
     <!-- Тот же in-proc тест-силос Orleans, что и в ChessSchool.Tests. -->
     <PackageReference Include="Microsoft.Orleans.TestingHost" Version="10.2.1" />
+    <!-- Та же шахматная либа, что в грейне (ChessGame) — генерим ЛЕГАЛЬНЫЕ ходы для сценария PLAY. -->
+    <PackageReference Include="Gera.Chess" Version="1.2.0" />
   </ItemGroup>
 
 </Project>

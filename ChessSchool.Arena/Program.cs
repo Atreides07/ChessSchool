@@ -160,6 +160,7 @@ builder.Services.AddHttpClient("PairingFetch", c =>
 
 // Продуктовая аналитика (PostHog при наличии ключа, иначе no-op).
 builder.AddChessSchoolAnalytics();
+builder.Services.AddSingleton<ChessSchool.Arena.Services.ArenaTelemetry>(); // формирование arena-событий в одном месте
 
 // Доступ к cookie запроса (запоминание выбранного вида расписания при SSR-навигации).
 builder.Services.AddHttpContextAccessor();

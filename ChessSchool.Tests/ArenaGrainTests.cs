@@ -28,6 +28,7 @@ public class ArenaGrainTests
                 s.AddSingleton<IChessEngine, FakeEngine>();
                 s.AddSingleton(new ArenaRuntimeOptions(RemindersEnabled: false));
                 s.AddSingleton<IAnalytics, NoopAnalytics>();
+                s.AddSingleton<ArenaTelemetry>();
                 s.AddSingleton(TimeProvider.System); // реальное время — поведение существующих тестов не меняется
             });
         }

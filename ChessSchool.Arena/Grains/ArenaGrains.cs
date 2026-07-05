@@ -137,7 +137,7 @@ public sealed class ArenaTournamentGrain(
     ArenaNotifier notifier,
     IChessEngine engine,
     ArenaRuntimeOptions runtime,
-    IAnalytics analytics,
+    ArenaTelemetry telemetry,
     TimeProvider time,
     IServiceProvider services,
     ILogger<ArenaTournamentGrain> logger) : Grain, IArenaTournamentGrain, IRemindable
@@ -473,11 +473,7 @@ public sealed class ArenaTournamentGrain(
             // (SeekAsync) — соперник (в т.ч. бот) автоматически не назначается.
             _players[sub] = new Player { Name = name };
             _dirty = true;
-            analytics.Capture("tournament_joined", sub, new Dictionary<string, object?>
-            {
-                ["tournament_id"] = Id,
-                ["time_control"] = _tc.ToString(),
-            });
+            telemetry.Joined(Id, _tc, sub);
         }
         EnsureTimer();
         Tick();
@@ -944,13 +940,8 @@ public sealed class ArenaTournamentGrain(
             if (!p.IsBot)
             {
                 var opp = _players[s == a ? b : a];
-                analytics.Capture("arena_paired", s, new Dictionary<string, object?>
-                {
-                    ["tournament_id"] = Id,
-                    ["time_control"] = _tc.ToString(),
-                    ["opponent_is_bot"] = opp.IsBot,
-                    ["wait_seconds"] = p.WaitingSince is { } w ? (int)(time.GetUtcNow() - w).TotalSeconds : 0,
-                });
+                telemetry.Paired(Id, _tc, s, opp.IsBot,
+                    p.WaitingSince is { } w ? (int)(time.GetUtcNow() - w).TotalSeconds : 0);
             }
             p.Playing = true;
             p.GameId = gid;
@@ -1002,16 +993,9 @@ public sealed class ArenaTournamentGrain(
             if (p.IsBot) continue;
             var outcome = g.Result == GameResult.Draw ? "draw"
                 : (g.Result == GameResult.WhiteWins) == isWhite ? "win" : "loss";
-            analytics.Capture("arena_game_finished", sub, new Dictionary<string, object?>
-            {
-                ["tournament_id"] = Id,
-                ["time_control"] = _tc.ToString(),
-                ["result"] = outcome,
-                ["reason"] = g.Reason.ToString(),
-                ["opponent_is_bot"] = _players[isWhite ? g.BlackSub : g.WhiteSub].IsBot,
-                ["was_berserk"] = isWhite ? g.WhiteBerserk : g.BlackBerserk,
-                ["duration_seconds"] = durationSec,
-            });
+            telemetry.GameFinished(Id, _tc, sub, outcome, g.Reason.ToString(),
+                _players[isWhite ? g.BlackSub : g.WhiteSub].IsBot,
+                isWhite ? g.WhiteBerserk : g.BlackBerserk, durationSec);
         }
 
         _dirty = true; // изменилась таблица — сохранить, чтобы пережить деактивацию грейна

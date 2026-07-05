@@ -31,6 +31,8 @@ public class ImageIngestBackfillTests
                 s.AddSingleton<IChessEngine, FakeEngine>();
                 s.AddSingleton(new ArenaRuntimeOptions(RemindersEnabled: false));
                 s.AddSingleton<IAnalytics, NoopAnalytics>();
+                s.AddSingleton<ArenaTelemetry>();
+                s.AddSingleton(TimeProvider.System);
             });
         }
     }

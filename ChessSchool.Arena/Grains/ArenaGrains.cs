@@ -162,6 +162,33 @@ public sealed class ArenaTournamentGrain(
         public int Wins;
         public readonly List<int> Results = new(); // очки за каждую сыгранную партию (0/1/2/4)
         public bool OnFire => Streak >= 2;
+
+        // Маппинг runtime↔persisted co-located и симметричен (design-review #4): при добавлении поля
+        // видно оба направления, нельзя забыть одно. Runtime-поля (Playing/GameId/Seeking/WaitingSince)
+        // намеренно НЕ персистятся — при реактивации игрок переспаривается.
+        public PersistedPlayer ToPersisted(string key) => new()
+        {
+            Key = key,
+            Name = Name,
+            IsBot = IsBot,
+            Score = Score,
+            Streak = Streak,
+            Games = Games,
+            Wins = Wins,
+            Results = Results.ToList()
+        };
+
+        public static Player FromPersisted(PersistedPlayer p)
+        {
+            var pl = new Player { Name = p.Name, IsBot = p.IsBot, Score = p.Score, Streak = p.Streak, Games = p.Games, Wins = p.Wins };
+            pl.Results.AddRange(p.Results);
+            if (pl.IsBot) // сила/скорость бота не хранятся — восстанавливаем детерминированно из ключа
+            {
+                var persona = BotPersona.For(p.Key);
+                pl.Rating = persona.Rating; pl.Skill = persona.Skill; pl.SpeedFactor = persona.Speed;
+            }
+            return pl;
+        }
     }
 
     // Желаемое число ботов в идущем турнире — настраивается в админке по типу игры (BotSettingsGrain).
@@ -169,11 +196,7 @@ public sealed class ArenaTournamentGrain(
     private int? _botTarget;
     private DateTimeOffset _botSettingsAt;
     private int BotTarget => _botTarget ?? BotSettingsGrain.DefaultCount;
-    // Сколько секунд человек ждёт соперника-человека, прежде чем к нему подключат бота.
-    private const int WaitForBotSeconds = 10;
-    // Хвост показа завершённой партии БЕЗ живого участника (бот-vs-бот / человек уже ушёл): зрители
-    // успевают увидеть финал, потом партия убирается. Партию, которую смотрит человек, держим без таймера.
-    private const int FinishedLingerSeconds = 6;
+    // Тюнинг-параметры (ожидание бота, linger, каденс тика, бюджет движка) сгруппированы в ArenaTuning.
     private int _botCounter;
 
     private static readonly string[] BotNames =
@@ -235,16 +258,7 @@ public sealed class ArenaTournamentGrain(
         _startsAt = s.StartsAt;
         _botCounter = s.BotCounter;
         foreach (var p in s.Players)
-        {
-            var pl = new Player { Name = p.Name, IsBot = p.IsBot, Score = p.Score, Streak = p.Streak, Games = p.Games, Wins = p.Wins };
-            pl.Results.AddRange(p.Results);
-            if (pl.IsBot) // сила/скорость бота не хранятся — восстанавливаем детерминированно из ключа
-            {
-                var persona = BotPersona.For(p.Key);
-                pl.Rating = persona.Rating; pl.Skill = persona.Skill; pl.SpeedFactor = persona.Speed;
-            }
-            _players[p.Key] = pl; // runtime-поля (Playing/GameId/WaitingSince) сбрасываются — игрок переспарится
-        }
+            _players[p.Key] = Player.FromPersisted(p); // runtime-поля сбрасываются — игрок переспарится
         EnsureTimer();
     }
 
@@ -281,17 +295,7 @@ public sealed class ArenaTournamentGrain(
         s.DurationSeconds = _durationSeconds;
         s.StartsAt = _startsAt;
         s.BotCounter = _botCounter;
-        s.Players = _players.Select(kv => new PersistedPlayer
-        {
-            Key = kv.Key,
-            Name = kv.Value.Name,
-            IsBot = kv.Value.IsBot,
-            Score = kv.Value.Score,
-            Streak = kv.Value.Streak,
-            Games = kv.Value.Games,
-            Wins = kv.Value.Wins,
-            Results = kv.Value.Results.ToList()
-        }).ToList();
+        s.Players = _players.Select(kv => kv.Value.ToPersisted(kv.Key)).ToList();
     }
 
     private async Task FlushAsync()
@@ -368,11 +372,7 @@ public sealed class ArenaTournamentGrain(
     private void SimulateFinished()
     {
         foreach (var p in ArenaFinishedSimulator.Build(Id, _tc, _durationSeconds))
-        {
-            var pl = new Player { Name = p.Name, IsBot = p.IsBot, Score = p.Score, Streak = p.Streak, Games = p.Games, Wins = p.Wins };
-            pl.Results.AddRange(p.Results);
-            _players[p.Key] = pl;
-        }
+            _players[p.Key] = Player.FromPersisted(p);
     }
 
     private void EnsureTimer()
@@ -380,9 +380,10 @@ public sealed class ArenaTournamentGrain(
         if (Status() != TournamentStatus.Running) return;
         // Пока турнир идёт, держим грейн активным: иначе при простое он деактивируется,
         // партии встанут, а боты перестанут ходить. Состояние всё равно персистится.
-        DelayDeactivation(TimeSpan.FromMinutes(10));
+        DelayDeactivation(TimeSpan.FromMinutes(ArenaTuning.KeepAliveMinutes));
         // 500 мс: достаточно мелкий шаг, чтобы тайминг ходов ботов был неравномерным, а не «по метроному».
-        _timer ??= this.RegisterGrainTimer(OnTimerAsync, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+        _timer ??= this.RegisterGrainTimer(OnTimerAsync,
+            TimeSpan.FromMilliseconds(ArenaTuning.TimerCadenceMs), TimeSpan.FromMilliseconds(ArenaTuning.TimerCadenceMs));
 
         // Reminder (есть Redis) воскрешает грейн на ЛЮБОЙ ноде даже при внезапной потере текущей ноды
         // (таймер живёт только в активном грейне). Гранулярность reminder'а — 1 мин (минимум Orleans):
@@ -398,7 +399,8 @@ public sealed class ArenaTournamentGrain(
     {
         try
         {
-            await this.RegisterOrUpdateReminder(TickReminder, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+            await this.RegisterOrUpdateReminder(TickReminder,
+                TimeSpan.FromMinutes(ArenaTuning.ReminderMinutes), TimeSpan.FromMinutes(ArenaTuning.ReminderMinutes));
         }
         catch (Exception ex)
         {
@@ -484,7 +486,7 @@ public sealed class ArenaTournamentGrain(
     /// <summary>
     /// Игрок нажал «подобрать соперника»: входит в пул подбора. Подбор не автоматический — пока флаг не
     /// взведён, игрок просто записан. Сразу пробуем спарить (если есть другой ищущий человек); иначе он
-    /// ждёт, и через <see cref="WaitForBotSeconds"/> к нему подключится бот (как и раньше после нажатия).
+    /// ждёт, и через <see cref="ArenaTuning.WaitForBotSeconds"/> к нему подключится бот (как и раньше после нажатия).
     /// </summary>
     public async Task SeekAsync(string sub)
     {
@@ -770,7 +772,7 @@ public sealed class ArenaTournamentGrain(
             // убираем — иначе _games рос бы без предела (горячий путь, неограниченная коллекция).
             bool humanHolds = IsHumanHolding(g.WhiteSub, g.Id) || IsHumanHolding(g.BlackSub, g.Id);
             if (humanHolds) continue;
-            if (g.FinishedAt is { } f && (now - f).TotalSeconds <= FinishedLingerSeconds) continue;
+            if (g.FinishedAt is { } f && (now - f).TotalSeconds <= ArenaTuning.FinishedLingerSeconds) continue;
             foreach (var s in new[] { g.WhiteSub, g.BlackSub })
                 if (_players.TryGetValue(s, out var pl) && pl.GameId == g.Id) FreePlayer(s);
             _games.Remove(g.Id);
@@ -837,7 +839,7 @@ public sealed class ArenaTournamentGrain(
 
             // Движку даём время, пропорциональное запланированному (но без блокировки грейна надолго);
             // сила хода — по уровню Stockfish этого бота (разные рейтинги играют по-разному).
-            int engineMs = Math.Clamp(g.BotPlannedMs, 100, 450);
+            int engineMs = Math.Clamp(g.BotPlannedMs, ArenaTuning.EngineBudgetMinMs, ArenaTuning.EngineBudgetMaxMs);
             var uci = await engine.GetBestMoveAsync(g.Board.Fen, mp.Skill, engineMs);
             bool moved = uci is not null && ApplyUci(g, uci);
             if (!moved) moved = g.Board.TryMakeRandomMove();
@@ -893,7 +895,7 @@ public sealed class ArenaTournamentGrain(
         var idleBots = _players.Where(kv => kv.Value.IsBot && !kv.Value.Playing)
             .Select(kv => kv.Key).ToList();
 
-        var plan = ArenaPairing.Plan(idleHumans, idleBots, time.GetUtcNow(), WaitForBotSeconds, BotTarget > 0);
+        var plan = ArenaPairing.Plan(idleHumans, idleBots, time.GetUtcNow(), ArenaTuning.WaitForBotSeconds, BotTarget > 0);
         foreach (var (a, b) in plan.Pairs) CreateGame(a, b);
         foreach (var human in plan.HumansNeedingNewBot) CreateGame(human, SpawnBot());
     }
@@ -951,6 +953,9 @@ public sealed class ArenaTournamentGrain(
     }
 
     // Часы и разрешение просрочки — в ArenaClock (тестируемо). Здесь только применяем к доске.
+    // Инвариант single-writer (design-review #6): часы двигают оба входа — MoveAsync и Tick — по дельте
+    // wall-clock. Гонки нет (грейн не-реентрантный): кто из Move/Tick выполнится первым, сдвинет LastMoveAt,
+    // второй увидит уже обновлённое значение. FinishGame идемпотентен (ранний выход при Status != InProgress).
     private bool DeductClock(Game g, Color mover)
     {
         var elapsed = (long)(time.GetUtcNow() - g.LastMoveAt).TotalMilliseconds;

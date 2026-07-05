@@ -322,6 +322,14 @@ ApiService остаётся владельцем персистентности 
     матчить по префиксу без хэша — `scripts.some(s => /^broadcast\.([\w]+\.)?js$/.test(s))` (ловит и
     `broadcast.js` в dev, и `broadcast.<hash>.js`). **Правило: любые проверки/код, завязанные на имя статики
     под `wwwroot`, писать хэш-независимо** — фингерпринт меняет имя при каждом изменении файла.
+19. **otpauth-URI: двоеточие-разделитель label должно быть ЛИТЕРАЛЬНЫМ, иначе Google Authenticator не сканирует.**
+    Симптом: QR настройки MFA не считывался Google Authenticator. Причина: [OtpAuthUri](ChessSchool.Auth/Totp.cs)
+    кодировал всю строку label целиком (`Uri.EscapeDataString($"{issuer}:{account}")`), из-за чего `:` →
+    `%3A`. По спеке key-uri `%3A` допустим, но часть версий GA парсит надёжно только **литеральное** двоеточие
+    (как otplib/speakeasy). Лечение: кодировать issuer и account по отдельности, двоеточие-разделитель
+    оставлять литералом: `otpauth://totp/{Esc(issuer)}:{Esc(account)}?secret=…&issuer={Esc(issuer)}&…`. Секрет —
+    Base32 (RFC 4648) БЕЗ паддинга, в верхнем регистре (иначе GA тоже отвергает). Защищено
+    `TotpTests.OtpAuthUri_UsesLiteralColonSeparator_AndCanonicalParams`.
 
 ## Безопасность и конфигурация (специфика)
 

@@ -54,9 +54,12 @@ public static class Totp
     /// <summary>otpauth://-URI для QR/ручного ввода в приложении-аутентификаторе.</summary>
     public static string OtpAuthUri(string issuer, string account, byte[] secret)
     {
-        var label = Uri.EscapeDataString($"{issuer}:{account}");
+        // Label = "issuer:account" с ЛИТЕРАЛЬНЫМ двоеточием-разделителем; issuer и account кодируем по
+        // отдельности. Форма с закодированным двоеточием (%3A) по спецификации допустима, но часть версий
+        // Google Authenticator её не парсит — канонический вид (как otplib/speakeasy) принимается надёжно.
         var iss = Uri.EscapeDataString(issuer);
-        return $"otpauth://totp/{label}?secret={Base32.Encode(secret)}&issuer={iss}&algorithm=SHA1&digits={DefaultDigits}&period={DefaultPeriodSeconds}";
+        var acc = Uri.EscapeDataString(account);
+        return $"otpauth://totp/{iss}:{acc}?secret={Base32.Encode(secret)}&issuer={iss}&algorithm=SHA1&digits={DefaultDigits}&period={DefaultPeriodSeconds}";
     }
 }
 

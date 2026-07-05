@@ -57,4 +57,21 @@ public class TotpTests
         var secret = Totp.GenerateSecret();
         Assert.Equal(secret, Base32.Decode(Base32.Encode(secret)));
     }
+
+    // Регрессия: Google Authenticator надёжно парсит otpauth-URI только с ЛИТЕРАЛЬНЫМ двоеточием-разделителем
+    // label (issuer:account). Форма с %3A (кодирование всей строки label) не сканировалась в GA.
+    [Fact]
+    public void OtpAuthUri_UsesLiteralColonSeparator_AndCanonicalParams()
+    {
+        var secret = Base32.Decode("JBSWY3DPEHPK3PXP");
+        var uri = Totp.OtpAuthUri("ChessSchool ID", "user@example.com", secret);
+
+        Assert.StartsWith("otpauth://totp/ChessSchool%20ID:user%40example.com?", uri);
+        Assert.DoesNotContain("%3A", uri); // двоеточие-разделитель НЕ закодировано
+        Assert.Contains($"secret={Base32.Encode(secret)}", uri);
+        Assert.Contains("issuer=ChessSchool%20ID", uri);
+        Assert.Contains("algorithm=SHA1", uri);
+        Assert.Contains($"digits={Totp.DefaultDigits}", uri);
+        Assert.Contains($"period={Totp.DefaultPeriodSeconds}", uri);
+    }
 }

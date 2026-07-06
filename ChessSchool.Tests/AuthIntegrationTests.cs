@@ -87,6 +87,29 @@ public class AuthIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Register_ConcurrentSameEmail_NoServerError_CreatesExactlyOneUser()
+    {
+        // TOCTOU-гонка: два параллельных запроса регистрации одним e-mail. Проверка existing и вставка
+        // не атомарны → второй ловит unique-индекс IX_Users_Email. Раньше это давало 500; теперь дубль
+        // обрабатывается как «уже существует» (не падаем), и в БД ровно один пользователь.
+        var email = $"race-{Guid.NewGuid():N}@test.local";
+        var c1 = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var c2 = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var responses = await Task.WhenAll(Register(c1, email), Register(c2, email));
+
+        foreach (var r in responses)
+        {
+            Assert.NotEqual(HttpStatusCode.InternalServerError, r.StatusCode); // никакого 500
+            Assert.Equal(HttpStatusCode.Redirect, r.StatusCode);
+        }
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Assert.Equal(1, await db.Users.CountAsync(u => u.Email == email)); // ровно один создан
+    }
+
+    [Fact]
     public async Task Login_Succeeds_EvenWhenEmailUnconfirmed()
     {
         var reg = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

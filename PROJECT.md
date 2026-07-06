@@ -340,6 +340,19 @@ ApiService остаётся владельцем персистентности 
     опрашивает в цикле (bounded long-poll) с кнопкой отмены. Правило: любой «ждущий» грейн-вызов — окно
     заметно меньше response-timeout, ответ — «пустой результат», а не исключение; долгое ожидание держит клиент
     повтором, а не одним висящим вызовом. Защищено `OnlineGameFlowTests.TimedOutSeeker_ReturnsNull_*`.
+21. **Проверка «уже существует» + вставка НЕ атомарны — под конкуренцией лови unique-констрейнт, а не 500.**
+    Симптом: `PostgresException 23505: duplicate key … "IX_Users_Email"` → 500 на `/account/register`. Причина:
+    TOCTOU-гонка — два параллельных запроса одним e-mail оба проходят `FirstOrDefaultAsync(existing)` (оба видят
+    null), оба делают `SaveChangesAsync`, второй бьётся об unique-индекс. БД-констрейнт сработал верно (он и есть
+    источник истины), но код его не обрабатывал. Лечение ([Program.cs](ChessSchool.Auth/Program.cs) `/account/register`):
+    обернуть insert в `try/catch (DbUpdateException)`, на конфликте **снять неудавшуюся вставку с трекера**
+    (`db.Entry(user).State = EntityState.Detached` — иначе следующий `SaveChanges` при выдаче токена письма повторит
+    insert и снова упрётся в констрейнт), перечитать «победителя» по e-mail и отдать тот же ответ, что и ветка
+    «уже существует» (подтверждён → `error=exists`; не подтверждён → переотправка письма). Постура анти-энумерации
+    не меняется — путь гонки ведёт себя как последовательный. Тот же паттерн уже в [ArenaGameStore](ChessSchool.ApiService/Services/ArenaGameStore.cs)
+    (`ExternalGameId`). Правило: любая пара «проверил-отсутствие → вставил» на общих данных не атомарна — полагайся
+    на unique-индекс и обрабатывай `DbUpdateException` идемпотентно, «проверка перед вставкой» лишь оптимизация, не
+    гарантия. Защищено `AuthIntegrationTests.Register_ConcurrentSameEmail_NoServerError_CreatesExactlyOneUser` (Postgres).
 
 ## Безопасность и конфигурация (специфика)
 

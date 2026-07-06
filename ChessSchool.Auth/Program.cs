@@ -340,7 +340,26 @@ app.MapPost("/account/register", async (HttpContext ctx, AuthDbContext db, IPass
     var user = new AppUser { Email = em, DisplayName = form["name"].ToString() };
     user.PasswordHash = hasher.HashPassword(user, password);
     db.Users.Add(user);
-    await db.SaveChangesAsync();
+    try
+    {
+        await db.SaveChangesAsync(ct);
+    }
+    catch (DbUpdateException)
+    {
+        // Гонка регистраций одним e-mail (TOCTOU): проверка existing выше и вставка не атомарны, поэтому
+        // второй параллельный запрос проходит проверку и ловит unique-индекс IX_Users_Email на вставке.
+        // Это не 500 — БД корректно отсекла дубль; ведём себя как при уже существующем пользователе.
+        // Снимаем неудавшуюся вставку с трекера, иначе следующий SaveChanges (выдача токена письма)
+        // повторит insert и снова упрётся в констрейнт.
+        db.Entry(user).State = EntityState.Detached;
+        var winner = await db.Users.FirstOrDefaultAsync(u => u.Email == em, ct);
+        if (winner is null) // конфликт был не по e-mail — не глотаем вслепую, показываем общую ошибку
+            return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1&mode=register");
+        if (winner.EmailConfirmed)
+            return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=exists&mode=register");
+        await SendConfirmationEmailAsync(ctx, tokens, email, winner, ret);
+        return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&mode=sent&email={Uri.EscapeDataString(em)}");
+    }
     await SendConfirmationEmailAsync(ctx, tokens, email, user, ret);
     await SignInCookieAsync(ctx, user);
     await audit.LogAsync(ctx, AuthEventType.Register, em, user.Id);

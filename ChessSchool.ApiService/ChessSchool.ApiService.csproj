@@ -15,6 +15,11 @@
   <ItemGroup>
     <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
+    <!-- Поднимаем транзитивную Microsoft.OpenApi 2.0.0 (high-severity GHSA-v5pm-xwqc-g5wc, NU1903:
+         зацикленные схемы прерывают ПАРСИНГ OpenAPI) до первого пропатченного 2.7.5. Та же мажорная
+         ветка 2.x (обратно совместима с 2.0.0, ожидаемой AspNetCore.OpenApi 10.0.8). У нас документ
+         генерируется, а не парсится извне — эксплуатируемость низкая, но advisory закрываем. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

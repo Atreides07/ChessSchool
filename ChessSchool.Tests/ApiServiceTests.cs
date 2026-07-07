@@ -61,6 +61,46 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task UpdateStudent_ByOwner_ChangesNameAndBirthDate()
+    {
+        var name = $"Правка-{Guid.NewGuid():N}";
+        var created = await _client.SendAsync(Owner(HttpMethod.Post, $"/schools/{Demo.SchoolId}/students",
+            new CreateStudentRequest(Demo.GroupId, name, null)));
+        var student = (await created.Content.ReadFromJsonAsync<StudentDto>())!;
+
+        var newName = name + "-ред";
+        var birth = new DateOnly(2013, 5, 20);
+        var upd = await _client.SendAsync(Owner(HttpMethod.Put, $"/students/{student.Id}",
+            new UpdateStudentRequest(newName, birth)));
+        upd.EnsureSuccessStatusCode();
+        var dto = (await upd.Content.ReadFromJsonAsync<StudentDto>())!;
+
+        Assert.Equal(newName, dto.DisplayName);
+        Assert.Equal(birth, dto.BirthDate);
+        Assert.Contains(await OwnerStudentsAsync(), s => s.DisplayName == newName && s.BirthDate == birth);
+    }
+
+    [Fact]
+    public async Task UpdateStudent_EmptyName_Returns400()
+    {
+        var student = (await OwnerStudentsAsync())[0];
+        var resp = await _client.SendAsync(Owner(HttpMethod.Put, $"/students/{student.Id}",
+            new UpdateStudentRequest("   ", null)));
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateStudent_ForeignUser_Returns403()
+    {
+        var student = (await OwnerStudentsAsync())[0];
+        var req = new HttpRequestMessage(HttpMethod.Put, $"/students/{student.Id}");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        req.Content = JsonContent.Create(new UpdateStudentRequest("Взлом", null));
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task Students_Pagination_LimitsResults()
     {
         var resp = await _client.SendAsync(Owner(HttpMethod.Get, $"/schools/{Demo.SchoolId}/students?take=2"));

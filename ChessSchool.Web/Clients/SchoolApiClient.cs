@@ -60,6 +60,12 @@ public sealed class SchoolApiClient(HttpClient http)
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<StudentDto>(ct) : null;
     }
 
+    public async Task<StudentDto?> UpdateStudentAsync(Guid studentId, UpdateStudentRequest req, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Put, $"/students/{studentId}", actingSub, req), ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<StudentDto>(ct) : null;
+    }
+
     public Task AttributeAsync(Guid gameId, AttributeGameRequest req, string actingSub, CancellationToken ct = default) =>
         http.SendAsync(Req(HttpMethod.Post, $"/games/{gameId}/attribute", actingSub, req), ct);
 

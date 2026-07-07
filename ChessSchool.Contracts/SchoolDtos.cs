@@ -17,7 +17,8 @@ public sealed record StudentDto(
     int Wins,
     int Draws,
     int Losses,
-    string? LinkedUserSub)
+    string? LinkedUserSub,
+    DateOnly? BirthDate = null)
 {
     public double WinRate => GamesPlayed == 0 ? 0 : Math.Round(100.0 * Wins / GamesPlayed, 1);
     public bool AccountLinked => !string.IsNullOrEmpty(LinkedUserSub);
@@ -47,6 +48,9 @@ public sealed record StudentProfileDto(
 
 /// <summary>Запрос на создание ученика.</summary>
 public sealed record CreateStudentRequest(Guid GroupId, string DisplayName, DateOnly? BirthDate);
+
+/// <summary>Запрос на редактирование ученика (имя/дата рождения).</summary>
+public sealed record UpdateStudentRequest(string DisplayName, DateOnly? BirthDate);
 
 /// <summary>Партия в очереди на атрибуцию (тренировочный сценарий).</summary>
 public sealed record PendingGameDto(Guid Id, DateTimeOffset PlayedAt, string DeviceRef, string Pgn);

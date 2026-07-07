@@ -17,7 +17,8 @@
 
 <div class="card">
     <div class="add-row">
-        <input @bind="_newName" placeholder="@Loc.T("school.newname")" class="input" />
+        <input @bind="_newName" @bind:event="oninput" placeholder="@Loc.T("school.newname")" class="input" />
+        <input type="date" @bind="_newBirth" title="@Loc.T("school.birthdate")" class="input input-date" />
         <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">@Loc.T("school.add")</button>
     </div>
 
@@ -27,33 +28,65 @@
     }
     else
     {
-        <table class="table hover">
-            <thead>
-                <tr><th>@Loc.T("school.col.student")</th><th>@Loc.T("school.col.rating")</th><th>@Loc.T("school.col.games")</th><th>@Loc.T("school.col.winrate")</th><th>@Loc.T("school.col.account")</th><th>@Loc.T("school.col.parent")</th></tr>
-            </thead>
-            <tbody>
-                @foreach (var s in _students)
-                {
+        <div class="list-tools">
+            <input @bind="_search" @bind:event="oninput" placeholder="@Loc.T("school.search")" class="input search" />
+            <span class="text-muted count">@View.Count / @_students.Count</span>
+        </div>
+
+        @if (View.Count == 0)
+        {
+            <p class="text-muted mt-2"><em>@(_students.Count == 0 ? Loc.T("school.empty") : Loc.T("school.nomatch"))</em></p>
+        }
+        else
+        {
+            <table class="table hover">
+                <thead>
                     <tr>
-                        <td><a href="students/@s.Id">@s.DisplayName</a></td>
-                        <td><strong>@s.Rating</strong> <span class="rd">±@s.RatingDeviation</span></td>
-                        <td>@s.GamesPlayed</td>
-                        <td>@s.WinRate%</td>
-                        <td>
-                            @if (s.AccountLinked)
-                            {
-                                <span class="badge badge-success">@Loc.T("school.linked")</span>
-                            }
-                            else
-                            {
-                                <button class="btn btn-sm btn-ghost" @onclick="() => _linkingId = s.Id">@Loc.T("school.link")</button>
-                            }
-                        </td>
-                        <td><button class="btn btn-sm btn-ghost" @onclick="() => Share(s.Id)">@Loc.T("school.share")</button></td>
+                        <th><button class="th-sort" @onclick='() => SetSort("name")'>@Loc.T("school.col.student")@Caret("name")</button></th>
+                        <th><button class="th-sort" @onclick='() => SetSort("rating")'>@Loc.T("school.col.rating")@Caret("rating")</button></th>
+                        <th><button class="th-sort" @onclick='() => SetSort("games")'>@Loc.T("school.col.games")@Caret("games")</button></th>
+                        <th><button class="th-sort" @onclick='() => SetSort("winrate")'>@Loc.T("school.col.winrate")@Caret("winrate")</button></th>
+                        <th>@Loc.T("school.col.account")</th>
+                        <th>@Loc.T("school.col.parent")</th>
+                        <th></th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var s in View)
+                    {
+                        <tr>
+                            <td><a href="students/@s.Id">@s.DisplayName</a></td>
+                            <td><strong>@s.Rating</strong> <span class="rd">±@s.RatingDeviation</span></td>
+                            <td>@s.GamesPlayed</td>
+                            <td>@s.WinRate%</td>
+                            <td>
+                                @if (s.AccountLinked)
+                                {
+                                    <span class="badge badge-success">@Loc.T("school.linked")</span>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-ghost" @onclick="() => _linkingId = s.Id">@Loc.T("school.link")</button>
+                                }
+                            </td>
+                            <td><button class="btn btn-sm btn-ghost" @onclick="() => Share(s.Id)">@Loc.T("school.share")</button></td>
+                            <td><button class="btn btn-sm btn-ghost" title="@Loc.T("school.edit")" @onclick="() => StartEdit(s)">✎</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+
+    @if (_editingId is { } eid)
+    {
+        <div class="link-panel">
+            <span>@Loc.T("school.edit"):</span>
+            <input @bind="_editName" placeholder="@Loc.T("school.newname")" class="form-control" />
+            <input type="date" @bind="_editBirth" title="@Loc.T("school.birthdate")" class="form-control" />
+            <button class="btn btn-primary btn-sm" @onclick="() => SaveEdit(eid)" disabled="@string.IsNullOrWhiteSpace(_editName)">@Loc.T("school.save")</button>
+            <button class="btn btn-link btn-sm" @onclick="CancelEdit">@Loc.T("school.cancel")</button>
+        </div>
     }
 
     @if (_linkingId is { } lid)
@@ -83,10 +116,50 @@
     private Guid _groupId;
     private string? _sub;
     private string _newName = "";
+    private DateOnly? _newBirth;
     private string? _shareUrl;
     private Guid? _linkingId;
     private string _linkEmail = "";
     private string? _linkError;
+
+    // Поиск/сортировка — на клиенте поверх загруженного списка (быстрый отклик без round-trip к API).
+    private string _search = "";
+    private string _sortKey = "rating";
+    private bool _sortDesc = true;
+
+    // Инлайн-редактирование.
+    private Guid? _editingId;
+    private string _editName = "";
+    private DateOnly? _editBirth;
+
+    private IReadOnlyList<StudentDto> View
+    {
+        get
+        {
+            if (_students is null) return [];
+            IEnumerable<StudentDto> q = _students;
+            var term = _search.Trim();
+            if (term.Length > 0)
+                q = q.Where(s => s.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase));
+            q = _sortKey switch
+            {
+                "name" => q.OrderBy(s => s.DisplayName, StringComparer.CurrentCultureIgnoreCase),
+                "games" => q.OrderBy(s => s.GamesPlayed),
+                "winrate" => q.OrderBy(s => s.WinRate),
+                _ => q.OrderBy(s => s.Rating),
+            };
+            if (_sortDesc) q = q.Reverse();
+            return q.ToList();
+        }
+    }
+
+    private void SetSort(string key)
+    {
+        if (_sortKey == key) _sortDesc = !_sortDesc;
+        else { _sortKey = key; _sortDesc = key != "name"; } // имя — по возрастанию, числа — по убыванию по умолчанию
+    }
+
+    private string Caret(string key) => _sortKey != key ? "" : _sortDesc ? " ▾" : " ▴";
 
     protected override async Task OnInitializedAsync()
     {
@@ -104,8 +177,28 @@
 
     private async Task AddStudent()
     {
-        await Api.CreateStudentAsync(_schoolId, new CreateStudentRequest(_groupId, _newName.Trim(), null), _sub!);
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        await Api.CreateStudentAsync(_schoolId, new CreateStudentRequest(_groupId, _newName.Trim(), _newBirth), _sub!);
         _newName = "";
+        _newBirth = null;
+        await Load();
+    }
+
+    private void StartEdit(StudentDto s)
+    {
+        _editingId = s.Id;
+        _editName = s.DisplayName;
+        _editBirth = s.BirthDate;
+        _linkingId = null; // не показывать две панели сразу
+    }
+
+    private void CancelEdit() => _editingId = null;
+
+    private async Task SaveEdit(Guid studentId)
+    {
+        if (string.IsNullOrWhiteSpace(_editName)) return;
+        await Api.UpdateStudentAsync(studentId, new UpdateStudentRequest(_editName.Trim(), _editBirth), _sub!);
+        _editingId = null;
         await Load();
     }
 
@@ -128,7 +221,13 @@
 }
 
 <style>
-    .add-row { display: flex; gap: .5rem; max-width: 480px; margin-bottom: 1.25rem; }
+    .add-row { display: flex; gap: .5rem; max-width: 640px; margin-bottom: 1rem; flex-wrap: wrap; }
+    .input-date { max-width: 170px; }
+    .list-tools { display: flex; align-items: center; gap: .75rem; margin: .25rem 0 1rem; }
+    .list-tools .search { max-width: 320px; }
+    .list-tools .count { font-size: .85rem; white-space: nowrap; }
+    .th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; font-weight: inherit; }
+    .th-sort:hover { color: var(--accent); }
     .rd { color: var(--muted); font-size: .8rem; }
     .link-panel { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0 0; padding: .85rem; background: var(--surface-2); border-radius: var(--r-md); max-width: 640px; }
     .link-panel input { max-width: 260px; }

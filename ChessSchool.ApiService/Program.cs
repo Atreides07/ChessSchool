@@ -123,6 +123,15 @@ lk.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStud
     return error is not null ? Results.BadRequest(new { error }) : Results.Created($"/students/{dto!.Id}", dto);
 });
 
+lk.MapPut("/students/{id:guid}", async (Guid id, UpdateStudentRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+{
+    if (!await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct)) return Results.StatusCode(Forbidden);
+    if (string.IsNullOrWhiteSpace(req.DisplayName)) return Results.BadRequest(new { error = "Имя не может быть пустым." });
+    var dto = await students.UpdateAsync(id, req with { DisplayName = req.DisplayName.Trim() }, ct);
+    return dto is not null ? Results.Ok(dto) : Results.NotFound();
+});
+
 lk.MapPost("/games/{id:guid}/attribute", async (Guid id, AttributeGameRequest req,
     HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
 {

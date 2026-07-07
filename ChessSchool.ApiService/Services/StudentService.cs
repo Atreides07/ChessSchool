@@ -14,7 +14,7 @@ public sealed class StudentService(
     SchoolDbContext db, GameArchiver archiver, IdpUserClient idp, IAnalytics analytics)
 {
     private static StudentDto ToDto(Student s) =>
-        new(s.Id, s.GroupId, s.DisplayName, s.Rating, s.RatingDeviation, s.GamesPlayed, s.Wins, s.Draws, s.Losses, s.LinkedUserSub);
+        new(s.Id, s.GroupId, s.DisplayName, s.Rating, s.RatingDeviation, s.GamesPlayed, s.Wins, s.Draws, s.Losses, s.LinkedUserSub, s.BirthDate);
 
     // Пагинация: единый разбор и ограничение страницы (защита от выборки «всё» на больших таблицах).
     private static (int Skip, int Take) Page(int? skip, int? take, int maxTake = 200, int defaultTake = 100) =>
@@ -30,7 +30,7 @@ public sealed class StudentService(
             where g.SchoolId == schoolId
             orderby st.Rating descending
             select new StudentDto(st.Id, st.GroupId, st.DisplayName, st.Rating, st.RatingDeviation,
-                st.GamesPlayed, st.Wins, st.Draws, st.Losses, st.LinkedUserSub))
+                st.GamesPlayed, st.Wins, st.Draws, st.Losses, st.LinkedUserSub, st.BirthDate))
             .Skip(s).Take(t).ToListAsync(ct);
     }
 
@@ -106,6 +106,18 @@ public sealed class StudentService(
         await db.SaveChangesAsync(ct);
         analytics.Capture("student_created", schoolId.ToString(), new Dictionary<string, object?> { ["group_id"] = req.GroupId });
         return (ToDto(student), null);
+    }
+
+    /// <summary>Отредактировать ученика (имя/дата рождения). null — ученик не найден.</summary>
+    public async Task<StudentDto?> UpdateAsync(Guid studentId, UpdateStudentRequest req, CancellationToken ct)
+    {
+        var student = await db.Students.FindAsync([studentId], ct);
+        if (student is null) return null;
+        student.DisplayName = req.DisplayName;
+        student.BirthDate = req.BirthDate;
+        await db.SaveChangesAsync(ct);
+        analytics.Capture("student_updated", studentId.ToString());
+        return ToDto(student);
     }
 
     public enum AttributeOutcome { Ok, GameNotFound, StudentNotFound }

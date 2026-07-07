@@ -64,6 +64,12 @@ public static class Loc
         ["school.cancel"] = ("Отмена", "Cancel"),
         ["school.shareparent"] = ("Ссылка для родителя (только просмотр):", "Parent link (view-only):"),
         ["school.linkerr"] = ("Пользователь с таким email не найден.", "No user found with this email."),
+        ["school.birthdate"] = ("Дата рождения", "Date of birth"),
+        ["school.search"] = ("Поиск по имени…", "Search by name…"),
+        ["school.edit"] = ("Изменить", "Edit"),
+        ["school.save"] = ("Сохранить", "Save"),
+        ["school.empty"] = ("Пока нет учеников. Добавьте первого выше.", "No students yet. Add the first one above."),
+        ["school.nomatch"] = ("Никого не найдено по запросу.", "No students match your search."),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

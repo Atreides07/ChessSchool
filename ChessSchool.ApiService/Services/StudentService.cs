@@ -11,7 +11,8 @@ namespace ChessSchool.ApiService.Services;
 /// чтобы эндпоинты были тонкими (request→service→response), а доменные запросы/события — здесь.
 /// </summary>
 public sealed class StudentService(
-    SchoolDbContext db, GameArchiver archiver, IdpUserClient idp, IAnalytics analytics)
+    SchoolDbContext db, GameArchiver archiver, IdpUserClient idp, IAnalytics analytics,
+    ChessSchool.ApiService.Email.IEmailSender email)
 {
     private static StudentDto ToDto(Student s) =>
         new(s.Id, s.GroupId, s.DisplayName, s.Rating, s.RatingDeviation, s.GamesPlayed, s.Wins, s.Draws, s.Losses, s.LinkedUserSub, s.BirthDate);
@@ -303,6 +304,37 @@ public sealed class StudentService(
         if (link is null) return false;
         if (!link.Revoked) { link.Revoked = true; await db.SaveChangesAsync(ct); }
         analytics.Capture("share_link_revoked", studentId.ToString());
+        return true;
+    }
+
+    /// <summary>Отправить родителю письмо о прогрессе ученика: сводка (рейтинг, тренд, последние партии) +
+    /// свежая ссылка на живой профиль. false — ученик не найден.</summary>
+    public async Task<bool> SendProgressEmailAsync(Guid studentId, string toEmail, string shareBaseUrl, CancellationToken ct)
+    {
+        if (await GetProfileAsync(studentId, ct) is not { } profile) return false;
+        var link = await CreateShareAsync(studentId, ct); // одноразовая живая ссылка для родителя
+        var url = $"{shareBaseUrl.TrimEnd('/')}{link!.Url}";
+
+        static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
+        var st = profile.Student;
+        var recent = string.Join("", profile.RecentGames.Take(5).Select(g =>
+        {
+            var res = g.RatingChange > 0 ? $"+{g.RatingChange}" : g.RatingChange.ToString();
+            return $"<li>{g.PlayedAt:dd.MM.yyyy} — {Enc(g.OpponentName)} ({res})</li>";
+        }));
+        var trend = profile.RatingHistory.Count >= 2
+            ? profile.RatingHistory[^1].Rating - profile.RatingHistory[0].Rating : 0;
+        var trendStr = trend > 0 ? $"+{trend}" : trend.ToString();
+
+        var html =
+            $"<h2>Прогресс: {Enc(st.DisplayName)}</h2>" +
+            $"<p>Текущий рейтинг: <b>{st.Rating}</b> (±{st.RatingDeviation}). Динамика за период: <b>{trendStr}</b>.</p>" +
+            $"<p>Партий: {st.GamesPlayed} · Побед: {st.Wins} · Ничьих: {st.Draws} · Поражений: {st.Losses}.</p>" +
+            (recent.Length > 0 ? $"<p>Последние партии:</p><ul>{recent}</ul>" : "") +
+            $"<p><a href=\"{url}\">Открыть профиль с графиком прогресса →</a></p>";
+
+        await email.SendAsync(toEmail, $"Прогресс: {st.DisplayName}", html, ct);
+        analytics.Capture("progress_email_sent", studentId.ToString());
         return true;
     }
 

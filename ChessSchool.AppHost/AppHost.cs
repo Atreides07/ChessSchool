@@ -69,9 +69,14 @@ var apiService = builder.AddProject<Projects.ChessSchool_ApiService>("apiservice
     .WithReference(arenaDb)
     .WithReference(billingDb)
     .WithReference(seq)
+    // Почта прогресса родителю: локально в mailpit (см. дашборд), прод — реальный SMTP через конфиг Email:Smtp.
+    .WithEnvironment("Email__Smtp__Host", mailSmtp.Property(Aspire.Hosting.ApplicationModel.EndpointProperty.Host))
+    .WithEnvironment("Email__Smtp__Port", mailSmtp.Property(Aspire.Hosting.ApplicationModel.EndpointProperty.Port))
+    .WithEnvironment("Email__From", "ChessSchool <no-reply@chessschool.local>")
     .WaitFor(schoolDb)
     .WaitFor(arenaDb)
-    .WaitFor(billingDb);
+    .WaitFor(billingDb)
+    .WaitFor(mailpit);
 
 // Игровой сервер: Orleans-силос (живые партии) + SignalR. Валидирует токены IdP,
 // архивирует завершённые партии в доменный API.

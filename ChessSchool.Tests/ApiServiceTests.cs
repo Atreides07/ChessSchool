@@ -21,8 +21,9 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
 {
     private const string DevKey = "dev-internal-key";
     private readonly HttpClient _client;
+    private readonly Factory _factory;
 
-    public ApiServiceTests(Factory factory) => _client = factory.CreateClient();
+    public ApiServiceTests(Factory factory) { _factory = factory; _client = factory.CreateClient(); }
 
     // Запрос от владельца демо-школы: internal-key + acting-sub = Demo.OwnerSub.
     private static HttpRequestMessage Owner(HttpMethod method, string url, object? body = null)
@@ -302,6 +303,40 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task SendProgress_ByOwner_SendsEmailWithNameAndLink()
+    {
+        var student = (await OwnerStudentsAsync())[0];
+        var parent = $"parent-{Guid.NewGuid():N}@test.local";
+        var resp = await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{student.Id}/send-progress",
+            new SendProgressRequest(parent, "https://school.example")));
+        resp.EnsureSuccessStatusCode();
+
+        var msg = _factory.Sent.Single(m => m.To == parent);
+        Assert.Contains(student.DisplayName, msg.Html);
+        Assert.Contains("https://school.example/p/", msg.Html); // абсолютная ссылка на профиль
+    }
+
+    [Fact]
+    public async Task SendProgress_InvalidEmail_Returns400()
+    {
+        var student = (await OwnerStudentsAsync())[0];
+        var resp = await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{student.Id}/send-progress",
+            new SendProgressRequest("not-an-email", "https://x")));
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task SendProgress_ForeignUser_Returns403()
+    {
+        var student = (await OwnerStudentsAsync())[0];
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/students/{student.Id}/send-progress");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        req.Content = JsonContent.Create(new SendProgressRequest("p@test.local", "https://x"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task Provision_CreatesSchoolForNewOwner_Idempotent()
     {
         var sub = $"owner-{Guid.NewGuid():N}";
@@ -356,10 +391,16 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     {
         private readonly string _dbName = $"chessschool-test-{Guid.NewGuid():N}";
 
+        /// <summary>Перехваченные письма (прогресс родителю) — вместо реального SMTP.</summary>
+        public List<(string To, string Subject, string Html)> Sent { get; } = new();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveAll<ChessSchool.ApiService.Email.IEmailSender>();
+                services.AddSingleton<ChessSchool.ApiService.Email.IEmailSender>(new CapturingEmailSender(Sent));
+
                 // Подменяем все три bounded-контекста (school/arena/billing) на EF InMemory —
                 // иначе арена-эндпоинты (ArenaDbContext) и /internal/subscriptions (BillingDbContext)
                 // упадут на резолве Npgsql-строки. У каждого — своя in-memory БД.
@@ -385,6 +426,15 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
                     .UseInMemoryDatabase($"{_dbName}-billing")
                     .UseInternalServiceProvider(efProvider));
             });
+        }
+
+        private sealed class CapturingEmailSender(List<(string, string, string)> sink) : ChessSchool.ApiService.Email.IEmailSender
+        {
+            public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+            {
+                lock (sink) sink.Add((to, subject, htmlBody));
+                return Task.CompletedTask;
+            }
         }
     }
 }

@@ -113,6 +113,12 @@ public sealed class SchoolApiClient(HttpClient http)
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<List<ShareLinkInfoDto>>(ct) ?? [] : [];
     }
 
+    public async Task<bool> SendProgressAsync(Guid studentId, string email, string shareBaseUrl, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Post, $"/students/{studentId}/send-progress", actingSub, new SendProgressRequest(email, shareBaseUrl)), ct);
+        return resp.IsSuccessStatusCode;
+    }
+
     public async Task<bool> RevokeShareAsync(Guid studentId, string token, string actingSub, CancellationToken ct = default)
     {
         var resp = await http.SendAsync(Req(HttpMethod.Post, $"/students/{studentId}/shares/{token}/revoke", actingSub), ct);

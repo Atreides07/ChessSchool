@@ -184,6 +184,11 @@
                 <button class="btn btn-primary btn-sm" @onclick="() => CreateShare(sid)">@Loc.T("school.sharenew")</button>
                 <button class="btn btn-link btn-sm" @onclick="() => _sharingId = null">@Loc.T("school.cancel")</button>
             </div>
+            <div class="progress-send">
+                <input @bind="_progressEmail" placeholder="@Loc.T("school.progressph")" class="form-control" />
+                <button class="btn btn-sm btn-ghost" @onclick="() => SendProgress(sid)" disabled="@(!(_progressEmail.Contains('@')))">@Loc.T("school.progresssend")</button>
+                @if (_progressMsg is not null) { <span class="text-success">@_progressMsg</span> }
+            </div>
             @if (_shares.Count == 0)
             {
                 <p class="text-muted mb-0"><em>@Loc.T("school.shareempty")</em></p>
@@ -233,6 +238,8 @@
     private string? _importMsg;
     private Guid? _sharingId;
     private IReadOnlyList<ShareLinkInfoDto> _shares = [];
+    private string _progressEmail = "";
+    private string? _progressMsg;
     private Guid? _linkingId;
     private string _linkEmail = "";
     private string? _linkError;
@@ -368,7 +375,16 @@
         _sharingId = studentId;
         _linkingId = null;
         _editingId = null;
+        _progressMsg = null;
         _shares = await Api.GetSharesAsync(studentId, _sub!);
+    }
+
+    private async Task SendProgress(Guid studentId)
+    {
+        if (!_progressEmail.Contains('@')) return;
+        var ok = await Api.SendProgressAsync(studentId, _progressEmail.Trim(), Nav.BaseUri, _sub!);
+        _progressMsg = ok ? Loc.T("school.progresssent") : Loc.T("school.progresserr");
+        if (ok) { _progressEmail = ""; _shares = await Api.GetSharesAsync(studentId, _sub!); }
     }
 
     private async Task CreateShare(Guid studentId)
@@ -416,6 +432,8 @@
     .link-panel input { max-width: 260px; }
     .share-panel { flex-direction: column; align-items: stretch; max-width: 720px; }
     .share-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .progress-send { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+    .progress-send input { max-width: 260px; }
     .share-list { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
     .share-list li { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
     .share-list li.inactive { opacity: .6; }

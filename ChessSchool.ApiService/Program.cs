@@ -27,6 +27,18 @@ builder.Services.AddScoped<ArenaGameStore>();
 builder.Services.AddScoped<SubscriptionService>();
 builder.Services.AddScoped<StudentService>();
 builder.Services.AddScoped<SchoolAccessService>(); // авторизация по владению школой + провижининг «моя школа»
+// Почта (прогресс родителю): есть Email:Smtp:Host → реальный SMTP (локально mailpit из AppHost),
+// нет → лог-фолбэк. Прод-путь переключается конфигом (тот же код, что у IdP).
+var emailOptions = ChessSchool.ApiService.Email.EmailOptions.FromConfig(builder.Configuration);
+if (!string.IsNullOrWhiteSpace(emailOptions.Host))
+{
+    builder.Services.AddSingleton(emailOptions);
+    builder.Services.AddSingleton<ChessSchool.ApiService.Email.IEmailSender, ChessSchool.ApiService.Email.SmtpEmailSender>();
+}
+else
+{
+    builder.Services.AddSingleton<ChessSchool.ApiService.Email.IEmailSender, ChessSchool.ApiService.Email.LogEmailSender>();
+}
 // В Development новосозданная школа наполняется примерными учениками (ЛК не пуст при первом входе); в проде — пустая.
 builder.Services.AddSingleton(new SchoolProvisioningOptions(builder.Environment.IsDevelopment()));
 // Провайдер эквайринга: Paddle при наличии конфига (секрет вебхука/API-ключ), иначе dev-заглушка
@@ -201,6 +213,15 @@ lk.MapPost("/students/{id:guid}/link", async (Guid id, LinkAccountRequest req,
 lk.MapPost("/students/{id:guid}/share", async (Guid id, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
     !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
     : await students.CreateShareAsync(id, ct) is { } link ? Results.Ok(link) : Results.NotFound());
+
+// Отправить родителю письмо о прогрессе ученика (со свежей ссылкой на профиль).
+lk.MapPost("/students/{id:guid}/send-progress", async (Guid id, SendProgressRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+{
+    if (!await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct)) return Results.StatusCode(Forbidden);
+    if (string.IsNullOrWhiteSpace(req.Email) || !req.Email.Contains('@')) return Results.BadRequest(new { error = "Некорректный e-mail." });
+    return await students.SendProgressEmailAsync(id, req.Email.Trim(), req.ShareBaseUrl ?? "", ct) ? Results.Ok() : Results.NotFound();
+});
 
 // Список ссылок родителю ученика (для управления/отзыва в ЛК).
 lk.MapGet("/students/{id:guid}/shares", async (Guid id, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>

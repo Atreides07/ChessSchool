@@ -96,6 +96,10 @@ public static class Loc
         ["school.importph"] = ("Иван Петров\nМария Сидорова\n…", "John Smith\nJane Doe\n…"),
         ["school.importdo"] = ("Импортировать", "Import"),
         ["school.imported"] = ("Добавлено учеников: {0}", "Students added: {0}"),
+        ["school.progressph"] = ("E-mail родителя", "Parent's e-mail"),
+        ["school.progresssend"] = ("Отправить прогресс", "Send progress"),
+        ["school.progresssent"] = ("Письмо отправлено ✓", "Email sent ✓"),
+        ["school.progresserr"] = ("Не удалось отправить.", "Could not send."),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

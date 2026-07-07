@@ -34,6 +34,10 @@ public sealed record StudentDto(
 /// <summary>Привязка профиля ученика к онлайн-аккаунту по email.</summary>
 public sealed record LinkAccountRequest(string Email);
 
+/// <summary>Отправка родителю письма о прогрессе ученика (со свежей ссылкой на живой профиль).
+/// ShareBaseUrl — публичный базовый адрес фронта (его знает Web), чтобы ссылка в письме была абсолютной.</summary>
+public sealed record SendProgressRequest(string Email, string ShareBaseUrl);
+
 /// <summary>Точка истории рейтинга для графика.</summary>
 public sealed record RatingPointDto(DateTimeOffset Date, int Rating);
 

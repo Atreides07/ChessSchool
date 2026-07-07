@@ -380,6 +380,17 @@ ApiService остаётся владельцем персистентности 
     переключаем `data-active`/`data-at` в месте (мои часы фиксируем на текущем показанном значении, соперника пускаем от now),
     а точные ms (с прибавкой за ход) сервер присылает следом и `updateMyGameCard` мягко сверяет. Правило: если действие
     рисуется оптимистично — переключай и сопутствующее состояние (часы/ход) оптимистично, не жди round-trip.
+23. **Ссылки на IdP (Auth) строить через `ResolveSsoAuthority()`, а не голый `Config["Sso:Authority"]`.**
+    Симптом: в Арене кнопка баннера «Подтвердите e-mail» вела на `http://<arena-host>/account/email` → Not Found,
+    письмо не отправлялось. Причина: [MainLayout](ChessSchool.Arena/Components/Layout/MainLayout.razor) брал
+    `Config["Sso:Authority"]`, который **локально ПУСТ** (в проде/dev-tunnel он задан, а в обычном Aspire адрес IdP
+    приходит из service discovery). Пустой authority → `$"{authority}/account/email"` = относительный URL → резолвится
+    на хост Арены, где такого маршрута нет. Лечение: строить хост IdP тем же способом, что и OIDC-конвейер —
+    `Config.ResolveSsoAuthority()` ([ServiceDefaults](ChessSchool.ServiceDefaults/Extensions.cs): `Sso:Authority`
+    иначе `services:auth:https:0`). Плюс `return` делать абсолютным URL страницы Арены (`Nav.Uri`), чтобы после
+    действий на IdP вернуться в Арену. Правило: любую **кросс-сервисную** ссылку (браузерный переход на IdP/другой
+    сервис) строй из резолвнутого authority, а не из сырого конфиг-ключа, который может быть пуст. Защищено
+    `ArenaVerifyBannerTests.VerifyBanner_ManageEmailLink_PointsToAbsoluteIdpAuthority`.
 
 ## Безопасность и конфигурация (специфика)
 

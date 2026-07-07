@@ -98,8 +98,15 @@
                     @foreach (var s in View)
                     {
                         <tr>
-                            <td><a href="students/@s.Id">@s.DisplayName</a></td>
-                            <td><strong>@s.Rating</strong> <span class="rd">±@s.RatingDeviation</span></td>
+                            <td><a href="students/@s.Id" title="@string.Format(Loc.T("rating.percentile"), Percentile(s))">@s.DisplayName</a></td>
+                            <td>
+                                <strong>@s.Rating</strong>
+                                @if (s.RecentDelta != 0)
+                                {
+                                    <span class="trend @(s.RecentDelta > 0 ? "up" : "down")" title="@Loc.T("rating.trendtip")">@(s.RecentDelta > 0 ? "▲" : "▼")@Math.Abs(s.RecentDelta)</span>
+                                }
+                                <span class="rd" title="@Loc.T("rating.rdtip")">±@s.RatingDeviation</span>
+                            </td>
                             <td>@s.GamesPlayed</td>
                             <td>@s.WinRate%</td>
                             <td>
@@ -248,6 +255,14 @@
 
     private string Caret(string key) => _sortKey != key ? "" : _sortDesc ? " ▾" : " ▴";
 
+    // Перцентиль рейтинга среди всех учеников школы (доля тех, кто ниже) — считаем на клиенте по загруженной странице.
+    private int Percentile(StudentDto s)
+    {
+        if (_students is null || _students.Count <= 1) return 100;
+        var below = _students.Count(o => o.Rating < s.Rating);
+        return (int)Math.Round(100.0 * below / (_students.Count - 1));
+    }
+
     protected override async Task OnInitializedAsync()
     {
         // sub из AuthState (работает и в prerender, и в интерактивном контуре Blazor Server).
@@ -356,7 +371,10 @@
     .input-group { max-width: 180px; }
     .th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; font-weight: inherit; }
     .th-sort:hover { color: var(--accent); }
-    .rd { color: var(--muted); font-size: .8rem; }
+    .rd { color: var(--muted); font-size: .8rem; cursor: help; }
+    .trend { font-size: .78rem; font-weight: 600; margin: 0 .15rem; font-variant-numeric: tabular-nums; }
+    .trend.up { color: var(--success, #1a7f37); }
+    .trend.down { color: var(--danger, #c0392b); }
     .link-panel { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0 0; padding: .85rem; background: var(--surface-2); border-radius: var(--r-md); max-width: 640px; }
     .link-panel input { max-width: 260px; }
     .share-panel { flex-direction: column; align-items: stretch; max-width: 720px; }

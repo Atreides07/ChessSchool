@@ -146,6 +146,14 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task Students_HaveRecentRatingTrend()
+    {
+        // Демо-история рейтинга растёт → у кого-то положительный тренд за 7 дней (для стрелки в ростере).
+        var students = await OwnerStudentsAsync();
+        Assert.Contains(students, s => s.RecentDelta > 0);
+    }
+
+    [Fact]
     public async Task Students_Pagination_LimitsResults()
     {
         var resp = await _client.SendAsync(Owner(HttpMethod.Get, $"/schools/{Demo.SchoolId}/students?take=2"));

@@ -87,6 +87,10 @@ public static class Loc
         ["school.allgroups"] = ("Все группы", "All groups"),
         ["school.groupname"] = ("Новая группа", "New group"),
         ["school.addgroup"] = ("+ группа", "+ group"),
+        ["rating.rdtip"] = ("Надёжность оценки: чем меньше ±, тем точнее рейтинг (растёт с числом партий).",
+            "Rating reliability: the smaller the ±, the more precise (improves with more games)."),
+        ["rating.trendtip"] = ("Изменение рейтинга за последние 7 дней", "Rating change over the last 7 days"),
+        ["rating.percentile"] = ("Выше {0}% учеников школы", "Above {0}% of the school's students"),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

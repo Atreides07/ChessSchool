@@ -24,7 +24,7 @@ public sealed class StudentService(
     {
         var (s, t) = Page(skip, take);
         // Один запрос с join, проекцией в DTO и пагинацией — без трекинга и без выборки всей таблицы.
-        return await (
+        var list = await (
             from st in db.Students.AsNoTracking()
             join g in db.Groups on st.GroupId equals g.Id
             where g.SchoolId == schoolId
@@ -32,6 +32,18 @@ public sealed class StudentService(
             select new StudentDto(st.Id, st.GroupId, st.DisplayName, st.Rating, st.RatingDeviation,
                 st.GamesPlayed, st.Wins, st.Draws, st.Losses, st.LinkedUserSub, st.BirthDate))
             .Skip(s).Take(t).ToListAsync(ct);
+
+        // Тренд рейтинга за 7 дней: current − (последняя точка истории на момент ≤ неделю назад).
+        // Отдельным запросом по показанной странице, чтобы не тащить всю историю в основной проекции.
+        var ids = list.Select(x => x.Id).ToList();
+        var weekAgo = DateTimeOffset.UtcNow.AddDays(-7);
+        var baseline = (await db.RatingPoints.AsNoTracking()
+                .Where(r => ids.Contains(r.StudentId) && r.Date <= weekAgo)
+                .Select(r => new { r.StudentId, r.Date, r.Rating }).ToListAsync(ct))
+            .GroupBy(r => r.StudentId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.Date).First().Rating);
+
+        return list.Select(x => baseline.TryGetValue(x.Id, out var b) ? x with { RecentDelta = x.Rating - b } : x).ToList();
     }
 
     public async Task<IReadOnlyList<PendingGameDto>> ListPendingGamesAsync(Guid schoolId, int? skip, int? take, CancellationToken ct)

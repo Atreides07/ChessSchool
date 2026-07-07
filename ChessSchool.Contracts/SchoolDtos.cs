@@ -24,7 +24,8 @@ public sealed record StudentDto(
     int Draws,
     int Losses,
     string? LinkedUserSub,
-    DateOnly? BirthDate = null)
+    DateOnly? BirthDate = null,
+    int RecentDelta = 0)
 {
     public double WinRate => GamesPlayed == 0 ? 0 : Math.Round(100.0 * Wins / GamesPlayed, 1);
     public bool AccountLinked => !string.IsNullOrEmpty(LinkedUserSub);

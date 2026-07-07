@@ -64,6 +64,13 @@ public sealed record MySchoolDto(Guid SchoolId, Guid GroupId);
 /// <summary>Ссылка на публичный профиль ученика для родителя.</summary>
 public sealed record ShareLinkDto(string Token, string Url, DateTimeOffset? ExpiresAt);
 
+/// <summary>Ссылка родителю с состоянием — для управления (список/отзыв) в ЛК.</summary>
+public sealed record ShareLinkInfoDto(string Token, string Url, DateTimeOffset? ExpiresAt, bool Revoked)
+{
+    /// <summary>Действует ли ссылка сейчас (не отозвана и не просрочена).</summary>
+    public bool Active => !Revoked && (ExpiresAt is null || ExpiresAt > DateTimeOffset.UtcNow);
+}
+
 /// <summary>
 /// Запрос на архивацию завершённой онлайн-партии (GameServer → ApiService).
 /// Игроки идентифицируются по их Sub из IdP; ApiService сам сопоставляет их с учениками.

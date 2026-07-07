@@ -75,6 +75,18 @@ public sealed class SchoolApiClient(HttpClient http)
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<ShareLinkDto>(ct) : null;
     }
 
+    public async Task<IReadOnlyList<ShareLinkInfoDto>> GetSharesAsync(Guid studentId, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Get, $"/students/{studentId}/shares", actingSub), ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<List<ShareLinkInfoDto>>(ct) ?? [] : [];
+    }
+
+    public async Task<bool> RevokeShareAsync(Guid studentId, string token, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Post, $"/students/{studentId}/shares/{token}/revoke", actingSub), ct);
+        return resp.IsSuccessStatusCode;
+    }
+
     public async Task<StudentDto?> LinkAccountAsync(Guid studentId, string email, string actingSub, CancellationToken ct = default)
     {
         var resp = await http.SendAsync(Req(HttpMethod.Post, $"/students/{studentId}/link", actingSub, new LinkAccountRequest(email)), ct);

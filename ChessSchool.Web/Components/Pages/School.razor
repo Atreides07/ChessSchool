@@ -69,7 +69,7 @@
                                     <button class="btn btn-sm btn-ghost" @onclick="() => _linkingId = s.Id">@Loc.T("school.link")</button>
                                 }
                             </td>
-                            <td><button class="btn btn-sm btn-ghost" @onclick="() => Share(s.Id)">@Loc.T("school.share")</button></td>
+                            <td><button class="btn btn-sm btn-ghost" @onclick="() => OpenShares(s.Id)">@Loc.T("school.share")</button></td>
                             <td><button class="btn btn-sm btn-ghost" title="@Loc.T("school.edit")" @onclick="() => StartEdit(s)">✎</button></td>
                         </tr>
                     }
@@ -100,10 +100,40 @@
         </div>
     }
 
-    @if (_shareUrl is not null)
+    @if (_sharingId is { } sid)
     {
-        <div class="alert alert-info mt-2">
-            @Loc.T("school.shareparent") <a href="@_shareUrl">@_shareUrl</a>
+        <div class="link-panel share-panel">
+            <div class="share-head">
+                <span>@Loc.T("school.shareparent")</span>
+                <button class="btn btn-primary btn-sm" @onclick="() => CreateShare(sid)">@Loc.T("school.sharenew")</button>
+                <button class="btn btn-link btn-sm" @onclick="() => _sharingId = null">@Loc.T("school.cancel")</button>
+            </div>
+            @if (_shares.Count == 0)
+            {
+                <p class="text-muted mb-0"><em>@Loc.T("school.shareempty")</em></p>
+            }
+            else
+            {
+                <ul class="share-list">
+                    @foreach (var l in _shares)
+                    {
+                        var abs = new Uri(new Uri(Nav.BaseUri), l.Url).ToString();
+                        <li class="@(l.Active ? "" : "inactive")">
+                            @if (l.Active)
+                            {
+                                <a href="@abs">@abs</a>
+                                <span class="share-state ok">@Loc.T("school.shareactive")</span>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RevokeShare(sid, l.Token)">@Loc.T("school.sharerevoke")</button>
+                            }
+                            else
+                            {
+                                <span class="share-url-dead">@abs</span>
+                                <span class="share-state dead">@(l.Revoked ? Loc.T("school.sharerevoked") : Loc.T("school.shareexpired"))</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
         </div>
     }
 </div>
@@ -117,7 +147,8 @@
     private string? _sub;
     private string _newName = "";
     private DateOnly? _newBirth;
-    private string? _shareUrl;
+    private Guid? _sharingId;
+    private IReadOnlyList<ShareLinkInfoDto> _shares = [];
     private Guid? _linkingId;
     private string _linkEmail = "";
     private string? _linkError;
@@ -202,11 +233,24 @@
         await Load();
     }
 
-    private async Task Share(Guid studentId)
+    private async Task OpenShares(Guid studentId)
     {
-        var link = await Api.CreateShareAsync(studentId, _sub!);
-        if (link is not null)
-            _shareUrl = new Uri(new Uri(Nav.BaseUri), link.Url).ToString();
+        _sharingId = studentId;
+        _linkingId = null;
+        _editingId = null;
+        _shares = await Api.GetSharesAsync(studentId, _sub!);
+    }
+
+    private async Task CreateShare(Guid studentId)
+    {
+        await Api.CreateShareAsync(studentId, _sub!);
+        _shares = await Api.GetSharesAsync(studentId, _sub!);
+    }
+
+    private async Task RevokeShare(Guid studentId, string token)
+    {
+        await Api.RevokeShareAsync(studentId, token, _sub!);
+        _shares = await Api.GetSharesAsync(studentId, _sub!);
     }
 
     private async Task LinkAccount(Guid studentId)
@@ -231,4 +275,13 @@
     .rd { color: var(--muted); font-size: .8rem; }
     .link-panel { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0 0; padding: .85rem; background: var(--surface-2); border-radius: var(--r-md); max-width: 640px; }
     .link-panel input { max-width: 260px; }
+    .share-panel { flex-direction: column; align-items: stretch; max-width: 720px; }
+    .share-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .share-list { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+    .share-list li { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .share-list li.inactive { opacity: .6; }
+    .share-url-dead { text-decoration: line-through; color: var(--muted); word-break: break-all; }
+    .share-state { font-size: .78rem; padding: .1rem .45rem; border-radius: var(--r-sm); }
+    .share-state.ok { background: var(--success-bg, #e6f4ea); color: var(--success, #1a7f37); }
+    .share-state.dead { background: var(--surface-2); color: var(--muted); }
 </style>

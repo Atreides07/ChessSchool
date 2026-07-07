@@ -165,6 +165,24 @@ public sealed class StudentService(
         return new ShareLinkDto(token, $"/p/{token}", expires);
     }
 
+    /// <summary>Все ссылки-шаринги ученика (для управления в ЛК) — от свежих к старым.</summary>
+    public async Task<IReadOnlyList<ShareLinkInfoDto>> ListSharesAsync(Guid studentId, CancellationToken ct) =>
+        await db.ShareLinks.AsNoTracking()
+            .Where(l => l.StudentId == studentId)
+            .OrderByDescending(l => l.ExpiresAt)
+            .Select(l => new ShareLinkInfoDto(l.Token, $"/p/{l.Token}", l.ExpiresAt, l.Revoked))
+            .ToListAsync(ct);
+
+    /// <summary>Отозвать ссылку родителю (по токену, в пределах ученика). true — отозвана/уже была отозвана.</summary>
+    public async Task<bool> RevokeShareAsync(Guid studentId, string token, CancellationToken ct)
+    {
+        var link = await db.ShareLinks.FirstOrDefaultAsync(l => l.StudentId == studentId && l.Token == token, ct);
+        if (link is null) return false;
+        if (!link.Revoked) { link.Revoked = true; await db.SaveChangesAsync(ct); }
+        analytics.Capture("share_link_revoked", studentId.ToString());
+        return true;
+    }
+
     /// <summary>Профиль по ссылке-шарингу (для родителя). null — ссылка не найдена/просрочена/отозвана.</summary>
     public async Task<StudentProfileDto?> GetSharedProfileAsync(string token, CancellationToken ct)
     {

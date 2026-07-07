@@ -164,6 +164,17 @@ lk.MapPost("/students/{id:guid}/share", async (Guid id, HttpContext ctx, Student
     !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
     : await students.CreateShareAsync(id, ct) is { } link ? Results.Ok(link) : Results.NotFound());
 
+// Список ссылок родителю ученика (для управления/отзыва в ЛК).
+lk.MapGet("/students/{id:guid}/shares", async (Guid id, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
+    : Results.Ok(await students.ListSharesAsync(id, ct)));
+
+// Отзыв конкретной ссылки родителю (закрывает capability-URL).
+lk.MapPost("/students/{id:guid}/shares/{token}/revoke", async (Guid id, string token,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
+    : await students.RevokeShareAsync(id, token, ct) ? Results.Ok() : Results.NotFound());
+
 // Публичный: профиль по share-токену — capability-URL родителю, БЕЗ ключа и acting-sub (вне группы `lk`).
 app.MapGet("/share/{token}", async (string token, StudentService students, CancellationToken ct) =>
     await students.GetSharedProfileAsync(token, ct) is { } p ? Results.Ok(p) : Results.NotFound());

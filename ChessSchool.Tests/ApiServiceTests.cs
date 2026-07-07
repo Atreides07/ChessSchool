@@ -172,6 +172,37 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task ShareLink_Revoke_MakesProfileUnavailable_AndListsAsRevoked()
+    {
+        var sid = (await OwnerStudentsAsync())[0].Id;
+        var link = (await (await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{sid}/share")))
+            .Content.ReadFromJsonAsync<ShareLinkDto>())!;
+
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/share/{link.Token}")).StatusCode); // читается
+        var list = (await (await _client.SendAsync(Owner(HttpMethod.Get, $"/students/{sid}/shares")))
+            .Content.ReadFromJsonAsync<List<ShareLinkInfoDto>>())!;
+        Assert.Contains(list, l => l.Token == link.Token && l.Active);
+
+        (await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{sid}/shares/{link.Token}/revoke"))).EnsureSuccessStatusCode();
+
+        // После отзыва: родитель больше не откроет, а в списке ссылка помечена отозванной.
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/share/{link.Token}")).StatusCode);
+        var list2 = (await (await _client.SendAsync(Owner(HttpMethod.Get, $"/students/{sid}/shares")))
+            .Content.ReadFromJsonAsync<List<ShareLinkInfoDto>>())!;
+        Assert.Contains(list2, l => l.Token == link.Token && l.Revoked && !l.Active);
+    }
+
+    [Fact]
+    public async Task ShareList_ForeignUser_Returns403()
+    {
+        var sid = (await OwnerStudentsAsync())[0].Id;
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/students/{sid}/shares");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task Provision_CreatesSchoolForNewOwner_Idempotent()
     {
         var sub = $"owner-{Guid.NewGuid():N}";

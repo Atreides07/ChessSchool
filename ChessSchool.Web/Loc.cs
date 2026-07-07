@@ -70,6 +70,12 @@ public static class Loc
         ["school.save"] = ("Сохранить", "Save"),
         ["school.empty"] = ("Пока нет учеников. Добавьте первого выше.", "No students yet. Add the first one above."),
         ["school.nomatch"] = ("Никого не найдено по запросу.", "No students match your search."),
+        ["school.sharenew"] = ("Создать ссылку", "Create link"),
+        ["school.shareempty"] = ("Ссылок пока нет — создайте первую.", "No links yet — create the first one."),
+        ["school.shareactive"] = ("активна", "active"),
+        ["school.sharerevoke"] = ("Отозвать", "Revoke"),
+        ["school.sharerevoked"] = ("отозвана", "revoked"),
+        ["school.shareexpired"] = ("истекла", "expired"),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

@@ -1,5 +1,6 @@
 using ChessSchool.ApiService.Data;
 using ChessSchool.ApiService.Domain;
+using ChessSchool.ApiService.Services;
 using ChessSchool.Contracts;
 using Microsoft.EntityFrameworkCore;
 
@@ -61,6 +62,62 @@ public class SeedDataTests
         SeedData.Ensure(db);
 
         Assert.Equal(Demo.OwnerSub, db.Schools.Single(s => s.Id == SeedData.SchoolId).OwnerSub);
+    }
+
+    [Fact]
+    public async Task EnsureSchoolFor_InDev_PopulatesNewSchoolWithSampleStudents()
+    {
+        // JTBD: dev-пользователь при первом входе видит НЕ пустой ЛК — новая школа сразу с учениками.
+        using var db = NewDb();
+        var access = new SchoolAccessService(db, new SchoolProvisioningOptions(SeedSampleStudents: true));
+
+        var my = await access.EnsureSchoolForAsync("dev-user-sub", CancellationToken.None);
+
+        var students = db.Students.Count(s => s.GroupId == my.GroupId);
+        Assert.Equal(6, students);
+        Assert.True(db.Schools.Any(s => s.Id == my.SchoolId && s.OwnerSub == "dev-user-sub"));
+    }
+
+    [Fact]
+    public async Task EnsureSchoolFor_InDev_PopulatesExistingEmptySchool()
+    {
+        // Школа уже существует пустой (завелась при прошлом входе до фикса) — dev всё равно наполняет её,
+        // иначе после рестарта ЛК так и остался бы пустым.
+        using var db = NewDb();
+        var school = new School { OwnerSub = "dev-user-sub", Name = "Моя школа" };
+        db.Schools.Add(school);
+        db.Groups.Add(new Group { SchoolId = school.Id, Name = "Основная группа" });
+        db.SaveChanges();
+        var access = new SchoolAccessService(db, new SchoolProvisioningOptions(SeedSampleStudents: true));
+
+        var my = await access.EnsureSchoolForAsync("dev-user-sub", CancellationToken.None);
+
+        Assert.Equal(school.Id, my.SchoolId);           // та же школа
+        Assert.Equal(6, db.Students.Count(s => s.GroupId == my.GroupId));
+    }
+
+    [Fact]
+    public async Task EnsureSchoolFor_InDev_DoesNotDuplicate_WhenSchoolAlreadyHasStudents()
+    {
+        using var db = NewDb();
+        var access = new SchoolAccessService(db, new SchoolProvisioningOptions(SeedSampleStudents: true));
+        var my = await access.EnsureSchoolForAsync("dev-user-sub", CancellationToken.None); // создаст + наполнит
+
+        await access.EnsureSchoolForAsync("dev-user-sub", CancellationToken.None); // повтор — гард не даёт дублей
+
+        Assert.Equal(6, db.Students.Count(s => s.GroupId == my.GroupId));
+    }
+
+    [Fact]
+    public async Task EnsureSchoolFor_InProd_CreatesEmptySchool()
+    {
+        // В проде новая школа пустая — реальные ученики добавляются вручную.
+        using var db = NewDb();
+        var access = new SchoolAccessService(db, new SchoolProvisioningOptions(SeedSampleStudents: false));
+
+        var my = await access.EnsureSchoolForAsync("prod-user-sub", CancellationToken.None);
+
+        Assert.Empty(db.Students.Where(s => s.GroupId == my.GroupId));
     }
 
     [Fact]

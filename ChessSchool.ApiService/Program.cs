@@ -27,6 +27,8 @@ builder.Services.AddScoped<ArenaGameStore>();
 builder.Services.AddScoped<SubscriptionService>();
 builder.Services.AddScoped<StudentService>();
 builder.Services.AddScoped<SchoolAccessService>(); // авторизация по владению школой + провижининг «моя школа»
+// В Development новосозданная школа наполняется примерными учениками (ЛК не пуст при первом входе); в проде — пустая.
+builder.Services.AddSingleton(new SchoolProvisioningOptions(builder.Environment.IsDevelopment()));
 // Провайдер эквайринга: Paddle при наличии конфига (секрет вебхука/API-ключ), иначе dev-заглушка
 // (оплата проходит локально). Выбор по конфигу — как S3↔MinIO.
 var paddleOptions = builder.Configuration.GetSection("Paddle").Get<PaddleOptions>() ?? new PaddleOptions();

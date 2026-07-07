@@ -41,7 +41,7 @@ public static class SeedData
         // 4. Ученики с историей рейтинга — восстанавливаем, если в демо-группе их нет.
         if (!db.Students.Any(s => s.GroupId == GroupId))
         {
-            SeedStudents(db);
+            AddSampleStudents(db, GroupId);
             db.SaveChanges();
         }
 
@@ -64,7 +64,12 @@ public static class SeedData
         }
     }
 
-    private static void SeedStudents(SchoolDbContext db)
+    /// <summary>
+    /// Наполняет указанную группу примерными учениками с историей рейтинга (без SaveChanges — сохраняет
+    /// вызывающий). Переиспользуется демо-посевом и провижинингом «моей школы» в Development, чтобы у любого
+    /// dev-пользователя ЛК не был пустым (в проде новая школа остаётся пустой).
+    /// </summary>
+    public static void AddSampleStudents(SchoolDbContext db, Guid groupId)
     {
         // name, рейтинг, связанный IdP-sub (для онлайн-партий), дата рождения, W/D/L.
         var roster = new (string Name, int Rating, string? Sub, DateOnly Birth, int Wins, int Draws, int Losses)[]
@@ -82,7 +87,7 @@ public static class SeedData
         {
             var student = new Student
             {
-                GroupId = GroupId,
+                GroupId = groupId,
                 DisplayName = r.Name,
                 Rating = r.Rating,
                 BirthDate = r.Birth,

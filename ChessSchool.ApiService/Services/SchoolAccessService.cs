@@ -9,7 +9,11 @@ namespace ChessSchool.ApiService.Services;
 /// Авторизация доступа к ЛК школы по владению: пользователь (IdP-`sub`) видит/меняет только СВОЮ школу.
 /// Плюс провижининг «моя школа» (get-or-create). Резолв школы ученика — через `Student.GroupId → Group.SchoolId`.
 /// </summary>
-public sealed class SchoolAccessService(SchoolDbContext db)
+/// <summary>Опции провижининга школы. В Development новосозданная школа наполняется примерными учениками
+/// (чтобы ЛK dev-пользователя не был пустым); в проде новая школа создаётся пустой.</summary>
+public sealed record SchoolProvisioningOptions(bool SeedSampleStudents);
+
+public sealed class SchoolAccessService(SchoolDbContext db, SchoolProvisioningOptions options)
 {
     /// <summary>Владеет ли пользователь школой.</summary>
     public Task<bool> OwnsSchoolAsync(string sub, Guid schoolId, CancellationToken ct) =>
@@ -46,6 +50,17 @@ public sealed class SchoolAccessService(SchoolDbContext db)
             .OrderBy(g => g.Name)
             .Select(g => (Guid?)g.Id)
             .FirstOrDefaultAsync(ct);
+
+        // В Development наполняем ПУСТУЮ школу примерными учениками (и новосозданную, и уже существующую
+        // пустую — иначе dev, у кого школа завелась пустой при прошлом входе, так и видел бы пустой ЛК).
+        // В проде школа остаётся пустой — реальные ученики добавляются вручную. Гард по «нет учеников»:
+        // повторный вызов на непустой школе ничего не делает (но опустошённую dev-школу переселит — приемлемо).
+        if (options.SeedSampleStudents && groupId is { } gid
+            && !await db.Students.AnyAsync(s => s.GroupId == gid, ct))
+        {
+            SeedData.AddSampleStudents(db, gid);
+            await db.SaveChangesAsync(ct);
+        }
         return new MySchoolDto(school.Id, groupId ?? Guid.Empty);
     }
 }

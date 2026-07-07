@@ -12,6 +12,9 @@
     // --- состояние клиента ---
     let conn = null, ChessLib = null, signalR = null, chess = null;
     let state = null, stateAt = 0, currentId = null, clockTimer = null;
+    let myGameAt = 0; // момент последнего СВЕЖЕГО состояния своей партии (персональный GetState/ход): часы моей
+                      // партии считают отсчёт от него, а НЕ от stateAt — иначе общий пуш (ход бота в чужой доске)
+                      // сбрасывал бы stateAt и мои часы «замирали»/прыгали до следующего персонального фетча.
     let authed = false, loginUrl = '/signin', L = {}, isEn = false;
     let sel = null, pendingPromo = null, myColor = 'w', flip = false, lastPersonalFetch = 0;
     let premove = null; // отложенный ход на чужом ходу: { from, to, promo } — исполнится, когда наступит наш ход
@@ -120,6 +123,7 @@
         if (g && g.fen) {
             myColor = g.myColor === 1 ? 'b' : 'w';
             flip = myColor === 'b';
+            myGameAt = stateAt; // часы моей партии свежие (пришли с персональным состоянием) → сдвигаем их базу
             try { chess.load(g.fen); } catch (e) { }
             maybeRunPremove(g); // если наступил наш ход и есть отложенный предход — исполнить
         }
@@ -345,20 +349,38 @@
         const iAmWhite = g.myColor === 0;
         const fin = g.status === 2;
         const wActive = g.turn === 0 && g.status === 1, bActive = g.turn === 1 && g.status === 1;
-        const whiteRow = playerRow(g.whiteName, g.whiteBerserk, g.whiteMs, wActive, g.whiteIsBot, fin && g.whiteMs <= 0);
-        const blackRow = playerRow(g.blackName, g.blackBerserk, g.blackMs, bActive, g.blackIsBot, fin && g.blackMs <= 0);
-        const top = document.querySelector('.my-game .players-top');
-        const bot = document.querySelector('.my-game .players-bottom');
-        if (top) top.innerHTML = iAmWhite ? blackRow : whiteRow;
-        if (bot) bot.innerHTML = iAmWhite ? whiteRow : blackRow;
+        const white = { name: g.whiteName, berserk: g.whiteBerserk, ms: g.whiteMs, active: wActive, isBot: g.whiteIsBot, flag: fin && g.whiteMs <= 0 };
+        const black = { name: g.blackName, berserk: g.blackBerserk, ms: g.blackMs, active: bActive, isBot: g.blackIsBot, flag: fin && g.blackMs <= 0 };
+        updatePlayerRow(document.querySelector('.my-game .players-top'), iAmWhite ? black : white);
+        updatePlayerRow(document.querySelector('.my-game .players-bottom'), iAmWhite ? white : black);
         const ctrl = document.querySelector('.my-game .my-controls');
-        if (ctrl) ctrl.innerHTML = controlsHtml(g);
+        if (ctrl) { const h = controlsHtml(g); if (ctrl.dataset.sig !== h) { ctrl.innerHTML = h; ctrl.dataset.sig = h; } }
         renderBoard();
+    }
+
+    // Обновляет строку игрока БЕЗ пересоздания узла часов: innerHTML пересобираем только при смене
+    // структуры (имя/берсерк/бот/флаг), а часы правим в месте (data-ms/at/active) — иначе на каждый общий
+    // пуш узел .js-clock уничтожался и создавался заново → «прыжок» времени, мерцание active-клетки и
+    // reflow строки над/под доской (доска будто дёргается). tickClocks сам дорисует текст по data-ms/at.
+    function updatePlayerRow(rowEl, p) {
+        if (!rowEl) return;
+        const structSig = `${p.name}|${p.berserk ? 1 : 0}|${p.isBot ? 1 : 0}|${p.flag ? 1 : 0}`;
+        if (rowEl.dataset.sig !== structSig) {
+            rowEl.innerHTML = playerRow(p.name, p.berserk, p.ms, p.active, p.isBot, p.flag);
+            rowEl.dataset.sig = structSig;
+        }
+        const clock = rowEl.querySelector('.js-clock');
+        if (clock) {
+            clock.dataset.ms = p.ms;
+            clock.dataset.at = myGameAt;
+            clock.dataset.active = p.active ? '1' : '0';
+            clock.classList.toggle('active', p.active);
+        }
     }
 
     function playerRow(name, berserk, ms, active, isBot, flag) {
         const fl = flag ? ' <span class="clock-flag" title="время вышло">⚑</span>' : '';
-        return `<span>${berserk ? '⚡ ' : ''}${esc(name)}${botTag(isBot)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-active="${active ? 1 : 0}">${mmss(ms)}</span>${fl}</span>`;
+        return `<span>${berserk ? '⚡ ' : ''}${esc(name)}${botTag(isBot)} <span class="clock js-clock ${active ? 'active' : ''}" data-ms="${ms}" data-at="${myGameAt}" data-active="${active ? 1 : 0}">${mmss(ms)}</span>${fl}</span>`;
     }
 
     function boardsHtml() {
@@ -581,7 +603,10 @@
         const elapsed = Date.now() - stateAt;
         document.querySelectorAll('.js-clock').forEach(el => {
             const base = +el.dataset.ms, active = el.dataset.active === '1';
-            el.textContent = mmss(base - (active ? elapsed : 0));
+            // База отсчёта — своя у узла (data-at), иначе общий stateAt. Часы моей партии несут myGameAt и не
+            // «замирают» на общих пушах; часы чужих досок берут stateAt (их ms свежие в каждом общем пуше).
+            const at = el.dataset.at ? +el.dataset.at : stateAt;
+            el.textContent = mmss(base - (active ? (Date.now() - at) : 0));
         });
         const cd = document.querySelector('.js-countdown');
         if (cd) cd.textContent = hms(Math.max(0, (+cd.dataset.left) - Math.floor(elapsed / 1000)));

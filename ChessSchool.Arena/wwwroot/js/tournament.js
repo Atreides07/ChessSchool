@@ -527,8 +527,33 @@
         let mv = null;
         try { mv = chess.move({ from, to, promotion: promotion || undefined }); } catch (e) { mv = null; }
         if (!mv) return;
-        renderBoard(); // мгновенно показываем свой ход (оптимистично)
+        renderBoard();          // мгновенно показываем свой ход (оптимистично)
+        switchClocksOptimistic(); // и сразу переключаем часы на соперника, не дожидаясь round-trip
         conn.invoke('Move', currentId, from, to, mv.promotion || null).then(applyState).catch(() => { });
+    }
+
+    // Оптимистичное переключение часов сразу после своего хода. Доска ходит мгновенно (renderBoard), а
+    // активные часы иначе переключались бы только по серверному applyState (round-trip) — отсюда лаг
+    // «часы меняются не сразу». Обновляем узлы .js-clock В МЕСТЕ: остановившиеся (мои) фиксируем на текущем
+    // показанном значении (иначе прыгнули бы к своей базе), пошедшие (соперника) считают от now. Точные ms
+    // (в т.ч. прибавка за ход) сервер пришлёт следом и updateMyGameCard мягко сверит.
+    function switchClocksOptimistic() {
+        const g = state.myGame; if (!g) return;
+        g.turn = chess.turn() === 'w' ? 0 : 1;                 // новый ход по локальной позиции
+        const now = Date.now();
+        const iAmActive = (g.turn === 0) === (myColor === 'w'); // мои часы идут, только когда мой ход
+        const setClock = (rowSel, active) => {
+            const el = document.querySelector('.my-game ' + rowSel + ' .js-clock'); if (!el) return;
+            const base = +el.dataset.ms, wasActive = el.dataset.active === '1';
+            const at = el.dataset.at ? +el.dataset.at : stateAt;
+            el.dataset.ms = String(Math.max(0, base - (wasActive ? (now - at) : 0))); // зафиксировать показанное
+            el.dataset.at = String(now);
+            el.dataset.active = active ? '1' : '0';
+            el.classList.toggle('active', active);
+        };
+        setClock('.players-bottom', iAmActive);  // я — снизу
+        setClock('.players-top', !iAmActive);    // соперник — сверху
+        tickClocks();                             // сразу перерисовать цифры без ожидания следующего тика
     }
 
     function askPromotion(from, to) {

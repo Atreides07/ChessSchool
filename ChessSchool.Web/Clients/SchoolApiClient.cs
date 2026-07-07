@@ -48,6 +48,12 @@ public sealed class SchoolApiClient(HttpClient http)
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<StudentProfileDto>(ct) : null;
     }
 
+    public async Task<SchoolInsightsDto?> GetInsightsAsync(Guid schoolId, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Get, $"/schools/{schoolId}/insights", actingSub), ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<SchoolInsightsDto>(ct) : null;
+    }
+
     public async Task<IReadOnlyList<PendingGameDto>> GetPendingAsync(Guid schoolId, string actingSub, CancellationToken ct = default)
     {
         var resp = await http.SendAsync(Req(HttpMethod.Get, $"/schools/{schoolId}/pending-games", actingSub), ct);

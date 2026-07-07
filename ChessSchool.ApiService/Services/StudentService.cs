@@ -45,6 +45,64 @@ public sealed class StudentService(
             .ToListAsync(ct);
     }
 
+    /// <summary>Сводка для дашборда тренера за неделю: рост/падение рейтинга, неактивные, активность.
+    /// Холодный путь с малыми данными (одна школа) — считаем в памяти по ограниченным окнам выборок.</summary>
+    public async Task<SchoolInsightsDto> GetInsightsAsync(Guid schoolId, CancellationToken ct)
+    {
+        const int inactiveDays = 14;
+        var now = DateTimeOffset.UtcNow;
+        var weekAgo = now.AddDays(-7);
+
+        var students = await (
+            from st in db.Students.AsNoTracking()
+            join g in db.Groups on st.GroupId equals g.Id
+            where g.SchoolId == schoolId
+            select new { st.Id, st.DisplayName, st.Rating }).ToListAsync(ct);
+        if (students.Count == 0) return new SchoolInsightsDto([], [], [], 0, 0, 0);
+        var ids = students.Select(s => s.Id).ToList();
+
+        // База рейтинга неделю назад: последняя точка истории на момент ≤ weekAgo (по каждому ученику).
+        var baseline = (await db.RatingPoints.AsNoTracking()
+                .Where(r => ids.Contains(r.StudentId) && r.Date <= weekAgo)
+                .Select(r => new { r.StudentId, r.Date, r.Rating }).ToListAsync(ct))
+            .GroupBy(r => r.StudentId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.Date).First().Rating);
+
+        // Партии учеников: дата последней (активность) и счётчик за неделю.
+        var games = await db.Games.AsNoTracking()
+            .Where(g => (g.WhiteStudentId != null && ids.Contains(g.WhiteStudentId.Value))
+                     || (g.BlackStudentId != null && ids.Contains(g.BlackStudentId.Value)))
+            .Select(g => new { g.WhiteStudentId, g.BlackStudentId, g.PlayedAt }).ToListAsync(ct);
+
+        var lastGame = new Dictionary<Guid, DateTimeOffset>();
+        var playedThisWeek = new HashSet<Guid>();
+        foreach (var g in games)
+            foreach (var sid in new[] { g.WhiteStudentId, g.BlackStudentId })
+                if (sid is { } id && ids.Contains(id))
+                {
+                    if (!lastGame.TryGetValue(id, out var d) || g.PlayedAt > d) lastGame[id] = g.PlayedAt;
+                    if (g.PlayedAt >= weekAgo) playedThisWeek.Add(id);
+                }
+
+        var deltas = students
+            .Where(s => baseline.ContainsKey(s.Id))
+            .Select(s => new InsightStudentDto(s.Id, s.DisplayName, s.Rating - baseline[s.Id]))
+            .ToList();
+
+        var improved = deltas.Where(d => d.Delta > 0).OrderByDescending(d => d.Delta).Take(5).ToList();
+        var declined = deltas.Where(d => d.Delta < 0).OrderBy(d => d.Delta).Take(5).ToList();
+
+        var inactive = students
+            .Select(s => new InactiveStudentDto(s.Id, s.DisplayName,
+                lastGame.TryGetValue(s.Id, out var d) ? (int)(now - d).TotalDays : null))
+            .Where(x => x.DaysSinceLastGame is null || x.DaysSinceLastGame >= inactiveDays)
+            .OrderByDescending(x => x.DaysSinceLastGame ?? int.MaxValue)
+            .Take(5).ToList();
+
+        return new SchoolInsightsDto(improved, declined, inactive,
+            playedThisWeek.Count, games.Count(g => g.PlayedAt >= weekAgo), students.Count);
+    }
+
     public async Task<StudentProfileDto?> GetProfileAsync(Guid studentId, CancellationToken ct)
     {
         var student = await db.Students.FindAsync([studentId], ct);

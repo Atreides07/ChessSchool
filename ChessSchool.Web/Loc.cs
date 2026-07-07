@@ -76,6 +76,13 @@ public static class Loc
         ["school.sharerevoke"] = ("Отозвать", "Revoke"),
         ["school.sharerevoked"] = ("отозвана", "revoked"),
         ["school.shareexpired"] = ("истекла", "expired"),
+        ["dash.activeweek"] = ("играли на этой неделе", "played this week"),
+        ["dash.gamesweek"] = ("партий за неделю", "games this week"),
+        ["dash.improved"] = ("Выросли за неделю", "Improved this week"),
+        ["dash.declined"] = ("Просели за неделю", "Declined this week"),
+        ["dash.inactive"] = ("Давно не играли", "Inactive"),
+        ["dash.daysago"] = ("{0} дн. назад", "{0}d ago"),
+        ["dash.never"] = ("ещё не играл", "no games yet"),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

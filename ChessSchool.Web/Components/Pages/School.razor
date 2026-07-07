@@ -15,6 +15,33 @@
     </div>
 </div>
 
+@if (_insights is { } ins && ins.TotalStudents > 0)
+{
+    <div class="card dash">
+        <div class="dash-summary">
+            <span><strong>@ins.ActiveThisWeek</strong>/@ins.TotalStudents @Loc.T("dash.activeweek")</span>
+            <span><strong>@ins.GamesThisWeek</strong> @Loc.T("dash.gamesweek")</span>
+        </div>
+        <div class="dash-cols">
+            <div class="dash-col">
+                <h3>📈 @Loc.T("dash.improved")</h3>
+                @if (ins.MostImproved.Count == 0) { <p class="text-muted mb-0"><em>—</em></p> }
+                else { @foreach (var s in ins.MostImproved) { <div class="dash-row"><a href="students/@s.Id">@s.Name</a><span class="delta up">+@s.Delta</span></div> } }
+            </div>
+            <div class="dash-col">
+                <h3>📉 @Loc.T("dash.declined")</h3>
+                @if (ins.Declined.Count == 0) { <p class="text-muted mb-0"><em>—</em></p> }
+                else { @foreach (var s in ins.Declined) { <div class="dash-row"><a href="students/@s.Id">@s.Name</a><span class="delta down">@s.Delta</span></div> } }
+            </div>
+            <div class="dash-col">
+                <h3>😴 @Loc.T("dash.inactive")</h3>
+                @if (ins.Inactive.Count == 0) { <p class="text-muted mb-0"><em>—</em></p> }
+                else { @foreach (var s in ins.Inactive) { <div class="dash-row"><a href="students/@s.Id">@s.Name</a><span class="days">@(s.DaysSinceLastGame is { } d ? string.Format(Loc.T("dash.daysago"), d) : Loc.T("dash.never"))</span></div> } }
+            </div>
+        </div>
+    </div>
+}
+
 <div class="card">
     <div class="add-row">
         <input @bind="_newName" @bind:event="oninput" placeholder="@Loc.T("school.newname")" class="input" />
@@ -142,6 +169,7 @@
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private IReadOnlyList<StudentDto>? _students;
+    private SchoolInsightsDto? _insights;
     private Guid _schoolId;
     private Guid _groupId;
     private string? _sub;
@@ -204,7 +232,11 @@
         await Load();
     }
 
-    private async Task Load() => _students = await Api.GetStudentsAsync(_schoolId, _sub!);
+    private async Task Load()
+    {
+        _students = await Api.GetStudentsAsync(_schoolId, _sub!);
+        _insights = await Api.GetInsightsAsync(_schoolId, _sub!);
+    }
 
     private async Task AddStudent()
     {
@@ -284,4 +316,14 @@
     .share-state { font-size: .78rem; padding: .1rem .45rem; border-radius: var(--r-sm); }
     .share-state.ok { background: var(--success-bg, #e6f4ea); color: var(--success, #1a7f37); }
     .share-state.dead { background: var(--surface-2); color: var(--muted); }
+    .dash { margin-bottom: 1.25rem; }
+    .dash-summary { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; color: var(--text-secondary); }
+    .dash-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .dash-col h3 { font-size: .9rem; margin: 0 0 .5rem; }
+    .dash-row { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; padding: .2rem 0; border-bottom: 1px solid var(--border, #eee); }
+    .dash-row:last-child { border-bottom: 0; }
+    .delta { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .delta.up { color: var(--success, #1a7f37); }
+    .delta.down { color: var(--danger, #c0392b); }
+    .days { color: var(--muted); font-size: .82rem; white-space: nowrap; }
 </style>

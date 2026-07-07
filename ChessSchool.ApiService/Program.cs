@@ -110,6 +110,11 @@ lk.MapGet("/students/{id:guid}", async (Guid id, HttpContext ctx, StudentService
     !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
     : await students.GetProfileAsync(id, ct) is { } p ? Results.Ok(p) : Results.NotFound());
 
+lk.MapGet("/schools/{schoolId:guid}/insights",
+    async (Guid schoolId, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct) ? Results.StatusCode(Forbidden)
+    : Results.Ok(await students.GetInsightsAsync(schoolId, ct)));
+
 lk.MapGet("/schools/{schoolId:guid}/pending-games",
     async (Guid schoolId, int? skip, int? take, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
     !await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct) ? Results.StatusCode(Forbidden)

@@ -110,6 +110,26 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task Insights_ForOwner_ReturnsWeeklySummary()
+    {
+        var resp = await _client.SendAsync(Owner(HttpMethod.Get, $"/schools/{Demo.SchoolId}/insights"));
+        resp.EnsureSuccessStatusCode();
+        var ins = (await resp.Content.ReadFromJsonAsync<SchoolInsightsDto>())!;
+        Assert.True(ins.TotalStudents >= 5);
+        Assert.NotEmpty(ins.MostImproved);      // демо-рейтинги растут → кто-то вырос
+        Assert.True(ins.GamesThisWeek >= 1);    // демо-партии сыграны на этой неделе
+    }
+
+    [Fact]
+    public async Task Insights_ForeignUser_Returns403()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/schools/{Demo.SchoolId}/insights");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task StudentProfile_HasRatingHistory()
     {
         var students = await OwnerStudentsAsync();

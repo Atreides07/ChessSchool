@@ -52,6 +52,21 @@ public sealed record CreateStudentRequest(Guid GroupId, string DisplayName, Date
 /// <summary>Запрос на редактирование ученика (имя/дата рождения).</summary>
 public sealed record UpdateStudentRequest(string DisplayName, DateOnly? BirthDate);
 
+/// <summary>Ученик с изменением рейтинга за период (для «вырос/просел» на дашборде тренера).</summary>
+public sealed record InsightStudentDto(Guid Id, string Name, int Delta);
+
+/// <summary>Неактивный ученик (давно не играл) для дашборда тренера.</summary>
+public sealed record InactiveStudentDto(Guid Id, string Name, int? DaysSinceLastGame);
+
+/// <summary>Сводка для тренера за неделю: кто вырос/просел, кто не играл, активность.</summary>
+public sealed record SchoolInsightsDto(
+    IReadOnlyList<InsightStudentDto> MostImproved,
+    IReadOnlyList<InsightStudentDto> Declined,
+    IReadOnlyList<InactiveStudentDto> Inactive,
+    int ActiveThisWeek,
+    int GamesThisWeek,
+    int TotalStudents);
+
 /// <summary>Партия в очереди на атрибуцию (тренировочный сценарий).</summary>
 public sealed record PendingGameDto(Guid Id, DateTimeOffset PlayedAt, string DeviceRef, string Pgn);
 

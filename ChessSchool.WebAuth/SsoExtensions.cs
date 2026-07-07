@@ -92,6 +92,21 @@ public static class SsoExtensions
                             identity.AddClaim(new Claim("token_expires_at", DateTimeOffset.UtcNow.AddSeconds(exp).ToString("o")));
                     }
                     return Task.CompletedTask;
+                },
+                // Сбой удалённого входа на /signin-oidc (напр. «Correlation failed»: протухший/израсходованный
+                // correlation-cookie, кнопка «назад», повторный колбэк, переход по устаревшей authorize-ссылке
+                // из письма) НЕ должен падать 500. Гасим исключение и уводим на свежий вход: сессия IdP обычно
+                // уже есть → повторный challenge проходит прозрачно и пользователь оказывается внутри. Доступ при
+                // этом не выдаётся (входа не произошло) — это только замена краша на мягкую деградацию.
+                OnRemoteFailure = ctx =>
+                {
+                    // На домашнюю (публичная), а НЕ на /signin — иначе при устойчивом сбое correlation
+                    // (challenge → callback снова падает) получилась бы петля редиректов. Домашняя безопасна:
+                    // если сессия Арены уже есть (частый случай) — пользователь остаётся внутри; если нет —
+                    // видит публичную главную и входит вручную. Главное — никакого 500.
+                    ctx.HandleResponse();
+                    ctx.Response.Redirect("/");
+                    return Task.CompletedTask;
                 }
             };
         });

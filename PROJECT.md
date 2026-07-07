@@ -403,6 +403,18 @@ ApiService остаётся владельцем персистентности 
     Правило (см. чек-лист CLAUDE.md): значение claim — в формате провайдера; булев claim парсить типизированно в одной
     точке, не сравнивать с литералом. Защищено `ClaimsPrincipalExtensionsTests` (True/true/False/absent) и
     `ArenaVerifyBannerTests.VerifyBanner_Hidden_WhenEmailVerified_RegardlessOfCase`.
+25. **OIDC-колбэк `/signin-oidc`: сбой удалённого входа («Correlation failed») обязан деградировать, а не падать 500.**
+    Симптом: переход по ссылке-подтверждению e-mail из письма → `AuthenticationFailureException: Correlation failed`
+    на `localhost:<web>/signin-oidc` (необработанное исключение). Причина: письмо в `return` несёт ИСХОДНЫЙ
+    `/connect/authorize?...&state=…`, захваченный при регистрации; регистрация уже прошла полный OIDC-раунд и
+    **израсходовала** correlation-cookie той сессии. Клик по письму повторно проигрывает тот authorize → код
+    приходит на `/signin-oidc`, а correlation уже нет → «Correlation failed». Обработчика `OnRemoteFailure` не было
+    → 500. (Не keyring: DataProtection-ключи в dev персистятся в Redis и переживают рестарт.) Лечение
+    ([SsoExtensions](ChessSchool.WebAuth/SsoExtensions.cs)): `OnRemoteFailure` гасит исключение и редиректит на
+    домашнюю `/` (НЕ на `/signin` — иначе петля при устойчивом сбое). Это ловит ЛЮБОЙ сбой удалённого входа
+    (протухший/израсходованный correlation-cookie, «назад», повторный колбэк, старая ссылка), не выдавая доступа.
+    Правило: OIDC-хендлеры ВСЕГДА обрабатывают `OnRemoteFailure`; кросс-сервисные auth-раунды (ссылка из письма →
+    OIDC-колбэк приложения) проверять сквозным прогоном на реальном приложении, а не по существующей сессии.
 
 ## Безопасность и конфигурация (специфика)
 

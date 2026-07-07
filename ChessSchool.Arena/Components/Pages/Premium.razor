@@ -113,9 +113,9 @@ else
         var user = Http.HttpContext?.User;
         _authed = user?.Identity?.IsAuthenticated == true;
         _emailVerified = user?.FindFirst("email_verified")?.Value == "true";
-        // Ссылка на управление e-mail в IdP (подтвердить/сменить), с возвратом на /premium.
-        var authority = (Config["Sso:Authority"] ?? "").TrimEnd('/');
-        _manageEmailUrl = $"{authority}/account/email?return={Uri.EscapeDataString($"{Nav.BaseUri}premium")}";
+        // Ссылка на управление e-mail в IdP (подтвердить/сменить), с возвратом на /premium. Через единый
+        // хелпер Config.IdpUrl (хост из ResolveSsoAuthority) — НЕ из сырого Config["Sso:Authority"] (локально пуст).
+        _manageEmailUrl = Config.IdpUrl("/account/email", $"{Nav.BaseUri}premium");
         _sub = user?.FindFirst("sub")?.Value ?? "";
         _token = Config["Paddle:ClientToken"] ?? "";
         _priceId = Config["Paddle:PremiumPriceId"] ?? "";

@@ -1,6 +1,5 @@
 @inherits LayoutComponentBase
 @using Microsoft.AspNetCore.Components.Authorization
-@using Microsoft.Extensions.Hosting
 @using ChessSchool.Arena
 @inject NavigationManager Nav
 @inject IHttpContextAccessor Http
@@ -108,13 +107,10 @@
         var user = Http.HttpContext?.User;
         _authed = user?.Identity?.IsAuthenticated == true;
         _emailVerified = user?.FindFirst("email_verified")?.Value == "true";
-        // Хост IdP берём так же, как OIDC-конвейер (ResolveSsoAuthority): явный Sso:Authority (dev tunnel/прод),
-        // иначе адрес из service discovery Aspire. Голый Config["Sso:Authority"] локально ПУСТ → ссылка
-        // становилась относительной и вела на хост Арены (нет /account/email → Not Found, письмо не уходило).
-        var authority = (Config.ResolveSsoAuthority() ?? "").TrimEnd('/');
-        // return — абсолютный URL текущей страницы Арены, чтобы после действий на IdP вернуться в Арену, а не на IdP.
-        var ret = Nav.Uri;
-        _manageEmailUrl = $"{authority}/account/email?return={Uri.EscapeDataString(ret)}";
+        // Единый хелпер построения ссылки на IdP (Config.IdpUrl): хост из ResolveSsoAuthority, return —
+        // абсолютный URL текущей страницы Арены (вернуться в Арену после действий на IdP). НЕ собирать из
+        // сырого Config["Sso:Authority"] — локально он пуст, ссылка выходила относительной → Not Found.
+        _manageEmailUrl = Config.IdpUrl("/account/email", Nav.Uri);
         var sub = user?.FindFirst("sub")?.Value;
         if (!string.IsNullOrEmpty(sub)) _isPremium = await Entitlements.IsPremiumAsync(sub);
     }

@@ -163,6 +163,23 @@ public static class Extensions
         : config["services:auth:https:0"] ?? config["services:auth:http:0"];
 
     /// <summary>
+    /// Абсолютный URL страницы IdP (Auth) для БРАУЗЕРНОГО перехода из другого сервиса (напр. кнопка
+    /// «Подтвердить e-mail» в Арене → <c>/account/email</c>). Хост берётся из <see cref="ResolveSsoAuthority"/>
+    /// (тот же, что использует OIDC-конвейер). ЕДИНАЯ точка построения таких ссылок: собирать их из сырого
+    /// <c>Config["Sso:Authority"]</c> нельзя — локально он ПУСТ, и URL выходил относительным (открывался на
+    /// хосте текущего сервиса, а не IdP → Not Found). <paramref name="returnUrl"/> (если задан) добавляется
+    /// как <c>?return=</c> — абсолютный URL страницы-источника, чтобы после действий на IdP вернуться назад.
+    /// </summary>
+    public static string IdpUrl(this IConfiguration config, string path, string? returnUrl = null)
+    {
+        var authority = (config.ResolveSsoAuthority() ?? "").TrimEnd('/');
+        if (!path.StartsWith('/')) path = "/" + path;
+        var url = authority + path;
+        if (string.IsNullOrEmpty(returnUrl)) return url;
+        return url + (path.Contains('?') ? "&" : "?") + "return=" + Uri.EscapeDataString(returnUrl);
+    }
+
+    /// <summary>
     /// То же, но с fail-fast: вне Development Redis обязателен (распределённые провайдеры — условие
     /// мультисервера), и отсутствие строки подключения роняет старт, а не уводит тихо в single-node
     /// in-memory. В Development допускается null (dev-фолбэк).

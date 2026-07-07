@@ -391,6 +391,18 @@ ApiService остаётся владельцем персистентности 
     действий на IdP вернуться в Арену. Правило: любую **кросс-сервисную** ссылку (браузерный переход на IdP/другой
     сервис) строй из резолвнутого authority, а не из сырого конфиг-ключа, который может быть пуст. Защищено
     `ArenaVerifyBannerTests.VerifyBanner_ManageEmailLink_PointsToAbsoluteIdpAuthority`.
+24. **Булев claim `email_verified` приходит как «True», а не «true» — не сравнивать со строковым литералом.**
+    Симптом: у пользователя e-mail подтверждён (на IdP «Ваш e-mail подтверждён ✓»), но в Арене висит баннер
+    «Подтвердите e-mail», и платные действия (`ConfirmedEmail`) заблокированы. Причина: `email_verified` —
+    стандартный OIDC-claim БУЛЕВ; userinfo отдаёт JSON `true`, OIDC-маппинг (`MapUniqueJsonKey`) кладёт значение
+    через `JsonElement.ToString()`, который для булева даёт **«True»** (с большой — воспроизведено). А потребители
+    сравнивали со строчным литералом: `...Value == "true"` (баннер в [MainLayout](ChessSchool.Arena/Components/Layout/MainLayout.razor)/[Premium](ChessSchool.Arena/Components/Pages/Premium.razor))
+    и `RequireClaim("email_verified","true")` (политика `ConfirmedEmail` в [Program.cs](ChessSchool.Arena/Program.cs), ordinal-сравнение) → «True» не совпадало → подтверждённый
+    считался неподтверждённым. Лечение: единый хелпер [IsEmailVerified](ChessSchool.WebAuth/ClaimsPrincipalExtensions.cs)
+    (`bool.TryParse`, регистронезависимо); баннеры читают через него, политика — `RequireAssertion(ctx => ctx.User.IsEmailVerified())`.
+    Правило (см. чек-лист CLAUDE.md): значение claim — в формате провайдера; булев claim парсить типизированно в одной
+    точке, не сравнивать с литералом. Защищено `ClaimsPrincipalExtensionsTests` (True/true/False/absent) и
+    `ArenaVerifyBannerTests.VerifyBanner_Hidden_WhenEmailVerified_RegardlessOfCase`.
 
 ## Безопасность и конфигурация (специфика)
 

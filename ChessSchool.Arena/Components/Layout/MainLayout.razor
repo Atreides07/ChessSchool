@@ -106,7 +106,7 @@
     {
         var user = Http.HttpContext?.User;
         _authed = user?.Identity?.IsAuthenticated == true;
-        _emailVerified = user?.FindFirst("email_verified")?.Value == "true";
+        _emailVerified = user.IsEmailVerified();
         // Единый хелпер построения ссылки на IdP (Config.IdpUrl): хост из ResolveSsoAuthority, return —
         // абсолютный URL текущей страницы Арены (вернуться в Арену после действий на IdP). НЕ собирать из
         // сырого Config["Sso:Authority"] — локально он пуст, ссылка выходила относительной → Not Found.

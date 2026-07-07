@@ -77,8 +77,11 @@ builder.Services.AddSingleton<ChessSchool.Arena.Services.BroadcastsCatalog>();
 // RoleClaimType="role" задаётся в AddChessSchoolSso, поэтому RequireRole видит этот claim.
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("Admin", policy => policy.RequireRole("admin"))
-    // Мягкий гейт: чувствительные действия (оплата) — только с подтверждённым e-mail (claim из IdP).
-    .AddPolicy("ConfirmedEmail", policy => policy.RequireAuthenticatedUser().RequireClaim("email_verified", "true"));
+    // Мягкий гейт: чувствительные действия (оплата) — только с подтверждённым e-mail. email_verified —
+    // булев OIDC-claim (приходит как "True"/"true"), поэтому читаем через IsEmailVerified (bool.TryParse),
+    // а НЕ RequireClaim("email_verified","true") — тот сравнивает ordinal и «True» бы не пропустил.
+    .AddPolicy("ConfirmedEmail", policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(ctx => ctx.User.IsEmailVerified()));
 
 // Серверный шахматный движок (Stockfish) для ботов.
 builder.Services.AddSingleton<ChessSchool.Arena.Services.IChessEngine, ChessSchool.Arena.Services.StockfishEngine>();

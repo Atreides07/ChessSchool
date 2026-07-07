@@ -112,7 +112,7 @@ else
     {
         var user = Http.HttpContext?.User;
         _authed = user?.Identity?.IsAuthenticated == true;
-        _emailVerified = user?.FindFirst("email_verified")?.Value == "true";
+        _emailVerified = user.IsEmailVerified();
         // Ссылка на управление e-mail в IdP (подтвердить/сменить), с возвратом на /premium. Через единый
         // хелпер Config.IdpUrl (хост из ResolveSsoAuthority) — НЕ из сырого Config["Sso:Authority"] (локально пуст).
         _manageEmailUrl = Config.IdpUrl("/account/email", $"{Nav.BaseUri}premium");

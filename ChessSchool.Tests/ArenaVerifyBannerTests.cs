@@ -23,12 +23,11 @@ public class ArenaVerifyBannerTests : BunitContext
         public void Invalidate(string? sub) { }
     }
 
-    [Fact]
-    public void VerifyBanner_ManageEmailLink_PointsToAbsoluteIdpAuthority()
+    // Рендерит MainLayout под пользователем с указанными claim'ами (кроме sub/email).
+    private IRenderedComponent<MainLayout> RenderAs(params Claim[] extra)
     {
-        // Вошёл, но e-mail НЕ подтверждён → баннер виден. email_verified claim отсутствует.
-        var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim("sub", "u1"), new Claim("email", "u@test.local")], authenticationType: "test"));
+        Claim[] claims = [new("sub", "u1"), new("email", "u@test.local"), .. extra];
+        var user = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "test"));
         Services.AddSingleton<IHttpContextAccessor>(
             new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = user } });
         // Sso:Authority НЕ задан (как локально) — хост IdP приходит из service discovery Aspire.
@@ -36,11 +35,26 @@ public class ArenaVerifyBannerTests : BunitContext
             new Dictionary<string, string?> { ["services:auth:https:0"] = "https://auth.local" }).Build());
         Services.AddSingleton<IPlayerEntitlements>(new FakeEntitlements());
         this.AddAuthorization(); // MainLayout содержит AuthorizeView
+        return Render<MainLayout>(p => p.Add(c => c.Body, "<p>body</p>"));
+    }
 
-        var cut = Render<MainLayout>(p => p.Add(c => c.Body, "<p>body</p>"));
-
+    [Fact]
+    public void VerifyBanner_ManageEmailLink_PointsToAbsoluteIdpAuthority()
+    {
+        // Вошёл, но e-mail НЕ подтверждён (claim отсутствует) → баннер виден.
+        var cut = RenderAs();
         var href = cut.Find(".ar-verify a").GetAttribute("href")!;
         // Абсолютная ссылка на IdP, а не относительная «/account/email» (которая вела бы на хост Арены → Not Found).
         Assert.StartsWith("https://auth.local/account/email", href);
+    }
+
+    [Theory]
+    [InlineData("True")]  // как OIDC сериализует БУЛЕВ claim (JsonElement.ToString()) — главный сценарий бага
+    [InlineData("true")]  // как строку кладёт id-токен
+    public void VerifyBanner_Hidden_WhenEmailVerified_RegardlessOfCase(string value)
+    {
+        // email_verified присутствует и истинный → баннера мягкого гейта быть НЕ должно.
+        var cut = RenderAs(new Claim("email_verified", value));
+        Assert.Empty(cut.FindAll(".ar-verify"));
     }
 }

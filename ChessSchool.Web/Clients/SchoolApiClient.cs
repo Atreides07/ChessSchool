@@ -90,6 +90,14 @@ public sealed class SchoolApiClient(HttpClient http)
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<StudentDto>(ct) : null;
     }
 
+    public async Task<int> BulkCreateStudentsAsync(Guid schoolId, Guid groupId, IReadOnlyList<string> names, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Post, $"/schools/{schoolId}/students/bulk", actingSub, new BulkCreateStudentsRequest(groupId, names)), ct);
+        if (!resp.IsSuccessStatusCode) return 0;
+        var created = await resp.Content.ReadFromJsonAsync<List<StudentDto>>(ct);
+        return created?.Count ?? 0;
+    }
+
     public Task AttributeAsync(Guid gameId, AttributeGameRequest req, string actingSub, CancellationToken ct = default) =>
         http.SendAsync(Req(HttpMethod.Post, $"/games/{gameId}/attribute", actingSub, req), ct);
 

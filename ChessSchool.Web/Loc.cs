@@ -91,6 +91,11 @@ public static class Loc
             "Rating reliability: the smaller the ±, the more precise (improves with more games)."),
         ["rating.trendtip"] = ("Изменение рейтинга за последние 7 дней", "Rating change over the last 7 days"),
         ["rating.percentile"] = ("Выше {0}% учеников школы", "Above {0}% of the school's students"),
+        ["school.import"] = ("Импорт списком", "Import list"),
+        ["school.importhint"] = ("Вставьте имена — по одному в строке:", "Paste names — one per line:"),
+        ["school.importph"] = ("Иван Петров\nМария Сидорова\n…", "John Smith\nJane Doe\n…"),
+        ["school.importdo"] = ("Импортировать", "Import"),
+        ["school.imported"] = ("Добавлено учеников: {0}", "Students added: {0}"),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

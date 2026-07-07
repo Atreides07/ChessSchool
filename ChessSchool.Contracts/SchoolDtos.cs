@@ -56,6 +56,9 @@ public sealed record StudentProfileDto(
 /// <summary>Запрос на создание ученика.</summary>
 public sealed record CreateStudentRequest(Guid GroupId, string DisplayName, DateOnly? BirthDate);
 
+/// <summary>Массовое создание учеников из списка имён (импорт класса одним заходом).</summary>
+public sealed record BulkCreateStudentsRequest(Guid GroupId, IReadOnlyList<string> Names);
+
 /// <summary>Запрос на редактирование ученика (имя/дата рождения).</summary>
 public sealed record UpdateStudentRequest(string DisplayName, DateOnly? BirthDate);
 

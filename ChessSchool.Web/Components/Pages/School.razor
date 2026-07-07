@@ -53,7 +53,27 @@
             </select>
         }
         <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">@Loc.T("school.add")</button>
+        <button class="btn btn-ghost" @onclick="() => _importOpen = !_importOpen">@Loc.T("school.import")</button>
     </div>
+
+    @if (_importOpen)
+    {
+        <div class="link-panel import-panel">
+            <span>@Loc.T("school.importhint")</span>
+            <textarea @bind="_importText" rows="6" class="form-control import-area" placeholder="@Loc.T("school.importph")"></textarea>
+            <div class="import-actions">
+                @if (_groups.Count > 1)
+                {
+                    <select @bind="_newGroupId" class="input input-group" title="@Loc.T("school.group")">
+                        @foreach (var g in _groups) { <option value="@g.Id">@g.Name</option> }
+                    </select>
+                }
+                <button class="btn btn-primary btn-sm" @onclick="ImportStudents" disabled="@string.IsNullOrWhiteSpace(_importText)">@Loc.T("school.importdo")</button>
+                <button class="btn btn-link btn-sm" @onclick="() => { _importOpen = false; _importMsg = null; }">@Loc.T("school.cancel")</button>
+                @if (_importMsg is not null) { <span class="text-success">@_importMsg</span> }
+            </div>
+        </div>
+    }
 
     @if (_students is null)
     {
@@ -208,6 +228,9 @@
     private Guid _newGroupId;
     private string _groupFilter = "";
     private string _newGroupName = "";
+    private bool _importOpen;
+    private string _importText = "";
+    private string? _importMsg;
     private Guid? _sharingId;
     private IReadOnlyList<ShareLinkInfoDto> _shares = [];
     private Guid? _linkingId;
@@ -294,6 +317,17 @@
         await Load();
     }
 
+    private async Task ImportStudents()
+    {
+        var names = _importText.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (names.Length == 0) return;
+        var groupId = _newGroupId != Guid.Empty ? _newGroupId : _groupId;
+        var count = await Api.BulkCreateStudentsAsync(_schoolId, groupId, names, _sub!);
+        _importMsg = string.Format(Loc.T("school.imported"), count);
+        _importText = "";
+        await Load();
+    }
+
     private async Task CreateGroup()
     {
         if (string.IsNullOrWhiteSpace(_newGroupName)) return;
@@ -369,6 +403,9 @@
     .list-tools .tools-spacer { flex: 1 1 auto; }
     .list-tools .newgroup { max-width: 160px; }
     .input-group { max-width: 180px; }
+    .import-panel { flex-direction: column; align-items: stretch; max-width: 640px; }
+    .import-area { width: 100%; font-family: inherit; resize: vertical; }
+    .import-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .5rem; }
     .th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; font-weight: inherit; }
     .th-sort:hover { color: var(--accent); }
     .rd { color: var(--muted); font-size: .8rem; cursor: help; }

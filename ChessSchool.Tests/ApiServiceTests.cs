@@ -146,6 +146,32 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task BulkCreate_AddsAll_SkipsBlanksAndDuplicates()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var names = new[] { $"A-{tag}", "  ", $"B-{tag}", $"b-{tag}", $"C-{tag}" }; // пустая + дубль по регистру
+        var resp = await _client.SendAsync(Owner(HttpMethod.Post, $"/schools/{Demo.SchoolId}/students/bulk",
+            new BulkCreateStudentsRequest(Demo.GroupId, names)));
+        resp.EnsureSuccessStatusCode();
+        var created = (await resp.Content.ReadFromJsonAsync<List<StudentDto>>())!;
+        Assert.Equal(3, created.Count); // A, B, C — пустая и дубль отброшены
+
+        var all = await OwnerStudentsAsync();
+        foreach (var n in new[] { $"A-{tag}", $"B-{tag}", $"C-{tag}" })
+            Assert.Contains(all, s => s.DisplayName == n);
+    }
+
+    [Fact]
+    public async Task BulkCreate_ForeignUser_Returns403()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/schools/{Demo.SchoolId}/students/bulk");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        req.Content = JsonContent.Create(new BulkCreateStudentsRequest(Demo.GroupId, new[] { "Взлом" }));
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task Students_HaveRecentRatingTrend()
     {
         // Демо-история рейтинга растёт → у кого-то положительный тренд за 7 дней (для стрелки в ростере).

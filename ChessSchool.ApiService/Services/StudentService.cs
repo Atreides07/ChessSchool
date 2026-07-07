@@ -221,6 +221,28 @@ public sealed class StudentService(
         return MoveOutcome.Ok;
     }
 
+    /// <summary>Массово создать учеников из списка имён (импорт класса). Пустые/дубли строк отбрасываются,
+    /// одна вставка на всех (без N запросов). Возвращает созданных или текст ошибки (группа не в школе).</summary>
+    public async Task<(IReadOnlyList<StudentDto> Created, string? Error)> BulkCreateAsync(
+        Guid schoolId, Guid groupId, IEnumerable<string> names, CancellationToken ct)
+    {
+        if (!await db.Groups.AnyAsync(g => g.Id == groupId && g.SchoolId == schoolId, ct))
+            return ([], "Группа не найдена в этой школе.");
+
+        const int maxBatch = 500; // защита от вставки «всё подряд» одной пачкой
+        var clean = names.Select(n => n?.Trim() ?? "")
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .Take(maxBatch).ToList();
+        if (clean.Count == 0) return ([], "Список пуст.");
+
+        var students = clean.Select(n => new Student { GroupId = groupId, DisplayName = n }).ToList();
+        db.Students.AddRange(students);
+        await db.SaveChangesAsync(ct);
+        analytics.Capture("students_bulk_created", schoolId.ToString(), new Dictionary<string, object?> { ["count"] = students.Count });
+        return (students.Select(ToDto).ToList(), null);
+    }
+
     public enum AttributeOutcome { Ok, GameNotFound, StudentNotFound }
 
     /// <summary>Привязать партию из очереди к ученикам и пересчитать рейтинг (через GameArchiver).</summary>

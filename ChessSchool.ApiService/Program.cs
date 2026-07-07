@@ -153,6 +153,14 @@ lk.MapPost("/students/{id:guid}/group", async (Guid id, MoveStudentRequest req,
     };
 });
 
+lk.MapPost("/schools/{schoolId:guid}/students/bulk", async (Guid schoolId, BulkCreateStudentsRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+{
+    if (!await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct)) return Results.StatusCode(Forbidden);
+    var (created, error) = await students.BulkCreateAsync(schoolId, req.GroupId, req.Names ?? [], ct);
+    return error is not null ? Results.BadRequest(new { error }) : Results.Ok(created);
+});
+
 lk.MapPut("/students/{id:guid}", async (Guid id, UpdateStudentRequest req,
     HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
 {

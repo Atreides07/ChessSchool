@@ -330,6 +330,14 @@ ApiService остаётся владельцем персистентности 
     оставлять литералом: `otpauth://totp/{Esc(issuer)}:{Esc(account)}?secret=…&issuer={Esc(issuer)}&…`. Секрет —
     Base32 (RFC 4648) БЕЗ паддинга, в верхнем регистре (иначе GA тоже отвергает). Защищено
     `TotpTests.OtpAuthUri_UsesLiteralColonSeparator_AndCanonicalParams`.
+    **Второй режим того же симптома (SVG QR обрезан):** QRCoder `SvgQRCode.GetGraphic(...)` по умолчанию
+    (`SizingMode.WidthHeightAttribute`) эмитит `<svg width="N" height="N">` **без `viewBox`**. Наш
+    адаптивный CSS (`.Replace("<svg ", …style=\"width:100%;height:auto\"…)` в [OtpAuthQrSvg](ChessSchool.Auth/AccountPages.cs))
+    сужал вьюпорт до контейнера (200px), но без `viewBox` координаты (0..N) НЕ масштабировались → правый/нижний
+    край QR вместе с quiet-zone **обрезался** → «отрисовалось не полностью», Google Authenticator не сканировал.
+    Лечение: генерировать с `SizingMode.ViewBoxAttribute` (SVG получает `viewBox` без фиксированных width/height),
+    тогда `width:100%;height:auto` масштабирует QR целиком. Правило: адаптивный inline-SVG обязан иметь `viewBox`,
+    иначе `width:100%` его режет. Защищено проверкой `viewBox` в `AuthIntegrationTests.MfaSetup_ShowsBothQrCodeAndManualKey`.
 20. **Long-poll грейн: окно ожидания ОБЯЗАНО быть меньше response-timeout Orleans, и возвращать «пусто», а не бросать.**
     Симптом: `System.TimeoutException` из `MatchmakingGrain.FindMatchAsync` у одинокого искателя партии. Причина
     двойная: (1) грейн ждал соперника `WaitTimeout=60с`, но дефолтный **response-timeout Orleans — 30с** →

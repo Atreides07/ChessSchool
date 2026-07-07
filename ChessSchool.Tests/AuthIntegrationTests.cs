@@ -212,6 +212,9 @@ public class AuthIntegrationTests : IAsyncLifetime
 
         // QR-код отрисован inline-SVG (сканирование).
         Assert.Contains("<svg", html);
+        // Регрессия: SVG QR обязан нести viewBox. Без него CSS width:100% сужал вьюпорт, а координаты не
+        // масштабировались → правый/нижний край QR обрезался («не полностью») и Google Authenticator не сканировал.
+        Assert.Contains("viewBox", html);
         // И ключ символами доступен (ручной ввод) — обе опции сразу (метка культуронезависимо RU/EN).
         Assert.True(html.Contains("Введите ключ вручную") || html.Contains("Enter this key manually"),
             "на странице должен быть блок ручного ввода ключа");

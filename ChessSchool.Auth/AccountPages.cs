@@ -201,8 +201,13 @@ button:hover{background:var(--accent-h)}
     {
         using var gen = new QRCoder.QRCodeGenerator();
         using var data = gen.CreateQrCode(otpauthUri, QRCoder.QRCodeGenerator.ECCLevel.M);
-        var svg = new QRCoder.SvgQRCode(data).GetGraphic(4, "#111827", "#ffffff", drawQuietZones: true);
-        // Вписываем в контейнер: SVG имеет фиксированный px-размер → форсим масштаб по ширине контейнера.
+        // SizingMode.ViewBoxAttribute: SVG получает viewBox БЕЗ фиксированных width/height. По умолчанию
+        // QRCoder ставит только width/height в px и НЕ ставит viewBox — тогда наш CSS width:100% сужал
+        // вьюпорт до контейнера, но координаты (0..N) не масштабировались, и правый/нижний край QR
+        // (вместе с quiet-zone) обрезался → «отрисовалось не полностью» и Google Authenticator не сканировал.
+        // С viewBox система координат масштабируется вместе с шириной → QR виден целиком.
+        var svg = new QRCoder.SvgQRCode(data).GetGraphic(4, "#111827", "#ffffff", true,
+            QRCoder.SvgQRCode.SizingMode.ViewBoxAttribute);
         return svg.Replace("<svg ", "<svg style=\"width:100%;height:auto;display:block\" ");
     }
 

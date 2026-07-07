@@ -244,6 +244,31 @@ public sealed class StudentService(
         return (students.Select(ToDto).ToList(), null);
     }
 
+    /// <summary>Удалить ученика и его персональные данные (GDPR): история рейтинга и ссылки родителю
+    /// удаляются, партии обезличиваются (строки истории остаются, но без привязки к удалённому ученику).
+    /// false — ученик не найден. Обходимся без ExecuteUpdate (не поддержан InMemory-провайдером в тестах).</summary>
+    public async Task<bool> DeleteAsync(Guid studentId, CancellationToken ct)
+    {
+        var student = await db.Students.FindAsync([studentId], ct);
+        if (student is null) return false;
+
+        db.RatingPoints.RemoveRange(await db.RatingPoints.Where(r => r.StudentId == studentId).ToListAsync(ct));
+        db.ShareLinks.RemoveRange(await db.ShareLinks.Where(l => l.StudentId == studentId).ToListAsync(ct));
+
+        // Партии не удаляем (история школы), но снимаем привязку к удалённому ученику.
+        var games = await db.Games.Where(g => g.WhiteStudentId == studentId || g.BlackStudentId == studentId).ToListAsync(ct);
+        foreach (var g in games)
+        {
+            if (g.WhiteStudentId == studentId) g.WhiteStudentId = null;
+            if (g.BlackStudentId == studentId) g.BlackStudentId = null;
+        }
+
+        db.Students.Remove(student);
+        await db.SaveChangesAsync(ct);
+        analytics.Capture("student_deleted", studentId.ToString());
+        return true;
+    }
+
     public enum AttributeOutcome { Ok, GameNotFound, StudentNotFound }
 
     /// <summary>Привязать партию из очереди к ученикам и пересчитать рейтинг (через GameArchiver).</summary>

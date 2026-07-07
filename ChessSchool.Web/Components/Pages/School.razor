@@ -162,6 +162,17 @@
             }
             <button class="btn btn-primary btn-sm" @onclick="() => SaveEdit(eid)" disabled="@string.IsNullOrWhiteSpace(_editName)">@Loc.T("school.save")</button>
             <button class="btn btn-link btn-sm" @onclick="CancelEdit">@Loc.T("school.cancel")</button>
+            <span class="edit-spacer"></span>
+            @if (!_confirmDelete)
+            {
+                <button class="btn btn-sm btn-outline-danger" @onclick="() => _confirmDelete = true">@Loc.T("school.delete")</button>
+            }
+            else
+            {
+                <span class="text-danger">@Loc.T("school.deleteconfirm")</span>
+                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStudent(eid)">@Loc.T("school.deleteyes")</button>
+                <button class="btn btn-link btn-sm" @onclick="() => _confirmDelete = false">@Loc.T("school.cancel")</button>
+            }
         </div>
     }
 
@@ -346,6 +357,7 @@
 
     private Guid _editGroupOrig;
     private Guid _editGroupId;
+    private bool _confirmDelete;
 
     private void StartEdit(StudentDto s)
     {
@@ -354,11 +366,20 @@
         _editBirth = s.BirthDate;
         _editGroupOrig = s.GroupId;
         _editGroupId = s.GroupId;
+        _confirmDelete = false;
         _linkingId = null; // не показывать две панели сразу
         _sharingId = null;
     }
 
-    private void CancelEdit() => _editingId = null;
+    private void CancelEdit() { _editingId = null; _confirmDelete = false; }
+
+    private async Task DeleteStudent(Guid studentId)
+    {
+        await Api.DeleteStudentAsync(studentId, _sub!);
+        _editingId = null;
+        _confirmDelete = false;
+        await Load();
+    }
 
     private async Task SaveEdit(Guid studentId)
     {
@@ -430,6 +451,7 @@
     .trend.down { color: var(--danger, #c0392b); }
     .link-panel { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0 0; padding: .85rem; background: var(--surface-2); border-radius: var(--r-md); max-width: 640px; }
     .link-panel input { max-width: 260px; }
+    .edit-spacer { flex: 1 1 auto; }
     .share-panel { flex-direction: column; align-items: stretch; max-width: 720px; }
     .share-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
     .progress-send { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }

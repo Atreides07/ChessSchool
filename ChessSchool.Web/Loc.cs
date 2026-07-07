@@ -100,6 +100,9 @@ public static class Loc
         ["school.progresssend"] = ("Отправить прогресс", "Send progress"),
         ["school.progresssent"] = ("Письмо отправлено ✓", "Email sent ✓"),
         ["school.progresserr"] = ("Не удалось отправить.", "Could not send."),
+        ["school.delete"] = ("Удалить ученика", "Delete student"),
+        ["school.deleteconfirm"] = ("Удалить без возврата? Данные ученика будут стёрты.", "Delete permanently? The student's data will be erased."),
+        ["school.deleteyes"] = ("Да, удалить", "Yes, delete"),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),
@@ -138,6 +141,7 @@ public static class Loc
         ["profile.fallback"] = ("Профиль ученика", "Student profile"),
         ["profile.notfound"] = ("Ученик не найден.", "Student not found."),
         ["profile.tolist"] = ("← К списку учеников", "← Back to students"),
+        ["profile.print"] = ("Печать / PDF", "Print / PDF"),
         ["public.invalid"] = ("Ссылка недействительна или истекла.", "The link is invalid or has expired."),
         ["public.sub"] = ("Профиль ученика для родителя (только просмотр).", "Student profile for parents (view-only)."),
         ["pv.rating"] = ("Рейтинг", "Rating"),

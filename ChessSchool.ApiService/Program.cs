@@ -173,6 +173,10 @@ lk.MapPost("/schools/{schoolId:guid}/students/bulk", async (Guid schoolId, BulkC
     return error is not null ? Results.BadRequest(new { error }) : Results.Ok(created);
 });
 
+lk.MapDelete("/students/{id:guid}", async (Guid id, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct) ? Results.StatusCode(Forbidden)
+    : await students.DeleteAsync(id, ct) ? Results.Ok() : Results.NotFound());
+
 lk.MapPut("/students/{id:guid}", async (Guid id, UpdateStudentRequest req,
     HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
 {

@@ -17,9 +17,22 @@ else if (_profile is null)
 }
 else
 {
+    <div class="profile-actions no-print">
+        <a href="school">@Loc.T("profile.tolist")</a>
+        <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 @Loc.T("profile.print")</button>
+    </div>
     <ProfileView Profile="_profile" />
-    <p><a href="school">@Loc.T("profile.tolist")</a></p>
+    <p class="no-print"><a href="school">@Loc.T("profile.tolist")</a></p>
 }
+
+<style>
+    .profile-actions { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+    @@media print {
+        .ds-topbar, .no-print { display: none !important; }
+        body { background: #fff; }
+        main, .page, article { margin: 0 !important; padding: 0 !important; }
+    }
+</style>
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }

@@ -127,6 +127,32 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task DeleteStudent_RemovesFromList_AndKillsShareLink()
+    {
+        var created = await _client.SendAsync(Owner(HttpMethod.Post, $"/schools/{Demo.SchoolId}/students",
+            new CreateStudentRequest(Demo.GroupId, $"Удаляемый-{Guid.NewGuid():N}", null)));
+        var st = (await created.Content.ReadFromJsonAsync<StudentDto>())!;
+        var link = (await (await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{st.Id}/share")))
+            .Content.ReadFromJsonAsync<ShareLinkDto>())!;
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/share/{link.Token}")).StatusCode);
+
+        (await _client.SendAsync(Owner(HttpMethod.Delete, $"/students/{st.Id}"))).EnsureSuccessStatusCode();
+
+        Assert.DoesNotContain(await OwnerStudentsAsync(), s => s.Id == st.Id);          // ушёл из списка
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/share/{link.Token}")).StatusCode); // ссылка мертва
+    }
+
+    [Fact]
+    public async Task DeleteStudent_ForeignUser_Returns403()
+    {
+        var st = (await OwnerStudentsAsync())[0];
+        var req = new HttpRequestMessage(HttpMethod.Delete, $"/students/{st.Id}");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task UpdateStudent_EmptyName_Returns400()
     {
         var student = (await OwnerStudentsAsync())[0];

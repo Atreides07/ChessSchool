@@ -98,6 +98,12 @@ public sealed class SchoolApiClient(HttpClient http)
         return created?.Count ?? 0;
     }
 
+    public async Task<bool> DeleteStudentAsync(Guid studentId, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Delete, $"/students/{studentId}", actingSub), ct);
+        return resp.IsSuccessStatusCode;
+    }
+
     public Task AttributeAsync(Guid gameId, AttributeGameRequest req, string actingSub, CancellationToken ct = default) =>
         http.SendAsync(Req(HttpMethod.Post, $"/games/{gameId}/attribute", actingSub, req), ct);
 

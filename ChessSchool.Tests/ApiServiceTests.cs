@@ -61,6 +61,51 @@ public class ApiServiceTests : IClassFixture<ApiServiceTests.Factory>
     }
 
     [Fact]
+    public async Task Groups_CreateListAndMoveStudent()
+    {
+        // Создаём группу, она появляется в списке.
+        var gname = $"Группа-{Guid.NewGuid():N}";
+        var created = await _client.SendAsync(Owner(HttpMethod.Post, $"/schools/{Demo.SchoolId}/groups", new CreateGroupRequest(gname)));
+        created.EnsureSuccessStatusCode();
+        var group = (await created.Content.ReadFromJsonAsync<GroupDto>())!;
+        var groups = (await (await _client.SendAsync(Owner(HttpMethod.Get, $"/schools/{Demo.SchoolId}/groups")))
+            .Content.ReadFromJsonAsync<List<GroupDto>>())!;
+        Assert.Contains(groups, g => g.Id == group.Id && g.Name == gname);
+
+        // Переводим ученика в новую группу.
+        var student = (await OwnerStudentsAsync())[0];
+        var move = await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{student.Id}/group", new MoveStudentRequest(group.Id)));
+        move.EnsureSuccessStatusCode();
+        Assert.Contains(await OwnerStudentsAsync(), s => s.Id == student.Id && s.GroupId == group.Id);
+    }
+
+    [Fact]
+    public async Task MoveStudent_ToForeignSchoolGroup_Returns400()
+    {
+        // Создаём школу другого владельца с её группой.
+        var otherSub = $"owner-{Guid.NewGuid():N}";
+        var otherReq = new HttpRequestMessage(HttpMethod.Get, "/my-school");
+        otherReq.Headers.Add("X-Internal-Key", DevKey);
+        otherReq.Headers.Add("X-Acting-Sub", otherSub);
+        var otherSchool = (await (await _client.SendAsync(otherReq)).Content.ReadFromJsonAsync<MySchoolDto>())!;
+
+        // Владелец демо-школы пытается перевести своего ученика в группу ЧУЖОЙ школы → 400.
+        var student = (await OwnerStudentsAsync())[0];
+        var resp = await _client.SendAsync(Owner(HttpMethod.Post, $"/students/{student.Id}/group", new MoveStudentRequest(otherSchool.GroupId)));
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateGroup_ForeignUser_Returns403()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/schools/{Demo.SchoolId}/groups");
+        req.Headers.Add("X-Internal-Key", DevKey);
+        req.Headers.Add("X-Acting-Sub", "some-other-user-sub");
+        req.Content = JsonContent.Create(new CreateGroupRequest("Взлом"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task UpdateStudent_ByOwner_ChangesNameAndBirthDate()
     {
         var name = $"Правка-{Guid.NewGuid():N}";

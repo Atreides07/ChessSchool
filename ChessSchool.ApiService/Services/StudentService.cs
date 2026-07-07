@@ -178,6 +178,37 @@ public sealed class StudentService(
         return ToDto(student);
     }
 
+    /// <summary>Группы школы (по алфавиту).</summary>
+    public async Task<IReadOnlyList<GroupDto>> ListGroupsAsync(Guid schoolId, CancellationToken ct) =>
+        await db.Groups.AsNoTracking().Where(g => g.SchoolId == schoolId).OrderBy(g => g.Name)
+            .Select(g => new GroupDto(g.Id, g.SchoolId, g.Name)).ToListAsync(ct);
+
+    /// <summary>Создать группу в школе.</summary>
+    public async Task<GroupDto> CreateGroupAsync(Guid schoolId, string name, CancellationToken ct)
+    {
+        var group = new Group { SchoolId = schoolId, Name = name };
+        db.Groups.Add(group);
+        await db.SaveChangesAsync(ct);
+        analytics.Capture("group_created", schoolId.ToString());
+        return new GroupDto(group.Id, group.SchoolId, group.Name);
+    }
+
+    public enum MoveOutcome { Ok, StudentNotFound, GroupNotInSchool }
+
+    /// <summary>Перевести ученика в другую группу — только в пределах его же школы (не даёт увести в чужую).</summary>
+    public async Task<MoveOutcome> MoveStudentAsync(Guid studentId, Guid targetGroupId, CancellationToken ct)
+    {
+        var student = await db.Students.FindAsync([studentId], ct);
+        if (student is null) return MoveOutcome.StudentNotFound;
+        var currentSchool = await db.Groups.Where(g => g.Id == student.GroupId).Select(g => (Guid?)g.SchoolId).FirstOrDefaultAsync(ct);
+        var targetSchool = await db.Groups.Where(g => g.Id == targetGroupId).Select(g => (Guid?)g.SchoolId).FirstOrDefaultAsync(ct);
+        if (targetSchool is null || targetSchool != currentSchool) return MoveOutcome.GroupNotInSchool;
+        student.GroupId = targetGroupId;
+        await db.SaveChangesAsync(ct);
+        analytics.Capture("student_moved", studentId.ToString(), new Dictionary<string, object?> { ["group_id"] = targetGroupId });
+        return MoveOutcome.Ok;
+    }
+
     public enum AttributeOutcome { Ok, GameNotFound, StudentNotFound }
 
     /// <summary>Привязать партию из очереди к ученикам и пересчитать рейтинг (через GameArchiver).</summary>

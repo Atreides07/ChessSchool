@@ -128,6 +128,31 @@ lk.MapPost("/schools/{schoolId:guid}/students", async (Guid schoolId, CreateStud
     return error is not null ? Results.BadRequest(new { error }) : Results.Created($"/students/{dto!.Id}", dto);
 });
 
+lk.MapGet("/schools/{schoolId:guid}/groups",
+    async (Guid schoolId, HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+    !await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct) ? Results.StatusCode(Forbidden)
+    : Results.Ok(await students.ListGroupsAsync(schoolId, ct)));
+
+lk.MapPost("/schools/{schoolId:guid}/groups", async (Guid schoolId, CreateGroupRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+{
+    if (!await access.OwnsSchoolAsync(ctx.ActingSub()!, schoolId, ct)) return Results.StatusCode(Forbidden);
+    if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "Название группы не может быть пустым." });
+    return Results.Ok(await students.CreateGroupAsync(schoolId, req.Name.Trim(), ct));
+});
+
+lk.MapPost("/students/{id:guid}/group", async (Guid id, MoveStudentRequest req,
+    HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
+{
+    if (!await access.OwnsStudentAsync(ctx.ActingSub()!, id, ct)) return Results.StatusCode(Forbidden);
+    return await students.MoveStudentAsync(id, req.GroupId, ct) switch
+    {
+        StudentService.MoveOutcome.StudentNotFound => Results.NotFound(),
+        StudentService.MoveOutcome.GroupNotInSchool => Results.BadRequest(new { error = "Группа не принадлежит этой школе." }),
+        _ => Results.Ok(),
+    };
+});
+
 lk.MapPut("/students/{id:guid}", async (Guid id, UpdateStudentRequest req,
     HttpContext ctx, StudentService students, SchoolAccessService access, CancellationToken ct) =>
 {

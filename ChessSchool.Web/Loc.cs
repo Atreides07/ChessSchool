@@ -83,6 +83,10 @@ public static class Loc
         ["dash.inactive"] = ("Давно не играли", "Inactive"),
         ["dash.daysago"] = ("{0} дн. назад", "{0}d ago"),
         ["dash.never"] = ("ещё не играл", "no games yet"),
+        ["school.group"] = ("Группа", "Group"),
+        ["school.allgroups"] = ("Все группы", "All groups"),
+        ["school.groupname"] = ("Новая группа", "New group"),
+        ["school.addgroup"] = ("+ группа", "+ group"),
 
         // --- Атрибуция (Attribution) ---
         ["attr.pagetitle"] = ("Очередь атрибуции партий", "Game attribution queue"),

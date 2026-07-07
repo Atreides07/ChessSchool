@@ -6,6 +6,12 @@ public sealed record SchoolDto(Guid Id, string Name);
 /// <summary>Учебная группа внутри школы.</summary>
 public sealed record GroupDto(Guid Id, Guid SchoolId, string Name);
 
+/// <summary>Создание учебной группы.</summary>
+public sealed record CreateGroupRequest(string Name);
+
+/// <summary>Перевод ученика в другую группу (в пределах его школы).</summary>
+public sealed record MoveStudentRequest(Guid GroupId);
+
 /// <summary>Строка таблицы учеников в ЛК школы.</summary>
 public sealed record StudentDto(
     Guid Id,

@@ -46,6 +46,12 @@
     <div class="add-row">
         <input @bind="_newName" @bind:event="oninput" placeholder="@Loc.T("school.newname")" class="input" />
         <input type="date" @bind="_newBirth" title="@Loc.T("school.birthdate")" class="input input-date" />
+        @if (_groups.Count > 1)
+        {
+            <select @bind="_newGroupId" class="input input-group" title="@Loc.T("school.group")">
+                @foreach (var g in _groups) { <option value="@g.Id">@g.Name</option> }
+            </select>
+        }
         <button class="btn btn-primary" @onclick="AddStudent" disabled="@string.IsNullOrWhiteSpace(_newName)">@Loc.T("school.add")</button>
     </div>
 
@@ -57,7 +63,17 @@
     {
         <div class="list-tools">
             <input @bind="_search" @bind:event="oninput" placeholder="@Loc.T("school.search")" class="input search" />
+            @if (_groups.Count > 1)
+            {
+                <select @bind="_groupFilter" class="input">
+                    <option value="">@Loc.T("school.allgroups")</option>
+                    @foreach (var g in _groups) { <option value="@g.Id">@g.Name</option> }
+                </select>
+            }
             <span class="text-muted count">@View.Count / @_students.Count</span>
+            <span class="tools-spacer"></span>
+            <input @bind="_newGroupName" @bind:event="oninput" placeholder="@Loc.T("school.groupname")" class="input newgroup" />
+            <button class="btn btn-sm btn-ghost" @onclick="CreateGroup" disabled="@string.IsNullOrWhiteSpace(_newGroupName)">@Loc.T("school.addgroup")</button>
         </div>
 
         @if (View.Count == 0)
@@ -111,6 +127,12 @@
             <span>@Loc.T("school.edit"):</span>
             <input @bind="_editName" placeholder="@Loc.T("school.newname")" class="form-control" />
             <input type="date" @bind="_editBirth" title="@Loc.T("school.birthdate")" class="form-control" />
+            @if (_groups.Count > 1)
+            {
+                <select @bind="_editGroupId" class="form-control" title="@Loc.T("school.group")">
+                    @foreach (var g in _groups) { <option value="@g.Id">@g.Name</option> }
+                </select>
+            }
             <button class="btn btn-primary btn-sm" @onclick="() => SaveEdit(eid)" disabled="@string.IsNullOrWhiteSpace(_editName)">@Loc.T("school.save")</button>
             <button class="btn btn-link btn-sm" @onclick="CancelEdit">@Loc.T("school.cancel")</button>
         </div>
@@ -175,6 +197,10 @@
     private string? _sub;
     private string _newName = "";
     private DateOnly? _newBirth;
+    private IReadOnlyList<GroupDto> _groups = [];
+    private Guid _newGroupId;
+    private string _groupFilter = "";
+    private string _newGroupName = "";
     private Guid? _sharingId;
     private IReadOnlyList<ShareLinkInfoDto> _shares = [];
     private Guid? _linkingId;
@@ -197,6 +223,8 @@
         {
             if (_students is null) return [];
             IEnumerable<StudentDto> q = _students;
+            if (Guid.TryParse(_groupFilter, out var gid))
+                q = q.Where(s => s.GroupId == gid);
             var term = _search.Trim();
             if (term.Length > 0)
                 q = q.Where(s => s.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase));
@@ -229,6 +257,7 @@
         if (my is null) return;
         _schoolId = my.SchoolId;
         _groupId = my.GroupId;
+        _newGroupId = my.GroupId;
         await Load();
     }
 
@@ -236,23 +265,41 @@
     {
         _students = await Api.GetStudentsAsync(_schoolId, _sub!);
         _insights = await Api.GetInsightsAsync(_schoolId, _sub!);
+        _groups = await Api.GetGroupsAsync(_schoolId, _sub!);
+        if (_groups.All(g => g.Id != _newGroupId) && _groups.Count > 0) _newGroupId = _groups[0].Id;
     }
 
     private async Task AddStudent()
     {
         if (string.IsNullOrWhiteSpace(_newName)) return;
-        await Api.CreateStudentAsync(_schoolId, new CreateStudentRequest(_groupId, _newName.Trim(), _newBirth), _sub!);
+        var groupId = _newGroupId != Guid.Empty ? _newGroupId : _groupId;
+        await Api.CreateStudentAsync(_schoolId, new CreateStudentRequest(groupId, _newName.Trim(), _newBirth), _sub!);
         _newName = "";
         _newBirth = null;
         await Load();
     }
+
+    private async Task CreateGroup()
+    {
+        if (string.IsNullOrWhiteSpace(_newGroupName)) return;
+        var g = await Api.CreateGroupAsync(_schoolId, _newGroupName.Trim(), _sub!);
+        _newGroupName = "";
+        _groups = await Api.GetGroupsAsync(_schoolId, _sub!);
+        if (g is not null) _newGroupId = g.Id; // удобно сразу добавлять учеников в новую группу
+    }
+
+    private Guid _editGroupOrig;
+    private Guid _editGroupId;
 
     private void StartEdit(StudentDto s)
     {
         _editingId = s.Id;
         _editName = s.DisplayName;
         _editBirth = s.BirthDate;
+        _editGroupOrig = s.GroupId;
+        _editGroupId = s.GroupId;
         _linkingId = null; // не показывать две панели сразу
+        _sharingId = null;
     }
 
     private void CancelEdit() => _editingId = null;
@@ -261,6 +308,8 @@
     {
         if (string.IsNullOrWhiteSpace(_editName)) return;
         await Api.UpdateStudentAsync(studentId, new UpdateStudentRequest(_editName.Trim(), _editBirth), _sub!);
+        if (_editGroupId != _editGroupOrig && _editGroupId != Guid.Empty)
+            await Api.MoveStudentAsync(studentId, _editGroupId, _sub!);
         _editingId = null;
         await Load();
     }
@@ -302,6 +351,9 @@
     .list-tools { display: flex; align-items: center; gap: .75rem; margin: .25rem 0 1rem; }
     .list-tools .search { max-width: 320px; }
     .list-tools .count { font-size: .85rem; white-space: nowrap; }
+    .list-tools .tools-spacer { flex: 1 1 auto; }
+    .list-tools .newgroup { max-width: 160px; }
+    .input-group { max-width: 180px; }
     .th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; font-weight: inherit; }
     .th-sort:hover { color: var(--accent); }
     .rd { color: var(--muted); font-size: .8rem; }

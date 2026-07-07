@@ -60,6 +60,24 @@ public sealed class SchoolApiClient(HttpClient http)
         return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<List<PendingGameDto>>(ct) ?? [] : [];
     }
 
+    public async Task<IReadOnlyList<GroupDto>> GetGroupsAsync(Guid schoolId, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Get, $"/schools/{schoolId}/groups", actingSub), ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<List<GroupDto>>(ct) ?? [] : [];
+    }
+
+    public async Task<GroupDto?> CreateGroupAsync(Guid schoolId, string name, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Post, $"/schools/{schoolId}/groups", actingSub, new CreateGroupRequest(name)), ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadFromJsonAsync<GroupDto>(ct) : null;
+    }
+
+    public async Task<bool> MoveStudentAsync(Guid studentId, Guid groupId, string actingSub, CancellationToken ct = default)
+    {
+        var resp = await http.SendAsync(Req(HttpMethod.Post, $"/students/{studentId}/group", actingSub, new MoveStudentRequest(groupId)), ct);
+        return resp.IsSuccessStatusCode;
+    }
+
     public async Task<StudentDto?> CreateStudentAsync(Guid schoolId, CreateStudentRequest req, string actingSub, CancellationToken ct = default)
     {
         var resp = await http.SendAsync(Req(HttpMethod.Post, $"/schools/{schoolId}/students", actingSub, req), ct);

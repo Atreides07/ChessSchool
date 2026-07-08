@@ -87,6 +87,16 @@ public class AuthIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RegisterPage_RendersPasswordAndConfirmFields()
+    {
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/account/login?mode=register");
+        // Форма регистрации отдаёт оба поля пароля (пароль + подтверждение).
+        Assert.Contains("name=\"password\"", html);
+        Assert.Contains("name=\"password2\"", html);
+    }
+
+    [Fact]
     public async Task Register_ConcurrentSameEmail_NoServerError_CreatesExactlyOneUser()
     {
         // TOCTOU-гонка: два параллельных запроса регистрации одним e-mail. Проверка existing и вставка
@@ -268,6 +278,31 @@ public class AuthIntegrationTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Redirect, r.StatusCode);
         Assert.Contains("error=weak", r.Headers.Location!.OriginalString);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Assert.False(await db.Users.AnyAsync(u => u.Email == email));
+    }
+
+    [Fact]
+    public async Task Register_RejectsPasswordMismatch_NoUserCreated_NoSession()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"mismatch-{Guid.NewGuid():N}@test.local";
+        var r = await client.PostAsync("/account/register", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["name"] = "X",
+            ["email"] = email,
+            ["password"] = "secret123",
+            ["password2"] = "secret124", // не совпадает с подтверждением
+            ["return"] = "/"
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, r.StatusCode);
+        Assert.Contains("error=mismatch", r.Headers.Location!.OriginalString);
+        // Пользователь не создан и сессия не выдана — регистрация отклонена до записи в БД.
+        Assert.DoesNotContain(r.Headers.TryGetValues("Set-Cookie", out var cookies) ? cookies : [],
+            c => c.StartsWith("idp_sso"));
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -622,6 +657,7 @@ public class AuthIntegrationTests : IAsyncLifetime
             ["name"] = "Test User",
             ["email"] = email,
             ["password"] = "secret123",
+            ["password2"] = "secret123", // подтверждение пароля должно совпадать
             ["return"] = "/"
         }));
 

@@ -63,10 +63,13 @@ public static class AccountEndpoints
             string em = form["email"].ToString().Trim().ToLowerInvariant();
             string ret = form["return"].ToString();
             string password = form["password"]!;
+            string password2 = form["password2"]!;
             if (string.IsNullOrWhiteSpace(em) || !em.Contains('@'))
                 return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=1&mode=register");
             if (!PasswordPolicy.IsAcceptable(password, cfg.MinPasswordLength, out _)) // NIST: решает длина, без композиции
                 return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=weak&mode=register");
+            if (!string.Equals(password, password2, StringComparison.Ordinal)) // подтверждение пароля должно совпадать (сервер — источник истины)
+                return Results.Redirect($"/account/login?return={Uri.EscapeDataString(ret)}&error=mismatch&mode=register");
 
             var existing = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
             if (existing is not null)

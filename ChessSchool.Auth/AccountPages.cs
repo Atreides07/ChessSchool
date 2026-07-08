@@ -84,6 +84,10 @@ button:hover{background:var(--accent-h)}
 
         string titleReg = en ? "Sign up" : "Регистрация", titleLogin = en ? "Sign in" : "Вход";
         string lPassword = en ? "Password" : "Пароль", lName = en ? "Name" : "Имя";
+        string lConfirm = en ? "Confirm password" : "Повторите пароль";
+        string phConfirm = en ? "Repeat the password" : "Ещё раз тот же пароль";
+        // JS-строка (в кавычках, экранированная) для setCustomValidity — безопасно для инлайнового скрипта.
+        string jsMismatchJson = System.Text.Json.JsonSerializer.Serialize(en ? "Passwords don't match" : "Пароли не совпадают");
         string phName = en ? "Your name" : "Ваше имя", phPass6 = en ? $"At least {minPw} characters" : $"Минимум {minPw} символов";
         string btnLogin = en ? "Sign in" : "Войти", btnCreate = en ? "Create account" : "Создать аккаунт";
         string noAcc = en ? "No account?" : "Нет аккаунта?", doReg = en ? "Sign up" : "Зарегистрироваться";
@@ -96,6 +100,7 @@ button:hover{background:var(--accent-h)}
             "badtoken" => en ? "The confirmation link is invalid or has expired. Request a new one:" : "Ссылка подтверждения недействительна или устарела. Запросите новую:",
             "exists" => en ? "This email is already registered. Sign in instead." : "Этот e-mail уже зарегистрирован. Войдите.",
             "weak" => en ? $"Password too short — at least {minPw} characters." : $"Пароль слишком короткий — минимум {minPw} символов.",
+            "mismatch" => en ? "Passwords don't match. Please re-enter." : "Пароли не совпадают. Введите ещё раз.",
             "pwned" => en ? "This password appears in known data breaches. Choose another." : "Этот пароль есть в известных утечках — выберите другой.",
             null => "",
             _ => en ? "Invalid credentials or email already taken." : "Неверные данные или email уже занят.",
@@ -132,10 +137,19 @@ button:hover{background:var(--accent-h)}
 <label>{{lName}}</label><input name="name" placeholder="{{phName}}">
 <label>Email</label><input name="email" type="email" value="{{emailEnc}}" placeholder="you@example.com" required>
 <label>{{lPassword}}</label><input name="password" type="password" placeholder="{{phPass6}}" required>
+<label>{{lConfirm}}</label><input name="password2" type="password" placeholder="{{phConfirm}}" required>
 <button type="submit">{{btnCreate}}</button></form>
 <p class="switch">{{haveAcc}} <label for="mode" class="as-link">{{btnLogin}}</label></p>
 </div>
 <p class="muted">{{secured}}</p></div>
+<script>
+(function(){
+  var f=document.querySelector('.view-reg form'); if(!f) return;
+  var p1=f.querySelector('[name=password]'), p2=f.querySelector('[name=password2]');
+  function chk(){ p2.setCustomValidity(p2.value && p1.value!==p2.value ? {{jsMismatchJson}} : ''); }
+  p1.addEventListener('input',chk); p2.addEventListener('input',chk);
+})();
+</script>
 """;
         return AuthShell(lang, register ? titleReg : titleLogin, inner);
     }

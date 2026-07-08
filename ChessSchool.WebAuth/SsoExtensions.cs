@@ -23,6 +23,9 @@ public static class SsoExtensions
 {
     public const string AccessTokenClaim = "access_token";
 
+    // One-shot guard: OnRemoteFailure переавторизуется ровно один раз (свежий challenge), затем — домашняя.
+    private const string RetryGuardCookie = "oidc_retry";
+
     public static void AddChessSchoolSso(this WebApplicationBuilder builder)
     {
         var clientId = builder.Configuration["Sso:ClientId"] ?? "app";
@@ -91,22 +94,45 @@ public static class SsoExtensions
                         if (int.TryParse(r.ExpiresIn, out var exp))
                             identity.AddClaim(new Claim("token_expires_at", DateTimeOffset.UtcNow.AddSeconds(exp).ToString("o")));
                     }
+                    ctx.Response.Cookies.Delete(RetryGuardCookie); // успешный вход → снимаем one-shot guard
                     return Task.CompletedTask;
                 },
                 // Сбой удалённого входа на /signin-oidc (напр. «Correlation failed»: протухший/израсходованный
                 // correlation-cookie, кнопка «назад», повторный колбэк, переход по устаревшей authorize-ссылке
-                // из письма) НЕ должен падать 500. Гасим исключение и уводим на свежий вход: сессия IdP обычно
-                // уже есть → повторный challenge проходит прозрачно и пользователь оказывается внутри. Доступ при
-                // этом не выдаётся (входа не произошло) — это только замена краша на мягкую деградацию.
+                // из письма) НЕ должен падать 500.
+                //
+                // Раньше здесь был тупиковый редирект на «/». Но у сценария «ссылка подтверждения e-mail из
+                // письма» это оставляло БАГ: confirm на IdP ставит EmailConfirmed=true и обновляет cookie IdP,
+                // но старый authorize-URL из письма несёт ИЗРАСХОДОВАННЫЙ correlation → callback падает → редирект
+                // на «/» → cookie ПРИЛОЖЕНИЯ не переиздаётся и хранит email_verified=false → баннер «подтвердите
+                // e-mail» висит даже после подтверждения. authorize/userinfo читают EmailConfirmed из БД свежим,
+                // поэтому лечение — заново пройти OIDC.
+                //
+                // Делаем СВЕЖИЙ challenge (новый correlation). Сессия IdP уже валидна (её только что поставил
+                // confirm) → повторный вход проходит прозрачно и приложение получает cookie с актуальным
+                // email_verified=true. One-shot guard-cookie рвёт возможную петлю: если и свежий callback падает
+                // (реально сломаны cookie/SSO) — второй раз не пытаемся, мягко уводим на домашнюю. Доступ силой не
+                // выдаётся: если сессии IdP нет, challenge просто покажет форму входа.
                 OnRemoteFailure = ctx =>
                 {
-                    // На домашнюю (публичная), а НЕ на /signin — иначе при устойчивом сбое correlation
-                    // (challenge → callback снова падает) получилась бы петля редиректов. Домашняя безопасна:
-                    // если сессия Арены уже есть (частый случай) — пользователь остаётся внутри; если нет —
-                    // видит публичную главную и входит вручную. Главное — никакого 500.
                     ctx.HandleResponse();
-                    ctx.Response.Redirect("/");
-                    return Task.CompletedTask;
+                    if (ctx.Request.Cookies.ContainsKey(RetryGuardCookie))
+                    {
+                        ctx.Response.Cookies.Delete(RetryGuardCookie);
+                        ctx.Response.Redirect("/"); // уже пробовали переавторизацию и снова сбой → без петли
+                        return Task.CompletedTask;
+                    }
+                    ctx.Response.Cookies.Append(RetryGuardCookie, "1", new CookieOptions
+                    {
+                        HttpOnly = true,
+                        Secure = true,
+                        SameSite = SameSiteMode.None, // callback /signin-oidc — кросс-сайтовый переход с IdP
+                        MaxAge = TimeSpan.FromSeconds(120),
+                        IsEssential = true,
+                        Path = "/",
+                    });
+                    return ctx.HttpContext.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme,
+                        new AuthenticationProperties { RedirectUri = "/" });
                 }
             };
         });
